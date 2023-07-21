@@ -1,0 +1,15 @@
+[package]
+name = "race-holdem"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+race-core = "0.0.5"
+race-proc-macro = "0.0.5"
+borsh = "0.9.3"
+
+[dev-dependencies]
+race-test = "0.0.5"
