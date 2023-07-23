@@ -848,14 +848,8 @@ impl Holdem {
         let next_player = self.next_action_player(players_to_act);
         let next_street = self.next_street();
 
-        // Blind bets
-        if self.street == Street::Preflop && self.bet_map.is_empty() {
-            println!("[Next State]: Blind bets");
-            self.blind_bets(effect)?;
-            Ok(())
-        }
         // Single player wins because there is one player only
-        else if ingame_players.len() == 1 {
+        if ingame_players.len() == 1 {
             self.stage = HoldemStage::Settle;
             self.signal_game_end()?;
             let Some(winner) = ingame_players.first() else {
@@ -881,6 +875,12 @@ impl Holdem {
                 winner
             );
             self.single_player_win(effect, (*winner).clone())?;
+            Ok(())
+        }
+        // Blind bets
+        else if self.street == Street::Preflop && self.bet_map.is_empty() {
+            println!("[Next State]: Blind bets");
+            self.blind_bets(effect)?;
             Ok(())
         }
         // Ask next player to act
