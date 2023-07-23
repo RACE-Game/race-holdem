@@ -226,7 +226,6 @@ impl Holdem {
     pub fn blind_bets(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         let mut players: Vec<String> = self.player_order.clone();
         if players.len() == 2 {
-            players.reverse();
             // Take bet from BB
             if let Some(bb_addr) = players.first() {
                 if let Some(bb_player) = self.player_map.get_mut(bb_addr) {
@@ -1102,13 +1101,11 @@ impl Holdem {
                     ));
                 }
 
-                if amount < self.street_bet + self.min_raise {
-                    return Err(HandleError::Custom("Player raises too small".to_string()));
-                }
-
                 if let Some(player) = self.player_map.get_mut(&sender) {
                     if let Some(betted) = self.bet_map.get_mut(&sender) {
-                        // let added_bet = amount - betted.amount;
+                        if amount + *betted < self.street_bet + self.min_raise {
+                            return Err(HandleError::Custom("Player raises too small".to_string()));
+                        }
                         let (allin, real_bet) = player.take_bet(amount);
                         let new_street_bet = *betted + real_bet;
                         let new_min_raise = new_street_bet - self.street_bet;
@@ -1122,7 +1119,9 @@ impl Holdem {
                         *betted += real_bet;
                         self.next_state(effect)?;
                     } else {
-                        // let added_bet = amount;
+                        if amount < self.street_bet + self.min_raise {
+                            return Err(HandleError::Custom("Player raises too small".to_string()));
+                        }
                         let (allin, real_bet) = player.take_bet(amount);
                         let new_min_raise = real_bet - self.street_bet;
                         self.street_bet = real_bet;
