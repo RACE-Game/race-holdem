@@ -1,10 +1,10 @@
 {
-  "title": "RHT01",
+  "title": "RHT03-USDC",
   "reg_addr": "DkSrrSzDmF9BbjLSpqaBkVDPZJmw58gYtDvye77V5HQs",
-  "bundle_addr": "DcLto1pxUeMA2byoXDv8kQe4R8AtbLi4xEAHTmbCaMmF",
-  "token_addr": "RACE5fnTKB9obGtCusArTQ6hhdNXAtf3HarvJM17rxJ",
+  "bundle_addr": "AWFsX79pypXSYWzifB6m5rxmCevU4E2mSWgB2xz8WT1m",
+  "token_addr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   "max_players": 6,
-  "min_deposit": 20000000000,
-  "max_deposit": 50000000000,
-  "data": [0,202,154,59,0,0,0,0,0,148,53,119,0,0,0,0,3,0]
+  "min_deposit": 10000000,
+  "max_deposit": 30000000,
+  "data": [160,134,1,0,0,0,0,0,64,13,3,0,0,0,0,0,3,0]
 }
