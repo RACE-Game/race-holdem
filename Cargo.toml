@@ -1,19 +1,29 @@
-[package]
-name = "race-holdem"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+  "base",
+  "mtt",
+]
 
 [profile.release]
 lto = true
 opt-level = 3
 
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
+[workspace.dependencies]
 race-core = "0.0.5"
 race-proc-macro = "0.0.5"
 borsh = "0.9.3"
-
-[dev-dependencies]
 race-test = "0.0.5"
+
+
+[workspace.package]
+authors = ["RACE Foundation <race.game.team@gmail.com>"]
+version = "0.0.5"
+edition = "2021"
+rust-version = "1.65.0"
+license = "MPL-2.0"
+repository = "https://github.com/RACE-Game/race-holdem"
+documentation = "https://docs.rs/race"
+homepage = "https://racepoker-v2.pages.dev"
+keywords = ["blockchain"]
+readme = "README.md"
