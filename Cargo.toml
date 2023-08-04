@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "base",
   "mtt",
+  "cash",
 ]
 
 [profile.release]
@@ -14,7 +15,6 @@ race-core = "0.0.5"
 race-proc-macro = "0.0.5"
 borsh = "0.9.3"
 race-test = "0.0.5"
-
 
 [workspace.package]
 authors = ["RACE Foundation <race.game.team@gmail.com>"]

@@ -610,11 +610,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "race-holdem-cash"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "race-core",
+ "race-holdem-base",
+ "race-proc-macro",
+ "race-test",
+]
+
+[[package]]
 name = "race-holdem-mtt"
 version = "0.1.0"
 dependencies = [
  "borsh",
  "race-core",
+ "race-holdem-base",
  "race-proc-macro",
  "race-test",
 ]

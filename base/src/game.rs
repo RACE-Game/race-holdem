@@ -1,6 +1,5 @@
 //! Game state machine (or handler) of Holdem: the core of this lib.
 use race_core::prelude::*;
-use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
 
 use crate::essential::{
@@ -13,8 +12,7 @@ use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 
 // Holdem: the game state
 #[cfg_attr(test, derive(Debug, PartialEq))]
-#[game_handler]
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct Holdem {
     pub deck_random_id: RandomId,
     pub sb: u64,
@@ -955,7 +953,7 @@ impl Holdem {
         }
     }
 
-    fn handle_custom_event(
+    pub fn handle_custom_event(
         &mut self,
         effect: &mut Effect,
         event: GameEvent,

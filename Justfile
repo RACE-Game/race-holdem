@@ -1,10 +1,10 @@
-release: build optimize
+release dir: (build dir) (optimize dir)
 
 test:
     cargo test
 
-build:
-    cargo build -r --target wasm32-unknown-unknown -p race-holdem-base
+build dir:
+    cargo build -r --target wasm32-unknown-unknown -p race-holdem-{{dir}}
 
-optimize:
-    wasm-opt -Oz target/wasm32-unknown-unknown/release/race_holdem_base.wasm -o target/race_holdem_base.wasm
+optimize dir:
+    wasm-opt -Oz target/wasm32-unknown-unknown/release/race_holdem_{{dir}}.wasm -o target/race_holdem_{{dir}}.wasm
