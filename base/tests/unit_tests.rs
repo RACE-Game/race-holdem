@@ -2,8 +2,12 @@
 //! Those functions that require `Effect' as their arguments are tested in
 //! event_tests.rs.  For the a complete test of Holdem games, see holdem_test.rs
 //! in the same dir.
-use crate::essential::{ActingPlayer, Display};
-use crate::tests::helper::{
+
+
+mod helper;
+
+use race_holdem_base::essential::{ActingPlayer, Display};
+use helper::{
     initial_players, make_even_betmap, make_uneven_betmap, setup_context, setup_holdem_state,
 };
 use race_core::prelude::{Effect, HandleError};

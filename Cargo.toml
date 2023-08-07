@@ -11,10 +11,10 @@ lto = true
 opt-level = 3
 
 [workspace.dependencies]
-race-core = "0.0.5"
-race-proc-macro = "0.0.5"
+race-core = "0.0.7"
+race-proc-macro = "0.0.7"
 borsh = "0.9.3"
-race-test = "0.0.5"
+race-test = "0.0.7"
 
 [workspace.package]
 authors = ["RACE Foundation <race.game.team@gmail.com>"]

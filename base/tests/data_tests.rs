@@ -1,16 +1,16 @@
 //! Test serializing and deserializing verious structs used by Holdem
 //! as well as the Holdem struct itself
 
+mod helper;
+
 use std::collections::BTreeMap;
 
-use crate::essential::{
+use race_holdem_base::essential::{
     ActingPlayer, AwardPot, Display, GameEvent, HoldemAccount, Player, Pot, ACTION_TIMEOUT_PREFLOP, PlayerResult, PlayerStatus,
 };
-use crate::game::Holdem;
-use crate::tests::helper::{setup_holdem_state, setup_real_holdem};
+use race_holdem_base::game::Holdem;
+use helper::{make_uneven_betmap, setup_holdem_state, setup_real_holdem};
 use borsh::{BorshDeserialize, BorshSerialize};
-
-use super::helper::make_uneven_betmap;
 
 #[test]
 fn test_borsh_player() {

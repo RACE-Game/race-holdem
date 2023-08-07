@@ -4,6 +4,8 @@
 //! Call, Bet, Raise, Leave, etc.
 //! The pivot function next_state is also covered in this test file.
 
+mod helper;
+
 use race_core::{
     error::Result as CoreResult,
     prelude::{Effect, HandleError}
@@ -11,8 +13,8 @@ use race_core::{
 use race_test::TestClient;
 use std::collections::BTreeMap;
 
-use crate::essential::*;
-use crate::tests::helper::{create_sync_event, setup_context, setup_two_player_holdem,  setup_holdem_game};
+use race_holdem_base::essential::*;
+use helper::{create_sync_event, setup_context, setup_two_player_holdem,  setup_holdem_game};
 
 #[test]
 fn test_preflop_fold() -> CoreResult<()> {

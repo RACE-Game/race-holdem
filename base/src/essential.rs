@@ -54,6 +54,16 @@ impl Player {
         }
     }
 
+    pub fn new_with_status(addr: String, chips: u64, position: usize, status: PlayerStatus) -> Player {
+        Self {
+            addr,
+            chips,
+            position,
+            status,
+            timeout: 0,
+        }
+    }
+
     pub fn init(addr: String, chips: u64, position: u16) -> Player {
         Self {
             addr,
@@ -161,8 +171,7 @@ impl Default for HoldemAccount {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub enum GameEvent {
     Bet(u64),
     Check,
@@ -174,15 +183,13 @@ pub enum GameEvent {
 impl CustomEvent for GameEvent {}
 
 // A pot used for awarding winners
-#[cfg_attr(test, derive(PartialEq))]
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
 pub struct AwardPot {
     pub winners: Vec<String>,
     pub amount: u64,
 }
 
-#[cfg_attr(test, derive(PartialEq))]
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub struct PlayerResult {
     pub addr: String,
     pub chips: u64,
@@ -192,8 +199,7 @@ pub struct PlayerResult {
 }
 
 /// Used for animation (with necessary audio effects)
-#[cfg_attr(test, derive(PartialEq))]
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub enum Display {
     DealCards,
     DealBoard {

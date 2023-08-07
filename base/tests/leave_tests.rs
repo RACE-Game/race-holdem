@@ -1,10 +1,12 @@
 //! Test varisou types of Leave events.  It is crucial for players to
 //! correctly leave the game.
 
+mod helper;
+
 use std::collections::HashMap;
 
-use crate::essential::*;
-use crate::tests::helper::{create_sync_event, setup_holdem_game};
+use race_holdem_base::essential::*;
+use helper::{create_sync_event, setup_holdem_game};
 use race_core::{error::Result, event::Event};
 use race_test::TestClient;
 

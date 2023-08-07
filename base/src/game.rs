@@ -11,8 +11,7 @@ use crate::essential::{
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 
 // Holdem: the game state
-#[cfg_attr(test, derive(Debug, PartialEq))]
-#[derive(BorshSerialize, BorshDeserialize, Default)]
+#[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq)]
 pub struct Holdem {
     pub deck_random_id: RandomId,
     pub sb: u64,
@@ -1357,7 +1356,7 @@ impl GameHandler for Holdem {
                 Ok(())
             }
 
-            Event::SecretsReady => match self.stage {
+            Event::SecretsReady { .. } => match self.stage {
                 HoldemStage::ShareKey => {
                     self.display.clear();
                     let players_cnt = self.count_ingame_players() * 2;

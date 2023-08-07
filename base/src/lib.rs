@@ -7,6 +7,3 @@
 pub mod evaluator;
 pub mod essential;
 pub mod game;
-
-#[cfg(test)]
-mod tests;

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
+
 //! Helper functions used in tests
+
 use std::collections::BTreeMap;
 
 use borsh::BorshSerialize;
@@ -9,8 +11,8 @@ use race_core::{
 
 use race_test::{TestClient, TestGameAccountBuilder, TestHandler};
 
-use crate::essential::*;
-use crate::game::*;
+use race_holdem_base::essential::*;
+use race_holdem_base::game::*;
 
 // ======================================================
 // Heplers for unit tests that focus on holdem game state
@@ -31,19 +33,6 @@ pub fn initial_players() -> BTreeMap<String, Player> {
         ("Eva".into(), Player::new("Eva".into(), 1000, 4u16)),
         ("Frank".into(), Player::new("Frank".into(), 1000, 5u16)),
     ])
-}
-
-impl Player {
-    #[allow(dead_code)]
-    fn new_with_status(addr: String, chips: u64, position: usize, status: PlayerStatus) -> Player {
-        Self {
-            addr,
-            chips,
-            position,
-            status,
-            timeout: 0,
-        }
-    }
 }
 
 pub fn gaming_players() -> BTreeMap<String, Player> {

@@ -4,6 +4,9 @@
 //! Note: In real-world games, players join a game one after
 //! another, instead of all together as shown in the tests.
 
+
+mod helper;
+
 use race_core::{
     context::{DispatchEvent, GameStatus},
     error::Result,
@@ -13,8 +16,8 @@ use race_core::{
 use race_test::TestClient;
 use std::collections::HashMap;
 
-use crate::essential::*;
-use crate::tests::helper::{create_sync_event, setup_holdem_game};
+use race_holdem_base::essential::*;
+use helper::{create_sync_event, setup_holdem_game};
 
 #[test]
 fn test_players_order() -> Result<()> {
