@@ -1,5 +1,6 @@
 use race_core::prelude::*;
 use race_holdem_base::game::Holdem;
+use race_proc_macro::game_handler;
 
 #[derive(BorshSerialize, BorshDeserialize)]
 #[game_handler]

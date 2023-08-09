@@ -15,6 +15,7 @@ race-core = "0.0.7"
 race-proc-macro = "0.0.7"
 borsh = "0.9.3"
 race-test = "0.0.7"
+anyhow = "1.0.72"
 
 [workspace.package]
 authors = ["RACE Foundation <race.game.team@gmail.com>"]

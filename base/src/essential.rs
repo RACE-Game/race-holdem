@@ -16,6 +16,14 @@ pub const WAIT_TIMEOUT_SHOWDOWN: u64 = 7_000;
 pub const WAIT_TIMEOUT_RUNNER: u64 = 13_000;
 
 #[derive(BorshSerialize, BorshDeserialize, Default, PartialEq, Debug, Clone, Copy)]
+pub enum GameMode {
+    #[default]
+    Cash,
+    Sng,
+    Mtt,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Default, PartialEq, Debug, Clone, Copy)]
 pub enum PlayerStatus {
     #[default]
     Wait,
@@ -26,6 +34,12 @@ pub enum PlayerStatus {
     Init, // Indicating new players ready for the next hand
     Leave,
     Out,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
+pub struct InternalPlayerJoin {
+    pub addr: String,
+    pub chips: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
@@ -54,7 +68,12 @@ impl Player {
         }
     }
 
-    pub fn new_with_status(addr: String, chips: u64, position: usize, status: PlayerStatus) -> Player {
+    pub fn new_with_status(
+        addr: String,
+        chips: u64,
+        position: usize,
+        status: PlayerStatus,
+    ) -> Player {
         Self {
             addr,
             chips,
