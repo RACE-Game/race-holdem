@@ -105,7 +105,7 @@ enum ReseatMethod {
     },
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct MttProperties {
     starting_chips: u64,
     start_time: u64,
@@ -170,6 +170,8 @@ impl GameHandler for Mtt {
         Ok(Self {
             ranks,
             timestamp: effect.timestamp(),
+            table_size: props.table_size,
+            starting_chips: props.starting_chips,
             blind_base: props.blind_base,
             blind_interval: props.blind_interval,
             blind_rules: if props.blind_rules.is_empty() {
@@ -231,9 +233,14 @@ impl GameHandler for Mtt {
                     }
                 }
             }
-            Event::GameStart { .. } => {
+            Event::GameStart { access_version } => {
                 self.create_tables()?;
                 self.stage = MttStage::Playing;
+                for game in self.games.values_mut() {
+                    if game.player_map.len() > 1 {
+                        game.handle_event(effect, Event::GameStart { access_version })?;
+                    }
+                }
             }
 
             // In Mtt, there's only one WaitingTimeout event.
@@ -478,7 +485,8 @@ impl Mtt {
 #[cfg(test)]
 mod tests {
 
-    use race_test::sync_new_players;
+    use race_core::context::GameContext;
+    use race_test::{sync_new_players, TestClient, TestGameAccountBuilder, TestHandler};
 
     use super::*;
 
@@ -514,6 +522,103 @@ mod tests {
         handler.handle_event(&mut effect, event)?;
         assert_eq!(handler.ranks.len(), 5);
         assert_eq!(handler.games.len(), 3);
+        Ok(())
+    }
+
+    pub fn create_sync_event(
+        ctx: &GameContext,
+        players: &[&TestClient],
+        transactor: &TestClient,
+    ) -> Event {
+        let av = ctx.get_access_version() + 1;
+        let max_players = 9usize;
+        let used_pos: Vec<usize> = ctx.get_players().iter().map(|p| p.position).collect();
+        let mut new_players = Vec::new();
+        for (i, p) in players.iter().enumerate() {
+            let mut position = i;
+            // If a position already taken, append the new player to the last
+            if used_pos.get(position).is_some() {
+                if position + 1 < max_players {
+                    position = ctx.count_players() as usize + 1;
+                } else {
+                    println!("Game is full");
+                }
+            }
+            new_players.push(PlayerJoin {
+                addr: p.get_addr(),
+                balance: 10_000,
+                position: position as u16,
+                access_version: av,
+                verify_key: p.get_addr(),
+            })
+        }
+
+        Event::Sync {
+            new_players,
+            new_servers: vec![],
+            transactor_addr: transactor.get_addr(),
+            access_version: av,
+        }
+    }
+
+    #[test]
+    pub fn integration_test() -> anyhow::Result<()> {
+        let mtt_props = MttProperties {
+            table_size: 2,
+            starting_chips: 1000,
+            blind_base: 50,
+            blind_interval: 10000000,
+            start_time: 0,
+            ..Default::default()
+        };
+
+        let mut transactor = TestClient::transactor("Tx");
+        let game_account = TestGameAccountBuilder::default()
+            .with_data(mtt_props)
+            .set_transactor(&transactor)
+            .build();
+        let mut ctx = GameContext::try_new(&game_account).unwrap();
+        let mut handler = TestHandler::<Mtt>::init_state(&mut ctx, &game_account).unwrap();
+
+        let mut alice = TestClient::player("Alice");
+        let mut bob = TestClient::player("Bob");
+        let mut carol = TestClient::player("Carol");
+        let mut dave = TestClient::player("Dave");
+        let mut eva = TestClient::player("Eva");
+
+        let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
+
+        handler.handle_until_no_events(&mut ctx, &sync_evt, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            assert_eq!(state.ranks.len(), 5);
+        }
+
+        let wait_timeout_evt = Event::WaitingTimeout;
+
+        handler.handle_until_no_events(&mut ctx, &wait_timeout_evt, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            assert_eq!(state.games.len(), 3);
+            let (_, game0) = state.games.first_key_value().unwrap();
+            assert_eq!(game0.player_map.len(), 2);
+            assert_eq!(game0.stage, HoldemStage::Play);
+            // Table assigns:
+            // 1. Alice, Dave
+            // 2. Bob, Eva
+            // 3. Carol
+        }
+
+        // Dave allin
+        let dave_call = dave.custom_event(GameEvent::Raise(1000));
+        handler.handle_until_no_events(&mut ctx, &dave_call, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+        }
+
         Ok(())
     }
 }
