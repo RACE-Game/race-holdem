@@ -18,9 +18,9 @@
 use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_core::prelude::*;
+use race_core::{prelude::*, types::SettleOp};
 use race_holdem_base::{
-    essential::{GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
+    essential::{GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player, ActingPlayer},
     game::Holdem,
 };
 use race_proc_macro::game_handler;
@@ -53,18 +53,28 @@ pub enum MttStage {
     Completed,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
 pub enum PlayerRankStatus {
     #[default]
     Alive,
     Out,
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct PlayerRank {
     addr: String,
-    balance: u64,
+    chips: u64,
     status: PlayerRankStatus,
+}
+
+impl PlayerRank {
+    pub fn new<S: Into<String>>(addr: S, chips: u64, status: PlayerRankStatus) -> Self {
+        Self {
+            addr: addr.into(),
+            chips,
+            status
+        }
+    }
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -87,7 +97,7 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
 }
 
 #[allow(unused)]
-#[derive(Default)]
+#[derive(Default, Debug)]
 enum ReseatMethod {
     #[default]
     Noop,
@@ -107,7 +117,6 @@ enum ReseatMethod {
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct MttProperties {
-    starting_chips: u64,
     start_time: u64,
     table_size: u8,
     blind_base: u64,
@@ -130,7 +139,6 @@ pub struct Mtt {
     // Must be between 2 and 9
     table_size: u8,
     // Inherited from properties
-    starting_chips: u64,
     // How much time spend so far. Usually it should match current time - start time,
     // unless the game was interrupted in the middle
     time_spend: u64,
@@ -154,11 +162,7 @@ impl GameHandler for Mtt {
             } else {
                 PlayerRankStatus::Alive
             };
-            ranks.push(PlayerRank {
-                addr: p.addr,
-                balance: p.balance,
-                status,
-            });
+            ranks.push(PlayerRank::new(p.addr, p.balance, status));
         }
 
         // Unregister is not supported for now
@@ -171,7 +175,6 @@ impl GameHandler for Mtt {
             ranks,
             timestamp: effect.timestamp(),
             table_size: props.table_size,
-            starting_chips: props.starting_chips,
             blind_base: props.blind_base,
             blind_interval: props.blind_interval,
             blind_rules: if props.blind_rules.is_empty() {
@@ -189,8 +192,16 @@ impl GameHandler for Mtt {
         self.timestamp = effect.timestamp();
 
         let mut updated_table_ids: Vec<TableId> = Vec::with_capacity(5);
+        let mut no_action_timeout = false; // We try to dispatch ActionTimeout by default
 
         match event {
+
+            // XXX
+            // EventLoop will dispatch SecretsReady event which can be overwritten by our action timeout
+            Event::ShareSecrets { .. } => {
+                no_action_timeout = true;
+            }
+
             // Delegate the custom events to sub event handlers
             Event::Custom { sender, raw } => {
                 if let Some(table_id) = self.table_assigns.get(&sender) {
@@ -221,11 +232,7 @@ impl GameHandler for Mtt {
             Event::Sync { new_players, .. } => {
                 if self.stage == MttStage::Init {
                     for p in new_players {
-                        self.ranks.push(PlayerRank {
-                            addr: p.addr,
-                            balance: p.balance,
-                            status: PlayerRankStatus::Alive,
-                        })
+                        self.ranks.push(PlayerRank::new(p.addr, p.balance, PlayerRankStatus::Alive));
                     }
                 } else {
                     for p in new_players {
@@ -267,10 +274,10 @@ impl GameHandler for Mtt {
 
             Event::SecretsReady { ref random_ids } => {
                 for random_id in random_ids {
-                    let games = self.games.values_mut();
-                    for game in games {
+                    for (id, game) in self.games.iter_mut() {
                         if game.deck_random_id == *random_id {
                             game.handle_event(effect, event.clone())?;
+                            updated_table_ids.push(*id);
                         }
                     }
                 }
@@ -278,13 +285,16 @@ impl GameHandler for Mtt {
             _ => (),
         }
 
+        println!("Updated table ids: {:?}", updated_table_ids);
         for table_id in updated_table_ids {
-            self.update_rank_balance(table_id)?;
+            self.apply_settles(effect)?;
             self.maybe_raise_blinds(table_id)?;
             self.maybe_reseat_players(effect, table_id)?;
         }
         self.sort_ranks();
-
+        if !no_action_timeout {
+            self.handle_dispatch_action_timeout(effect)?;
+        }
         Ok(())
     }
 }
@@ -301,10 +311,11 @@ impl Mtt {
                     r.addr.to_owned(),
                     Player::new(
                         r.addr.to_owned(),
-                        self.starting_chips,
+                        r.chips,
                         (j / num_of_tables) as u16,
                     ),
                 );
+                self.table_assigns.insert(r.addr.to_owned(), i);
                 j += num_of_tables;
             }
             let game = Holdem {
@@ -320,21 +331,55 @@ impl Mtt {
         Ok(())
     }
 
-    fn update_rank_balance(&mut self, table_id: TableId) -> Result<(), HandleError> {
-        let game = self.games.get(&table_id).ok_or(error_table_not_fonud())?;
-        for (addr, p) in game.player_map.iter() {
-            let rank = self
-                .ranks
-                .iter_mut()
-                .find(|p| p.addr.eq(addr))
-                .ok_or(error_player_not_found())?;
-            rank.balance = p.chips;
+    fn apply_settles(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        println!("Settles: {:?}", effect.settles);
+        for s in effect.settles.iter() {
+            let rank = self.ranks.iter_mut().find(|r| r.addr.eq(&s.addr)).ok_or(error_player_not_found())?;
+            match s.op {
+                SettleOp::Add(amount) => {
+                    rank.chips += amount;
+                }
+                SettleOp::Sub(amount) => {
+                    rank.chips -= amount;
+                }
+                SettleOp::Eject => {
+                    rank.status = PlayerRankStatus::Out;
+                }
+            }
         }
+        effect.settles.clear();
         Ok(())
     }
 
     fn sort_ranks(&mut self) {
-        self.ranks.sort_by(|r1, r2| r2.balance.cmp(&r1.balance));
+        self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
+    }
+
+    // Dispatch the ActionTimeout event which has highest priority based on timestamp.
+    // With Mtt mode, sub games wouldn't dispatch ActionTimeout event.
+    // The current acting player can be found in `acting_player` field.
+    // No op if there's an instant dispatch already.
+    fn handle_dispatch_action_timeout(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        let mut first_to_timeout: Option<(TableId, u64)> = None;
+
+        for (table_id, game) in self.games.iter() {
+            if let Some(ref acting_player) = game.acting_player {
+                if let Some((table_id, clock)) = first_to_timeout {
+                    if acting_player.clock < clock {
+                        first_to_timeout = Some((table_id, acting_player.clock))
+                    }
+                } else {
+                    first_to_timeout = Some((*table_id, acting_player.clock))
+                }
+            }
+        }
+
+        if let Some((table_id, _)) = first_to_timeout {
+            let acting_player = self.games.get(&table_id).ok_or(error_table_not_fonud())?
+                .acting_player.as_ref().ok_or(error_player_not_found())?;
+            effect.action_timeout(&acting_player.addr, acting_player.clock - effect.timestamp());
+        }
+        Ok(())
     }
 
     fn maybe_raise_blinds(&mut self, table_id: TableId) -> Result<(), HandleError> {
@@ -358,7 +403,7 @@ impl Mtt {
 
     fn maybe_reseat_players(
         &mut self,
-        _effect: &mut Effect,
+        effect: &mut Effect,
         table_id: TableId,
     ) -> Result<(), HandleError> {
         // No-op for final table
@@ -395,6 +440,9 @@ impl Mtt {
                     }
                 })
                 .sum::<usize>();
+
+            println!("Table with least: {}", table_with_least.0);
+            println!("Table with most: {}", table_with_most.0);
             if table_id == *table_with_least.0
                 && table_with_least.1.player_map.len() <= total_empty_seats
             {
@@ -412,6 +460,8 @@ impl Mtt {
                 ReseatMethod::Noop
             }
         };
+
+        println!("Reseat method: {:?}", reseat_method);
 
         match reseat_method {
             ReseatMethod::Noop => (),
@@ -448,6 +498,9 @@ impl Mtt {
                     }
 
                     game_ref.internal_add_players(moved_players)?;
+                    if game_ref.stage == HoldemStage::Init {
+                        game_ref.internal_start_game(effect)?;
+                    }
 
                     if game_to_close.player_map.is_empty() {
                         break;
@@ -484,6 +537,8 @@ impl Mtt {
 
 #[cfg(test)]
 mod tests {
+
+    use std::collections::HashMap;
 
     use race_core::context::GameContext;
     use race_test::{sync_new_players, TestClient, TestGameAccountBuilder, TestHandler};
@@ -565,7 +620,6 @@ mod tests {
     pub fn integration_test() -> anyhow::Result<()> {
         let mtt_props = MttProperties {
             table_size: 2,
-            starting_chips: 1000,
             blind_base: 50,
             blind_interval: 10000000,
             start_time: 0,
@@ -580,11 +634,11 @@ mod tests {
         let mut ctx = GameContext::try_new(&game_account).unwrap();
         let mut handler = TestHandler::<Mtt>::init_state(&mut ctx, &game_account).unwrap();
 
-        let mut alice = TestClient::player("Alice");
-        let mut bob = TestClient::player("Bob");
-        let mut carol = TestClient::player("Carol");
-        let mut dave = TestClient::player("Dave");
-        let mut eva = TestClient::player("Eva");
+        let alice = TestClient::player("Alice");
+        let bob = TestClient::player("Bob");
+        let carol = TestClient::player("Carol");
+        let dave = TestClient::player("Dave");
+        let eva = TestClient::player("Eva");
 
         let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
 
@@ -612,11 +666,81 @@ mod tests {
         }
 
         // Dave allin
-        let dave_call = dave.custom_event(GameEvent::Raise(1000));
-        handler.handle_until_no_events(&mut ctx, &dave_call, vec![&mut transactor])?;
+        let dave_allin = dave.custom_event(GameEvent::Raise(10000));
+        handler.handle_until_no_events(&mut ctx, &dave_allin, vec![&mut transactor])?;
 
         {
             let state = handler.get_state();
+            let (_, game0) = state.games.first_key_value().unwrap();
+            assert_eq!(game0.deck_random_id, 1);
+            assert_eq!(game0.player_map.get("Alice").unwrap().chips, 9900); // -100 for blind
+            assert_eq!(game0.player_map.get("Dave").unwrap().chips, 0);
+            // TODO: Check the dispatching
+        }
+
+        let alice_call = alice.custom_event(GameEvent::Call);
+        ctx.add_revealed_random(
+            1,
+            HashMap::from([
+                (0, "sa".to_string()), // Alice
+                (1, "sk".to_string()), // Alice
+                (2, "ha".to_string()), // Dave
+                (3, "hk".to_string()), // Dave
+                (4, "sq".to_string()),
+                (5, "sj".to_string()),
+                (6, "st".to_string()),
+                (7, "s8".to_string()),
+                (8, "s9".to_string()),
+            ]),
+        )?;
+        handler.handle_until_no_events(&mut ctx, &alice_call, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            assert_eq!(state.games.len(), 2); // The original first game was closed
+            assert_eq!(
+                *state.ranks.first().unwrap(),
+                PlayerRank::new("Alice", 20000, PlayerRankStatus::Alive)
+            );
+            println!("Ranks: {:?}", state.ranks);
+            assert_eq!(
+                *state.ranks.last().unwrap(),
+                PlayerRank::new("Dave", 0, PlayerRankStatus::Out)
+            );
+        }
+
+        ctx.add_revealed_random(
+            2,
+            HashMap::from([
+                (0, "sa".to_string()), // Bob
+                (1, "sk".to_string()), // Bob
+                (2, "ha".to_string()), // Eva
+                (3, "hk".to_string()), // Eva
+                (4, "sq".to_string()),
+                (5, "sj".to_string()),
+                (6, "st".to_string()),
+                (7, "s8".to_string()),
+                (8, "s9".to_string()),
+            ]),
+        )?;
+
+        let eva_allin = eva.custom_event(GameEvent::Raise(10000));
+        handler.handle_until_no_events(&mut ctx, &eva_allin, vec![&mut transactor])?;
+        let bob_call = bob.custom_event(GameEvent::Call);
+        handler.handle_until_no_events(&mut ctx, &bob_call, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            let (_, game0) = state.games.first_key_value().unwrap();
+            assert_eq!(game0.player_map.len(), 1);
+            assert_eq!(game0.stage, HoldemStage::Runner);
+            assert_eq!(state.ranks, vec![
+                PlayerRank::new("Alice", 20000, PlayerRankStatus::Alive),
+                PlayerRank::new("Bob", 20000, PlayerRankStatus::Alive),
+                PlayerRank::new("Carol", 10000, PlayerRankStatus::Alive),
+                PlayerRank::new("Eva", 0, PlayerRankStatus::Out),
+                PlayerRank::new("Dave", 0, PlayerRankStatus::Out),
+            ]);
         }
 
         Ok(())

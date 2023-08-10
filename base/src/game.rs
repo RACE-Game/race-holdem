@@ -190,7 +190,9 @@ impl Holdem {
                 position: player.position,
                 clock: effect.timestamp() + timeout,
             });
-            effect.action_timeout(player_addr, timeout); // in secs
+            if self.mode != GameMode::Mtt {
+                effect.action_timeout(player_addr, timeout); // in msecs
+            }
             Ok(())
         } else {
             return Err(HandleError::Custom(
@@ -809,7 +811,7 @@ impl Holdem {
         self.mark_out_players();
         let removed_addrs = self.remove_leave_and_out_players();
 
-        if self.mode == GameMode::Cash {
+        if matches!(self.mode, GameMode::Cash | GameMode::Mtt) {
             for addr in removed_addrs {
                 effect.settle(Settle::eject(addr));
             }
@@ -1170,8 +1172,10 @@ impl Holdem {
     }
 
     pub fn internal_start_game(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        // Do exact the same with GameStart
+        // WaitingTimeout + GameStart
         self.display.clear();
+        self.reset_holdem_state()?;
+        self.reset_player_map_status()?;
 
         let next_btn = self.get_next_btn()?;
         println!("Next BTN: {}", next_btn);
