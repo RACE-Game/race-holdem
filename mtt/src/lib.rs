@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_core::{prelude::*, types::SettleOp};
 use race_holdem_base::{
-    essential::{GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player, ActingPlayer},
+    essential::{GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
     game::Holdem,
 };
 use race_proc_macro::game_handler;
@@ -41,9 +41,6 @@ fn error_empty_blind_rules() -> HandleError {
 }
 
 pub type TableId = u8;
-
-const STARTING_SB: u64 = 50;
-const STARTING_BB: u64 = 100;
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
 pub enum MttStage {
@@ -72,7 +69,7 @@ impl PlayerRank {
         Self {
             addr: addr.into(),
             chips,
-            status
+            status,
         }
     }
 }
@@ -96,12 +93,12 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
         .collect()
 }
 
-#[allow(unused)]
-#[derive(Default, Debug)]
-enum ReseatMethod {
+#[derive(Default, Debug, BorshDeserialize, BorshSerialize, Clone)]
+enum TableUpdate {
+    /// The last event affected this table, but no player has to be
+    /// moved.
     #[default]
     Noop,
-
     /// This table has the least players, if there are enough empty
     /// seats in other tables, close this table and move its players
     /// to other tables
@@ -127,6 +124,7 @@ pub struct MttProperties {
 #[game_handler]
 #[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
+    start_time: u64,
     // The number of alive players
     alives: usize,
     stage: MttStage,
@@ -148,6 +146,8 @@ pub struct Mtt {
     // Blind rules
     blind_interval: u64,
     blind_rules: Vec<BlindRuleItem>,
+    // Table updates in this event
+    table_updates: BTreeMap<TableId, TableUpdate>,
 }
 
 impl GameHandler for Mtt {
@@ -168,10 +168,8 @@ impl GameHandler for Mtt {
         // Unregister is not supported for now
         effect.allow_exit(false);
 
-        // Schedule the startup
-        effect.wait_timeout(props.start_time - effect.timestamp);
-
         Ok(Self {
+            start_time: props.start_time,
             ranks,
             timestamp: effect.timestamp(),
             table_size: props.table_size,
@@ -190,11 +188,20 @@ impl GameHandler for Mtt {
         // Update time spend for blinds calculation.
         self.time_spend = effect.timestamp() - self.timestamp;
         self.timestamp = effect.timestamp();
+        self.table_updates.clear();
 
         let mut updated_table_ids: Vec<TableId> = Vec::with_capacity(5);
         let mut no_action_timeout = false; // We try to dispatch ActionTimeout by default
 
         match event {
+            Event::Ready => {
+                // Schedule the startup
+                if self.start_time > effect.timestamp {
+                    effect.wait_timeout(self.start_time - effect.timestamp);
+                } else {
+                    effect.wait_timeout(0);
+                }
+            }
 
             // XXX
             // EventLoop will dispatch SecretsReady event which can be overwritten by our action timeout
@@ -232,7 +239,11 @@ impl GameHandler for Mtt {
             Event::Sync { new_players, .. } => {
                 if self.stage == MttStage::Init {
                     for p in new_players {
-                        self.ranks.push(PlayerRank::new(p.addr, p.balance, PlayerRankStatus::Alive));
+                        self.ranks.push(PlayerRank::new(
+                            p.addr,
+                            p.balance,
+                            PlayerRankStatus::Alive,
+                        ));
                     }
                 } else {
                     for p in new_players {
@@ -289,7 +300,7 @@ impl GameHandler for Mtt {
         for table_id in updated_table_ids {
             self.apply_settles(effect)?;
             self.maybe_raise_blinds(table_id)?;
-            self.maybe_reseat_players(effect, table_id)?;
+            self.update_tables(effect, table_id)?;
         }
         self.sort_ranks();
         if !no_action_timeout {
@@ -309,18 +320,26 @@ impl Mtt {
             while let Some(r) = self.ranks.get(j as usize) {
                 player_map.insert(
                     r.addr.to_owned(),
-                    Player::new(
-                        r.addr.to_owned(),
-                        r.chips,
-                        (j / num_of_tables) as u16,
-                    ),
+                    Player::new(r.addr.to_owned(), r.chips, (j / num_of_tables) as u16),
                 );
                 self.table_assigns.insert(r.addr.to_owned(), i);
                 j += num_of_tables;
             }
+            let sb = self
+                .blind_rules
+                .first()
+                .ok_or(error_empty_blind_rules())?
+                .sb_x as u64
+                * self.blind_base;
+            let bb = self
+                .blind_rules
+                .first()
+                .ok_or(error_empty_blind_rules())?
+                .bb_x as u64
+                * self.blind_base;
             let game = Holdem {
-                sb: STARTING_SB,
-                bb: STARTING_BB,
+                sb,
+                bb,
                 player_map,
                 mode: GameMode::Mtt,
                 ..Default::default()
@@ -334,7 +353,11 @@ impl Mtt {
     fn apply_settles(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         println!("Settles: {:?}", effect.settles);
         for s in effect.settles.iter() {
-            let rank = self.ranks.iter_mut().find(|r| r.addr.eq(&s.addr)).ok_or(error_player_not_found())?;
+            let rank = self
+                .ranks
+                .iter_mut()
+                .find(|r| r.addr.eq(&s.addr))
+                .ok_or(error_player_not_found())?;
             match s.op {
                 SettleOp::Add(amount) => {
                     rank.chips += amount;
@@ -375,9 +398,17 @@ impl Mtt {
         }
 
         if let Some((table_id, _)) = first_to_timeout {
-            let acting_player = self.games.get(&table_id).ok_or(error_table_not_fonud())?
-                .acting_player.as_ref().ok_or(error_player_not_found())?;
-            effect.action_timeout(&acting_player.addr, acting_player.clock - effect.timestamp());
+            let acting_player = self
+                .games
+                .get(&table_id)
+                .ok_or(error_table_not_fonud())?
+                .acting_player
+                .as_ref()
+                .ok_or(error_player_not_found())?;
+            effect.action_timeout(
+                &acting_player.addr,
+                acting_player.clock - effect.timestamp(),
+            );
         }
         Ok(())
     }
@@ -401,22 +432,20 @@ impl Mtt {
         Ok(())
     }
 
-    fn maybe_reseat_players(
-        &mut self,
-        effect: &mut Effect,
-        table_id: TableId,
-    ) -> Result<(), HandleError> {
+    /// Update tables by balancing the players.
+    fn update_tables(&mut self, effect: &mut Effect, table_id: TableId) -> Result<(), HandleError> {
         // No-op for final table
         if self.games.len() == 1 {
+            self.table_updates.insert(table_id, TableUpdate::Noop);
             return Ok(());
         }
 
         let table_size = self.table_size as usize;
 
-        let reseat_method = {
+        let table_update = {
             let Some(first_table) = self.games.first_key_value() else {
-            return Ok(())
-        };
+                return Ok(())
+            };
 
             let mut table_with_least = first_table;
             let mut table_with_most = first_table;
@@ -446,26 +475,26 @@ impl Mtt {
             if table_id == *table_with_least.0
                 && table_with_least.1.player_map.len() <= total_empty_seats
             {
-                ReseatMethod::CloseTable {
+                TableUpdate::CloseTable {
                     close_table_id: table_id,
                 }
             } else if table_id == *table_with_most.0
                 && table_with_most.1.player_map.len() > table_with_least.1.player_map.len() + 1
             {
-                ReseatMethod::MovePlayer {
+                TableUpdate::MovePlayer {
                     from_table_id: table_id,
                     to_table_id: *table_with_least.0,
                 }
             } else {
-                ReseatMethod::Noop
+                TableUpdate::Noop
             }
         };
 
-        println!("Reseat method: {:?}", reseat_method);
+        self.table_updates.insert(table_id, table_update.clone());
 
-        match reseat_method {
-            ReseatMethod::Noop => (),
-            ReseatMethod::CloseTable { close_table_id } => {
+        match table_update {
+            TableUpdate::Noop => (),
+            TableUpdate::CloseTable { close_table_id } => {
                 // Remove this game
                 let mut game_to_close = self
                     .games
@@ -507,7 +536,7 @@ impl Mtt {
                     }
                 }
             }
-            ReseatMethod::MovePlayer {
+            TableUpdate::MovePlayer {
                 from_table_id,
                 to_table_id,
             } => {
@@ -544,6 +573,18 @@ mod tests {
     use race_test::{sync_new_players, TestClient, TestGameAccountBuilder, TestHandler};
 
     use super::*;
+
+    #[test]
+    pub fn test_props_serialize() {
+        let props = MttProperties {
+            start_time: 0,
+            table_size: 3,
+            blind_base: 10,
+            blind_interval: 60_000,
+            blind_rules: vec![],
+        };
+        println!("{:?}", props.try_to_vec());
+    }
 
     #[test]
     pub fn test_new_player_join() -> anyhow::Result<()> {
@@ -734,13 +775,16 @@ mod tests {
             let (_, game0) = state.games.first_key_value().unwrap();
             assert_eq!(game0.player_map.len(), 1);
             assert_eq!(game0.stage, HoldemStage::Runner);
-            assert_eq!(state.ranks, vec![
-                PlayerRank::new("Alice", 20000, PlayerRankStatus::Alive),
-                PlayerRank::new("Bob", 20000, PlayerRankStatus::Alive),
-                PlayerRank::new("Carol", 10000, PlayerRankStatus::Alive),
-                PlayerRank::new("Eva", 0, PlayerRankStatus::Out),
-                PlayerRank::new("Dave", 0, PlayerRankStatus::Out),
-            ]);
+            assert_eq!(
+                state.ranks,
+                vec![
+                    PlayerRank::new("Alice", 20000, PlayerRankStatus::Alive),
+                    PlayerRank::new("Bob", 20000, PlayerRankStatus::Alive),
+                    PlayerRank::new("Carol", 10000, PlayerRankStatus::Alive),
+                    PlayerRank::new("Eva", 0, PlayerRankStatus::Out),
+                    PlayerRank::new("Dave", 0, PlayerRankStatus::Out),
+                ]
+            );
         }
 
         Ok(())

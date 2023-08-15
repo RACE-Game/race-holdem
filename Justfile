@@ -1,3 +1,5 @@
+release-all: (release "cash") (release "mtt")
+
 release dir: (build dir) (optimize dir)
 
 test:
