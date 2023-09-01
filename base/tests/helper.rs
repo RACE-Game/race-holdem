@@ -133,6 +133,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         winners: Vec::<String>::new(),
         display: Vec::<Display>::new(),
         mode: GameMode::Cash,
+        next_game_start: 0,
     };
     state.arrange_players(0usize)?;
     Ok(state)
@@ -162,6 +163,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
         winners: Vec::<String>::new(),
         display: Vec::<Display>::new(),
         mode: GameMode::Cash,
+        next_game_start: 0,
     };
     state.arrange_players(0usize)?;
     Ok(state)

@@ -33,6 +33,8 @@ pub struct Holdem {
     pub winners: Vec<String>,
     pub display: Vec<Display>,
     pub mode: GameMode,
+    pub next_game_start: u64, // A timestamp indicates when the next game will start
+    pub table_size: u8, // The size of table
 }
 
 // Methods that mutate or query the game state
@@ -93,6 +95,7 @@ impl Holdem {
         self.hand_index_map = BTreeMap::<String, Vec<usize>>::new();
         self.bet_map = BTreeMap::<String, u64>::new();
         self.prize_map = BTreeMap::<String, u64>::new();
+        self.next_game_start = 0;
 
         Ok(())
     }
@@ -702,10 +705,16 @@ impl Holdem {
             effect.settle(Settle::eject(addr));
         }
 
-        if self.mode != GameMode::Mtt {
-            effect.wait_timeout(WAIT_TIMEOUT_LAST_PLAYER);
-        }
+        self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
         Ok(())
+    }
+
+    pub fn wait_timeout(&mut self, effect: &mut Effect, timeout: u64) {
+        self.next_game_start = effect.timestamp() + timeout;
+
+        if self.mode != GameMode::Mtt {
+            effect.wait_timeout(timeout);
+        }
     }
 
     pub fn settle(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
@@ -811,7 +820,7 @@ impl Holdem {
         self.mark_out_players();
         let removed_addrs = self.remove_leave_and_out_players();
 
-        if matches!(self.mode, GameMode::Cash | GameMode::Mtt) {
+        if self.mode == GameMode::Cash {
             for addr in removed_addrs {
                 effect.settle(Settle::eject(addr));
             }
@@ -965,6 +974,7 @@ impl Holdem {
         event: GameEvent,
         sender: String,
     ) -> Result<(), HandleError> {
+        self.display.clear();
         match event {
             GameEvent::Bet(amount) => {
                 if !self.is_acting_player(&sender) {
@@ -1184,9 +1194,11 @@ impl Holdem {
         let player_num = self.player_map.len();
         println!("== {} players in game", player_num);
 
-        // Prepare randomness (shuffling cards)
-        let rnd_spec = RandomSpec::deck_of_cards();
-        self.deck_random_id = effect.init_random_state(rnd_spec);
+        if player_num >= 2 {
+            // Prepare randomness (shuffling cards)
+            let rnd_spec = RandomSpec::deck_of_cards();
+            self.deck_random_id = effect.init_random_state(rnd_spec);
+        }
         Ok(())
     }
 }
@@ -1206,7 +1218,6 @@ impl GameHandler for Holdem {
         let HoldemAccount { sb, bb, rake } = init_account.data()?;
 
         effect.allow_exit(true);
-        println!("Game allows exit? {}", effect.allow_exit);
 
         Ok(Self {
             deck_random_id: 0,
@@ -1229,6 +1240,8 @@ impl GameHandler for Holdem {
             winners: Vec::<String>::new(),
             display: Vec::<Display>::new(),
             mode: GameMode::Cash,
+            next_game_start: 0,
+            table_size: init_account.max_players as u8,
         })
     }
 
@@ -1249,9 +1262,9 @@ impl GameHandler for Holdem {
                     return Err(HandleError::Custom("Player not found in game".to_string()));
                 };
 
-                // Mark those who've reached T/O for
+                // In Cash game, mark those who've reached T/O for
                 // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
-                if player.timeout > MAX_ACTION_TIMEOUT_COUNT {
+                if player.timeout > MAX_ACTION_TIMEOUT_COUNT && self.mode == GameMode::Cash {
                     player.status = PlayerStatus::Leave;
                     self.acting_player = None;
                     self.next_state(effect)?;
@@ -1286,6 +1299,7 @@ impl GameHandler for Holdem {
                 self.reset_player_map_status()?;
 
                 if effect.count_players() >= 2 && effect.count_servers() >= 1 {
+                    self.next_game_start = 0;
                     effect.start_game();
                 }
 
@@ -1309,6 +1323,7 @@ impl GameHandler for Holdem {
                         }
 
                         if effect.count_players() >= 2 && effect.count_servers() >= 1 {
+                            self.next_game_start = 0;
                             effect.start_game();
                         }
                     }
@@ -1331,6 +1346,7 @@ impl GameHandler for Holdem {
             }
 
             Event::GameStart { .. } => {
+                self.next_game_start = 0;
                 self.display.clear();
 
                 let next_btn = self.get_next_btn()?;
@@ -1367,7 +1383,7 @@ impl GameHandler for Holdem {
                     | HoldemStage::Showdown => {
                         self.player_map.remove_entry(&player_addr);
                         effect.settle(Settle::eject(&player_addr));
-                        effect.wait_timeout(WAIT_TIMEOUT_DEFAULT);
+                        self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                         self.signal_game_end()?;
                     }
 
@@ -1506,9 +1522,7 @@ impl GameHandler for Holdem {
                     });
                     self.settle(effect)?;
 
-                    if self.mode != GameMode::Mtt {
-                        effect.wait_timeout(WAIT_TIMEOUT_RUNNER);
-                    }
+                    self.wait_timeout(effect, WAIT_TIMEOUT_RUNNER);
                     Ok(())
                 }
 
@@ -1516,9 +1530,7 @@ impl GameHandler for Holdem {
                 HoldemStage::Showdown => {
                     self.display.clear();
                     self.settle(effect)?;
-                    if self.mode != GameMode::Mtt {
-                        effect.wait_timeout(WAIT_TIMEOUT_SHOWDOWN);
-                    }
+                    self.wait_timeout(effect, WAIT_TIMEOUT_SHOWDOWN);
                     Ok(())
                 }
 

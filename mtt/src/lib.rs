@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_core::{prelude::*, types::SettleOp};
 use race_holdem_base::{
-    essential::{GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
+    essential::{ActingPlayer, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
     game::Holdem,
 };
 use race_proc_macro::game_handler;
@@ -30,6 +30,10 @@ fn error_player_not_found() -> HandleError {
 }
 
 /// Following errors are internal errors
+fn error_invalid_stage() -> HandleError {
+    HandleError::Custom("Invalid stage".to_string())
+}
+
 fn error_table_not_fonud() -> HandleError {
     HandleError::Custom("Table not found".to_string())
 }
@@ -87,7 +91,7 @@ impl BlindRuleItem {
 }
 
 fn default_blind_rules() -> Vec<BlindRuleItem> {
-    [(2, 3), (3, 5), (4, 6), (8, 12), (12, 16), (16, 20)]
+    [(1, 2), (2, 3), (3, 6), (8, 12), (12, 16), (16, 20)]
         .into_iter()
         .map(|(sb, bb)| BlindRuleItem::new(sb, bb))
         .collect()
@@ -186,12 +190,12 @@ impl GameHandler for Mtt {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
         // Update time spend for blinds calculation.
-        self.time_spend = effect.timestamp() - self.timestamp;
+        self.time_spend = self.time_spend + effect.timestamp() - self.timestamp;
         self.timestamp = effect.timestamp();
         self.table_updates.clear();
 
         let mut updated_table_ids: Vec<TableId> = Vec::with_capacity(5);
-        let mut no_action_timeout = false; // We try to dispatch ActionTimeout by default
+        let mut no_timeout = false; // We try to dispatch ActionTimeout by default
 
         match event {
             Event::Ready => {
@@ -206,10 +210,11 @@ impl GameHandler for Mtt {
             // XXX
             // EventLoop will dispatch SecretsReady event which can be overwritten by our action timeout
             Event::ShareSecrets { .. } => {
-                no_action_timeout = true;
+                no_timeout = true;
             }
 
             // Delegate the custom events to sub event handlers
+            // Single table update
             Event::Custom { sender, raw } => {
                 if let Some(table_id) = self.table_assigns.get(&sender) {
                     let game = self
@@ -218,19 +223,22 @@ impl GameHandler for Mtt {
                         .ok_or(error_table_not_fonud())?;
                     let event = GameEvent::try_parse(&raw)?;
                     game.handle_custom_event(effect, event, sender)?;
+                    updated_table_ids.push(*table_id);
                 } else {
                     return Err(HandleError::InvalidPlayer);
                 }
             }
 
             // Delegate to the corresponding game
+            // Single table update
             Event::RandomnessReady { random_id } => {
-                if let Some(game) = self
+                if let Some((table_id, game)) = self
                     .games
-                    .values_mut()
-                    .find(|g| g.deck_random_id == random_id)
+                    .iter_mut()
+                    .find(|(_, g)| g.deck_random_id == random_id)
                 {
-                    game.handle_event(effect, event)?
+                    game.handle_event(effect, event)?;
+                    updated_table_ids.push(*table_id);
                 }
             }
 
@@ -245,29 +253,39 @@ impl GameHandler for Mtt {
                             PlayerRankStatus::Alive,
                         ));
                     }
-                } else {
-                    for p in new_players {
-                        effect.settle(Settle::eject(p.addr));
-                    }
                 }
             }
-            Event::GameStart { access_version } => {
+
+            Event::GameStart { .. } => {
                 self.create_tables()?;
                 self.stage = MttStage::Playing;
                 for game in self.games.values_mut() {
                     if game.player_map.len() > 1 {
-                        game.handle_event(effect, Event::GameStart { access_version })?;
+                        game.internal_start_game(effect)?;
                     }
                 }
             }
 
-            // In Mtt, there's only one WaitingTimeout event.
-            // We should start the game in this case.
-            Event::WaitingTimeout => {
-                effect.start_game();
-            }
+            // The first is used to start game
+            // The rest are for sub game start
+            // Multiple table updates
+            Event::WaitingTimeout => match self.stage {
+                MttStage::Init => {
+                    effect.start_game();
+                }
+                MttStage::Playing => {
+                    for (table_id, game) in self.games.iter_mut() {
+                        if game.next_game_start != 0 && game.next_game_start <= effect.timestamp() {
+                            game.internal_start_game(effect)?;
+                            updated_table_ids.push(*table_id);
+                        }
+                    }
+                }
+                _ => (),
+            },
 
             // Delegate to the player's table
+            // Single table update
             Event::ActionTimeout { ref player_addr } => {
                 let table_id = self
                     .table_assigns
@@ -278,11 +296,10 @@ impl GameHandler for Mtt {
                     .get_mut(table_id)
                     .ok_or(error_table_not_fonud())?;
                 game.handle_event(effect, event)?;
-                if game.stage == HoldemStage::Init {
-                    updated_table_ids.push(*table_id);
-                }
+                updated_table_ids.push(*table_id);
             }
 
+            // Multiple table updates
             Event::SecretsReady { ref random_ids } => {
                 for random_id in random_ids {
                     for (id, game) in self.games.iter_mut() {
@@ -298,13 +315,14 @@ impl GameHandler for Mtt {
 
         println!("Updated table ids: {:?}", updated_table_ids);
         for table_id in updated_table_ids {
-            self.apply_settles(effect)?;
             self.maybe_raise_blinds(table_id)?;
             self.update_tables(effect, table_id)?;
         }
+        self.apply_settles(effect)?;
+        effect.settles.clear();
         self.sort_ranks();
-        if !no_action_timeout {
-            self.handle_dispatch_action_timeout(effect)?;
+        if !no_timeout {
+            self.handle_dispatch_timeout(effect)?;
         }
         Ok(())
     }
@@ -342,6 +360,7 @@ impl Mtt {
                 bb,
                 player_map,
                 mode: GameMode::Mtt,
+                table_size: self.table_size,
                 ..Default::default()
             };
             self.games.insert(i, game);
@@ -351,7 +370,9 @@ impl Mtt {
     }
 
     fn apply_settles(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        println!("Settles: {:?}", effect.settles);
+        if !effect.settles.is_empty() {
+            println!("Settles: {:?}", effect.settles);
+        }
         for s in effect.settles.iter() {
             let rank = self
                 .ranks
@@ -364,13 +385,15 @@ impl Mtt {
                 }
                 SettleOp::Sub(amount) => {
                     rank.chips -= amount;
+                    if rank.chips == 0 {
+                        rank.status = PlayerRankStatus::Out;
+                    }
                 }
                 SettleOp::Eject => {
                     rank.status = PlayerRankStatus::Out;
                 }
             }
         }
-        effect.settles.clear();
         Ok(())
     }
 
@@ -378,38 +401,58 @@ impl Mtt {
         self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
     }
 
-    // Dispatch the ActionTimeout event which has highest priority based on timestamp.
-    // With Mtt mode, sub games wouldn't dispatch ActionTimeout event.
-    // The current acting player can be found in `acting_player` field.
-    // No op if there's an instant dispatch already.
-    fn handle_dispatch_action_timeout(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        let mut first_to_timeout: Option<(TableId, u64)> = None;
+    // Dispatch the ActionTimeout or WaitingTimeout event which has
+    // highest priority based on timestamp.  With Mtt mode, sub games
+    // wouldn't dispatch ActionTimeout event.  The current acting
+    // player can be found in `acting_player` field.  No op if there's
+    // an instant dispatch already.
+    fn handle_dispatch_timeout(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        // Option<&str>, the addr of action timeout or none for waiting timeout
+        // u64, the expected timeout timestamp
+        let mut first_to_timeout: Option<(Option<&str>, u64)> = None;
 
-        for (table_id, game) in self.games.iter() {
-            if let Some(ref acting_player) = game.acting_player {
-                if let Some((table_id, clock)) = first_to_timeout {
-                    if acting_player.clock < clock {
-                        first_to_timeout = Some((table_id, acting_player.clock))
+        for game in self.games.values() {
+            let curr_timestamp = if let Some((_, t)) = first_to_timeout {
+                t
+            } else {
+                u64::MAX
+            };
+
+            match (&game.acting_player, game.next_game_start) {
+                // action timeout only
+                (Some(ActingPlayer { addr, clock, .. }), 0) => {
+                    if *clock < curr_timestamp {
+                        first_to_timeout = Some((Some(addr), *clock))
                     }
-                } else {
-                    first_to_timeout = Some((*table_id, acting_player.clock))
                 }
+                // both
+                (Some(ActingPlayer { addr, clock, .. }), next_game_start) => {
+                    if *clock < u64::min(next_game_start, curr_timestamp) {
+                        first_to_timeout = Some((Some(addr), *clock))
+                    } else if next_game_start < u64::min(*clock, curr_timestamp) {
+                        first_to_timeout = Some((None, next_game_start))
+                    }
+                }
+                // waiting timeout only
+                (None, next_game_start) if next_game_start > 0 => {
+                    first_to_timeout = Some((None, next_game_start))
+                }
+                _ => (),
             }
         }
 
-        if let Some((table_id, _)) = first_to_timeout {
-            let acting_player = self
-                .games
-                .get(&table_id)
-                .ok_or(error_table_not_fonud())?
-                .acting_player
-                .as_ref()
-                .ok_or(error_player_not_found())?;
-            effect.action_timeout(
-                &acting_player.addr,
-                acting_player.clock - effect.timestamp(),
-            );
+        println!("Handle dispatch result: {:?}", first_to_timeout);
+        if let Some((addr, timestamp)) = first_to_timeout {
+            let timeout = timestamp - effect.timestamp();
+            if let Some(addr) = addr {
+                println!("Dispatch action timeout");
+                effect.action_timeout(addr, timeout)
+            } else {
+                println!("Dispatch wait timeout");
+                effect.wait_timeout(timeout);
+            }
         }
+
         Ok(())
     }
 
@@ -570,6 +613,7 @@ mod tests {
     use std::collections::HashMap;
 
     use race_core::context::GameContext;
+    use race_holdem_base::essential::WAIT_TIMEOUT_DEFAULT;
     use race_test::{sync_new_players, TestClient, TestGameAccountBuilder, TestHandler};
 
     use super::*;
@@ -601,6 +645,7 @@ mod tests {
     pub fn test_game_start() -> anyhow::Result<()> {
         let mut effect = Effect::default();
         let mut handler = Mtt::default();
+        handler.blind_rules = default_blind_rules();
         handler.table_size = 2;
         // Add 5 players
         let event = sync_new_players(
@@ -658,7 +703,85 @@ mod tests {
     }
 
     #[test]
-    pub fn integration_test() -> anyhow::Result<()> {
+    pub fn integration_simple_game_test() -> anyhow::Result<()> {
+        let mtt_props = MttProperties {
+            table_size: 2,
+            blind_base: 50,
+            blind_interval: 10000000,
+            start_time: 0,
+            ..Default::default()
+        };
+        let mut transactor = TestClient::transactor("Tx");
+        let game_account = TestGameAccountBuilder::default()
+            .with_data(mtt_props)
+            .set_transactor(&transactor)
+            .build();
+        let mut ctx = GameContext::try_new(&game_account).unwrap();
+        let mut handler = TestHandler::<Mtt>::init_state(&mut ctx, &game_account).unwrap();
+
+        let alice = TestClient::player("Alice");
+        let bob = TestClient::player("Bob");
+
+        let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+
+        handler.handle_until_no_events(&mut ctx, &sync_evt, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            assert_eq!(state.ranks.len(), 2);
+        }
+
+        let wait_timeout_evt = Event::WaitingTimeout;
+
+        handler.handle_until_no_events(&mut ctx, &wait_timeout_evt, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            assert_eq!(state.games.len(), 1);
+            let (_, game0) = state.games.first_key_value().unwrap();
+            assert_eq!(game0.player_map.len(), 2);
+            assert_eq!(game0.stage, HoldemStage::Play);
+            // Table assigns:
+            // 1. Alice, Dave
+            // 2. Bob, Eva
+            // 3. Carol
+        }
+
+        let action_timeout_evt = Event::ActionTimeout {
+            player_addr: "Bob".to_string(),
+        };
+
+        handler.handle_until_no_events(&mut ctx, &action_timeout_evt, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            let (_, game0) = state.games.first_key_value().unwrap();
+            assert_eq!(game0.player_map.len(), 2);
+            assert_eq!(game0.stage, HoldemStage::Settle);
+            assert_eq!(
+                ctx.get_dispatch(),
+                &Some(race_core::context::DispatchEvent::new(
+                    Event::WaitingTimeout,
+                    WAIT_TIMEOUT_DEFAULT
+                ))
+            );
+        }
+
+        ctx.set_timestamp(ctx.get_timestamp() + 5000);
+        handler.handle_until_no_events(&mut ctx, &Event::WaitingTimeout, vec![&mut transactor])?;
+
+        {
+            let state = handler.get_state();
+            let (_, game0) = state.games.first_key_value().unwrap();
+            assert_eq!(game0.deck_random_id, 2);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    /// 5 players, three tables, test table merging
+    pub fn integration_table_merge_test() -> anyhow::Result<()> {
         let mtt_props = MttProperties {
             table_size: 2,
             blind_base: 50,
