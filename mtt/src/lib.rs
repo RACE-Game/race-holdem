@@ -335,12 +335,13 @@ impl Mtt {
         for i in 0..num_of_tables {
             let mut player_map = BTreeMap::<String, Player>::default();
             let mut j = i;
+            let table_id = i + 1;
             while let Some(r) = self.ranks.get(j as usize) {
                 player_map.insert(
                     r.addr.to_owned(),
                     Player::new(r.addr.to_owned(), r.chips, (j / num_of_tables) as u16),
                 );
-                self.table_assigns.insert(r.addr.to_owned(), i);
+                self.table_assigns.insert(r.addr.to_owned(), table_id);
                 j += num_of_tables;
             }
             let sb = self
@@ -363,7 +364,7 @@ impl Mtt {
                 table_size: self.table_size,
                 ..Default::default()
             };
-            self.games.insert(i, game);
+            self.games.insert(table_id, game);
         }
 
         Ok(())

@@ -569,7 +569,9 @@ dependencies = [
 
 [[package]]
 name = "race-client"
-version = "0.0.10"
+version = "0.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21d346827e78c7a64ff70d0e8aa869d4c8cc792e880d493f6fe8e4556dc71ed9"
 dependencies = [
  "race-core",
 ]
@@ -577,6 +579,8 @@ dependencies = [
 [[package]]
 name = "race-core"
 version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0556ab6d8aa61c6abeaf1b9da2f86bf233a898d2914bea113bf90f27c596f613"
 dependencies = [
  "async-trait",
  "borsh",
@@ -586,6 +590,8 @@ dependencies = [
 [[package]]
 name = "race-encryptor"
 version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c6d0eb988a1d3332ba0e4eec073828ce6b9bbc35e1a8f878e90aa09ea67712c"
 dependencies = [
  "aes",
  "arrayref",
@@ -635,6 +641,8 @@ dependencies = [
 [[package]]
 name = "race-proc-macro"
 version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c14980345ea7c257bab73c4222e43a6cb02723880ae559ab0738b544b126c8e8"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -642,7 +650,9 @@ dependencies = [
 
 [[package]]
 name = "race-test"
-version = "0.0.10"
+version = "0.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "294438a25f034ebf8d7c7b9bf1da209af07bf31bcd5167b1ebb950b9cce71b1c"
 dependencies = [
  "async-trait",
  "base64",

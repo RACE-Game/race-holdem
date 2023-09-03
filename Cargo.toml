@@ -13,7 +13,7 @@ opt-level = 3
 [workspace.dependencies]
 race-core = "0.0.10"
 race-proc-macro = "0.0.10"
-race-test = "0.0.10"
+race-test = "0.0.9"
 # race-core.path = "../race/core"
 # race-proc-macro.path = "../race/proc-macro"
 # race-test.path = "../race/test"
