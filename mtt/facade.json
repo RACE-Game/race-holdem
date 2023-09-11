@@ -2,8 +2,8 @@
   "title": "MTT",
   "bundle": "../race-holdem/target/race_holdem_mtt.wasm",
   "token": "FACADE_USDC",
-  "max_players": 10,
-  "min_deposit": 5000,
-  "max_deposit": 5000,
+  "maxPlayers": 10,
+  "minDeposit": 5000,
+  "maxDeposit": 5000,
   "data": [122,185,218,92,138,1,0,0,2,10,0,0,0,0,0,0,0,96,234,0,0,0,0,0,0,0,0,0,0]
 }

@@ -393,6 +393,7 @@ impl Mtt {
                 SettleOp::Eject => {
                     rank.status = PlayerRankStatus::Out;
                 }
+                _ => ()
             }
         }
         Ok(())
