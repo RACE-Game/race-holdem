@@ -1,0 +1,32 @@
+{
+  "title": "RHT06-USDC",
+  "regAddr": "DkSrrSzDmF9BbjLSpqaBkVDPZJmw58gYtDvye77V5HQs",
+  "bundleAddr": "5RHbkVC7NjP3Dx4mb7ynHsksXDjkACJnr2c7aTYnAUX5",
+  "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "maxPlayers": 6,
+  "entryType": {
+    "cash": {
+      "minDeposit": 10000000,
+      "maxDeposit": 30000000
+    }
+  },
+  "recipient": {
+    "slots":[
+      {
+        "id": 0,
+        "slotType": "token",
+        "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "initShares": [{
+          "owner": {
+            "assigned": {
+              "addr": "DfgtACV9VzRUKUqRjuzxRHmeycyomcCzfRHgVyDPha9F"
+            }
+          },
+          "weights": 1,
+          "claimAmountCap": 10000000000
+        }]
+      }
+    ]
+  } ,
+  "data": [160,134,1,0,0,0,0,0,64,13,3,0,0,0,0,0,3,0]
+}

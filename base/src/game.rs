@@ -492,6 +492,33 @@ impl Holdem {
         Ok(())
     }
 
+    /// Take the rake from winners' pot and update prize map.
+    pub fn take_rake_from_prize(&mut self) -> Result<u64, HandleError> {
+        // Only take rakes in Cash game
+        if self.mode != GameMode::Cash {
+            return Ok(0)
+        }
+
+        // No rake for preflop
+        if self.street == Street::Preflop {
+            return Ok(0)
+        }
+        let mut total_rake = 0;
+
+        // For now, we use 1BB as rake cap
+        let rake_cap = self.bb;
+
+        for (_, prize) in self.prize_map.iter_mut() {
+            if *prize > 0 {
+                let r = u64::min(self.rake as u64 * *prize / 1000u64, rake_cap);
+                total_rake += r;
+                prize.checked_sub(r).ok_or(HandleError::Custom("Amount overflow".to_string()))?;
+            }
+        }
+
+        return Ok(total_rake)
+    }
+
     /// Build the prize map for awarding chips
     pub fn calc_prize(&mut self) -> Result<(), HandleError> {
         let pots = &mut self.pots;
@@ -686,6 +713,7 @@ impl Holdem {
         self.collect_bets()?;
         self.assign_winners(vec![vec![winner]])?;
         self.calc_prize()?;
+        let rake = self.take_rake_from_prize()?;
         let chips_change_map = self.update_chips_map()?;
         self.apply_prize()?;
 
@@ -703,6 +731,10 @@ impl Holdem {
         let removed_addrs = self.remove_leave_and_out_players();
         for addr in removed_addrs {
             effect.settle(Settle::eject(addr));
+        }
+
+        if rake > 0 {
+            effect.transfer(0, rake);
         }
 
         self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
@@ -805,6 +837,7 @@ impl Holdem {
 
         self.assign_winners(winners)?;
         self.calc_prize()?;
+        let rake = self.take_rake_from_prize()?;
         let chips_change_map = self.update_chips_map()?;
         self.apply_prize()?;
 
@@ -824,6 +857,10 @@ impl Holdem {
             for addr in removed_addrs {
                 effect.settle(Settle::eject(addr));
             }
+        }
+
+        if rake > 0 {
+            effect.transfer(0, rake);
         }
 
         Ok(())
@@ -1352,9 +1389,6 @@ impl GameHandler for Holdem {
                 let next_btn = self.get_next_btn()?;
                 println!("Next BTN: {}", next_btn);
                 self.btn = next_btn;
-
-                let player_num = self.player_map.len();
-                println!("== {} players in game", player_num);
 
                 // Prepare randomness (shuffling cards)
                 let rnd_spec = RandomSpec::deck_of_cards();

@@ -1,30 +1,17 @@
 {
-  "title": "RHT05-USDC",
+  "title": "RHT06-USDC-3",
   "regAddr": "DkSrrSzDmF9BbjLSpqaBkVDPZJmw58gYtDvye77V5HQs",
-  "bundleAddr": "5RHbkVC7NjP3Dx4mb7ynHsksXDjkACJnr2c7aTYnAUX5",
+  "bundleAddr": "41S4E2GiwNFp4MymSCXjTdhjrVcJFX4h5WiZMEnYvBix",
   "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   "maxPlayers": 6,
   "entryType": {
     "cash": {
-      "minDeposit": 10000000,
-      "maxDeposit": 30000000
+      "minDeposit": 1000000,
+      "maxDeposit": 3000000
     }
   },
-  "recipientSlots": [
-    {
-      "id": 0,
-      "slotType": "token",
-      "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      "initShares": [{
-        "owner": {
-          "assigned": {
-            "addr": "DfgtACV9VzRUKUqRjuzxRHmeycyomcCzfRHgVyDPha9F"
-          }
-        },
-        "weights": 1,
-        "claimAmountCap": 10000000000
-      }]
-    }
-  ],
-  "data": [160,134,1,0,0,0,0,0,64,13,3,0,0,0,0,0,3,0]
+  "recipient": {
+    "addr": "6ZHnfJ7x3P2S8dcQEpf45bwmmJjVL1Uf7dCPWjeiHnDG"
+  } ,
+  "data": [16,39,0,0,0,0,0,0,32,78,0,0,0,0,0,0,3,0]
 }
