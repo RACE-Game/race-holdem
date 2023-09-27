@@ -6,15 +6,12 @@
 
 mod helper;
 
-use race_core::{
-    error::Result as CoreResult,
-    prelude::{Effect, HandleError}
-};
-use race_test::TestClient;
+use race_api::{error::Result as CoreResult};
+use race_test::prelude::*;
 use std::collections::BTreeMap;
 
+use helper::{create_sync_event, setup_context, setup_holdem_game, setup_two_player_holdem};
 use race_holdem_base::essential::*;
-use helper::{create_sync_event, setup_context, setup_two_player_holdem,  setup_holdem_game};
 
 #[test]
 fn test_preflop_fold() -> CoreResult<()> {
@@ -28,7 +25,7 @@ fn test_preflop_fold() -> CoreResult<()> {
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
-        vec![&mut alice, &mut bob, &mut transactor]
+        vec![&mut alice, &mut bob, &mut transactor],
     )?;
 
     // Regular tests to make sure holdem has been set up properly
@@ -55,7 +52,10 @@ fn test_preflop_fold() -> CoreResult<()> {
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(alice.chips, 9990);
         assert_eq!(bob.chips, 10_010);
-        assert_eq!(state.player_map.get("Bob").unwrap().status, PlayerStatus::Wait);
+        assert_eq!(
+            state.player_map.get("Bob").unwrap().status,
+            PlayerStatus::Wait
+        );
     }
 
     // Game should be able to start again
@@ -69,15 +69,15 @@ fn test_preflop_fold() -> CoreResult<()> {
 }
 
 #[test]
-fn test_next_state() -> Result<(), HandleError> {
+fn test_next_state() -> anyhow::Result<()> {
     let mut state = setup_two_player_holdem()?;
     let ctx = setup_context();
-    let mut effect = Effect::from_context(&ctx);
+    let mut effect = ctx.derive_effect();
     // SB folds so next state: single player wins
     {
         let bet_map: BTreeMap<String, u64> = BTreeMap::from([
-          ("Alice".into(), 20u64), // BB
-          ("Bob".into(), 10u64),     // SB
+            ("Alice".into(), 20u64), // BB
+            ("Bob".into(), 10u64),   // SB
         ]);
         state.bet_map = bet_map;
         state.street = Street::Preflop;
@@ -90,7 +90,6 @@ fn test_next_state() -> Result<(), HandleError> {
         state.next_state(&mut effect)?;
 
         assert_eq!(state.street, Street::Preflop);
-
     }
     Ok(())
 }

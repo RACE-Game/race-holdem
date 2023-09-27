@@ -5,11 +5,8 @@
 use std::collections::BTreeMap;
 
 use borsh::BorshSerialize;
-use race_core::{
-    context::GameContext, error::Result, event::Event, prelude::InitAccount, types::PlayerJoin,
-};
-
-use race_test::{TestClient, TestGameAccountBuilder, TestHandler};
+use race_api::prelude::*;
+use race_test::prelude::*;
 
 use race_holdem_base::essential::*;
 use race_holdem_base::game::*;
@@ -221,7 +218,7 @@ pub fn setup_holdem_game() -> Game {
         .build();
     game_account.data = holdem_data;
 
-    let init_account = InitAccount::from_game_account(&game_account);
+    let init_account = game_account.derive_init_account();
     let mut context = GameContext::try_new(&game_account).unwrap();
     let handler = TestHandler::<Holdem>::init_state(&mut context, &game_account).unwrap();
     (init_account, context, handler, transactor)

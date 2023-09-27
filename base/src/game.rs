@@ -1,5 +1,5 @@
 //! Game state machine (or handler) of Holdem: the core of this lib.
-use race_core::prelude::*;
+use race_api::prelude::*;
 use std::collections::BTreeMap;
 
 use crate::essential::{

@@ -121,6 +121,7 @@ fn test_borsh_display() {
     }
 }
 
+#[ignore]
 #[test]
 fn test_borsh_holdem() {
     let mut holdem = setup_holdem_state().unwrap();

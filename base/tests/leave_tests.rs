@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use race_holdem_base::essential::*;
 use helper::{create_sync_event, setup_holdem_game};
-use race_core::{error::Result, event::Event};
-use race_test::TestClient;
+use race_api::{error::Result, event::Event};
+use race_test::prelude::*;
 
 // Two players leave one after another
 #[test]

@@ -1,7 +1,7 @@
 {
-  "title": "RHT06-USDC-3",
-  "regAddr": "DkSrrSzDmF9BbjLSpqaBkVDPZJmw58gYtDvye77V5HQs",
-  "bundleAddr": "41S4E2GiwNFp4MymSCXjTdhjrVcJFX4h5WiZMEnYvBix",
+  "title": "RHT06-USDC-4",
+  "regAddr": "CDuTN8k2Gjw79gkyt6H4jBNtFTLqnoPXYu3T74XZCQeZ",
+  "bundleAddr": "3K8giwEfSw2rBVH39J5Ub78ZHDhpL9TQQfVr33eWSWLE",
   "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   "maxPlayers": 6,
   "entryType": {
@@ -11,7 +11,7 @@
     }
   },
   "recipient": {
-    "addr": "6ZHnfJ7x3P2S8dcQEpf45bwmmJjVL1Uf7dCPWjeiHnDG"
+    "addr": "6NCF18683Ht7b3QnPJYNG4Zzt8Lnio9zijLrRQjtEbpM"
   } ,
   "data": [16,39,0,0,0,0,0,0,32,78,0,0,0,0,0,0,3,0]
 }

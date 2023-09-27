@@ -7,13 +7,8 @@
 
 mod helper;
 
-use race_core::{
-    context::{DispatchEvent, GameStatus},
-    error::Result,
-    event::Event,
-    random::RandomStatus,
-};
-use race_test::TestClient;
+use race_api::prelude::*;
+use race_test::prelude::*;
 use std::collections::HashMap;
 
 use race_holdem_base::essential::*;

@@ -3,14 +3,13 @@
 //! event_tests.rs.  For the a complete test of Holdem games, see holdem_test.rs
 //! in the same dir.
 
-
 mod helper;
 
-use race_holdem_base::essential::{ActingPlayer, Display};
 use helper::{
     initial_players, make_even_betmap, make_uneven_betmap, setup_context, setup_holdem_state,
 };
-use race_core::prelude::{Effect, HandleError};
+use race_api::prelude::HandleError;
+use race_holdem_base::essential::{ActingPlayer, Display};
 use std::collections::BTreeMap;
 
 #[test]
@@ -382,7 +381,7 @@ fn test_blind_bets() -> Result<(), HandleError> {
     let mut state = setup_holdem_state()?;
     let ctx = setup_context();
     // Effect is required to dispatch action timeout event
-    let mut efx = Effect::from_context(&ctx);
+    let mut efx = ctx.derive_effect();
 
     state.blind_bets(&mut efx)?;
     assert_eq!(

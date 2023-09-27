@@ -1,6 +1,6 @@
 {
-  "title": "RHT06-USDC",
-  "regAddr": "DkSrrSzDmF9BbjLSpqaBkVDPZJmw58gYtDvye77V5HQs",
+  "title": "RHT06-USDC-5",
+  "regAddr": "CDuTN8k2Gjw79gkyt6H4jBNtFTLqnoPXYu3T74XZCQeZ",
   "bundleAddr": "5RHbkVC7NjP3Dx4mb7ynHsksXDjkACJnr2c7aTYnAUX5",
   "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
   "maxPlayers": 6,
@@ -16,15 +16,23 @@
         "id": 0,
         "slotType": "token",
         "tokenAddr": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "initShares": [{
-          "owner": {
-            "assigned": {
-              "addr": "DfgtACV9VzRUKUqRjuzxRHmeycyomcCzfRHgVyDPha9F"
-            }
-          },
-          "weights": 1,
-          "claimAmountCap": 10000000000
-        }]
+        "initShares": [
+          {
+            "owner": {
+              "assigned": {
+                "addr": "DfgtACV9VzRUKUqRjuzxRHmeycyomcCzfRHgVyDPha9F"
+              }
+            },
+            "weights": 1
+          },{
+            "owner": {
+              "assigned": {
+                "addr": "F6JoJgWrVZEUaRVpA2uQyRQDNdZXyhyiD8KqdfXcjXQN"
+              }
+            },
+            "weights": 1
+          }
+        ]
       }
     ]
   } ,

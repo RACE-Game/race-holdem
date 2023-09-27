@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_core::{prelude::*, types::SettleOp};
+use race_api::{prelude::*, types::SettleOp};
 use race_holdem_base::{
     essential::{ActingPlayer, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
     game::Holdem,
@@ -27,11 +27,6 @@ use race_proc_macro::game_handler;
 
 fn error_player_not_found() -> HandleError {
     HandleError::Custom("Player not found".to_string())
-}
-
-/// Following errors are internal errors
-fn error_invalid_stage() -> HandleError {
-    HandleError::Custom("Invalid stage".to_string())
 }
 
 fn error_table_not_fonud() -> HandleError {
@@ -614,9 +609,9 @@ mod tests {
 
     use std::collections::HashMap;
 
-    use race_core::context::GameContext;
+    use race_api::prelude::*;
+    use race_test::prelude::*;
     use race_holdem_base::essential::WAIT_TIMEOUT_DEFAULT;
-    use race_test::{sync_new_players, TestClient, TestGameAccountBuilder, TestHandler};
 
     use super::*;
 
@@ -762,7 +757,7 @@ mod tests {
             assert_eq!(game0.stage, HoldemStage::Settle);
             assert_eq!(
                 ctx.get_dispatch(),
-                &Some(race_core::context::DispatchEvent::new(
+                &Some(DispatchEvent::new(
                     Event::WaitingTimeout,
                     WAIT_TIMEOUT_DEFAULT
                 ))
