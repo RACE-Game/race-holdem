@@ -512,7 +512,7 @@ impl Holdem {
             if *prize > 0 {
                 let r = u64::min(self.rake as u64 * *prize / 1000u64, rake_cap);
                 total_rake += r;
-                prize.checked_sub(r).ok_or(HandleError::Custom("Amount overflow".to_string()))?;
+                *prize = prize.checked_sub(r).ok_or(HandleError::Custom("Amount overflow".to_string()))?;
             }
         }
 
