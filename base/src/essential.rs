@@ -179,7 +179,9 @@ pub enum HoldemStage {
 pub struct HoldemAccount {
     pub sb: u64,
     pub bb: u64,
-    pub rake: u16, // an integer representing the rake percent
+    pub ante: u64,
+    pub rake: u16, // an integer representing the rake (per thousand)
+    pub theme: Option<String>, // an optional theme identifier
 }
 
 impl Default for HoldemAccount {
@@ -187,7 +189,9 @@ impl Default for HoldemAccount {
         Self {
             sb: 10,
             bb: 20,
+            ante: 0,
             rake: 3u16,
+            theme: None
         }
     }
 }

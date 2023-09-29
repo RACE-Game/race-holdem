@@ -37,7 +37,9 @@ fn test_borsh_holdem_account() {
     let acct = HoldemAccount {
         sb: 10,
         bb: 20,
+        ante: 0,
         rake: 3,
+        theme: None,
     };
     let acct_ser = acct.try_to_vec().unwrap();
     println!("Game Account Ser data {:?}", acct_ser);

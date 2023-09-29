@@ -1252,7 +1252,7 @@ impl GameHandler for Holdem {
             })
             .collect();
 
-        let HoldemAccount { sb, bb, rake } = init_account.data()?;
+        let HoldemAccount { sb, bb, rake, .. } = init_account.data()?;
 
         effect.allow_exit(true);
 
