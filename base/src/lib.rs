@@ -7,3 +7,4 @@
 pub mod evaluator;
 pub mod essential;
 pub mod game;
+pub mod errors;

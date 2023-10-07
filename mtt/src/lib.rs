@@ -15,6 +15,8 @@
 //! for each table in the tournament.
 //!
 
+mod errors;
+
 use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -24,20 +26,6 @@ use race_holdem_base::{
     game::Holdem,
 };
 use race_proc_macro::game_handler;
-
-fn error_player_not_found() -> HandleError {
-    HandleError::Custom("Player not found".to_string())
-}
-
-fn error_table_not_fonud() -> HandleError {
-    HandleError::Custom("Table not found".to_string())
-}
-fn error_table_is_empty() -> HandleError {
-    HandleError::Custom("Table is empty".to_string())
-}
-fn error_empty_blind_rules() -> HandleError {
-    HandleError::Custom("Empty blind rules".to_string())
-}
 
 pub type TableId = u8;
 
@@ -149,7 +137,12 @@ pub struct Mtt {
     table_updates: BTreeMap<TableId, TableUpdate>,
 }
 
+#[derive(BorshSerialize, BorshDeserialize)]
+pub struct MttCheckpoint {}
+
 impl GameHandler for Mtt {
+    type Checkpoint = MttCheckpoint;
+
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
         let props = MttProperties::try_from_slice(&init_account.data)
             .map_err(|_| HandleError::MalformedGameAccountData)?;
@@ -215,7 +208,7 @@ impl GameHandler for Mtt {
                     let game = self
                         .games
                         .get_mut(table_id)
-                        .ok_or(error_table_not_fonud())?;
+                        .ok_or(errors::error_table_not_fonud())?;
                     let event = GameEvent::try_parse(&raw)?;
                     game.handle_custom_event(effect, event, sender)?;
                     updated_table_ids.push(*table_id);
@@ -285,11 +278,11 @@ impl GameHandler for Mtt {
                 let table_id = self
                     .table_assigns
                     .get(player_addr)
-                    .ok_or(error_player_not_found())?;
+                    .ok_or(errors::error_player_not_found())?;
                 let game = self
                     .games
                     .get_mut(table_id)
-                    .ok_or(error_table_not_fonud())?;
+                    .ok_or(errors::error_table_not_fonud())?;
                 game.handle_event(effect, event)?;
                 updated_table_ids.push(*table_id);
             }
@@ -321,6 +314,10 @@ impl GameHandler for Mtt {
         }
         Ok(())
     }
+
+    fn into_checkpoint(self) -> HandleResult<MttCheckpoint> {
+        Ok(MttCheckpoint {})
+    }
 }
 
 impl Mtt {
@@ -342,13 +339,13 @@ impl Mtt {
             let sb = self
                 .blind_rules
                 .first()
-                .ok_or(error_empty_blind_rules())?
+                .ok_or(errors::error_empty_blind_rules())?
                 .sb_x as u64
                 * self.blind_base;
             let bb = self
                 .blind_rules
                 .first()
-                .ok_or(error_empty_blind_rules())?
+                .ok_or(errors::error_empty_blind_rules())?
                 .bb_x as u64
                 * self.blind_base;
             let game = Holdem {
@@ -374,7 +371,7 @@ impl Mtt {
                 .ranks
                 .iter_mut()
                 .find(|r| r.addr.eq(&s.addr))
-                .ok_or(error_player_not_found())?;
+                .ok_or(errors::error_player_not_found())?;
             match s.op {
                 SettleOp::Add(amount) => {
                     rank.chips += amount;
@@ -460,13 +457,13 @@ impl Mtt {
         if blind_rule.is_none() {
             blind_rule = self.blind_rules.last();
         }
-        let blind_rule = blind_rule.ok_or(error_empty_blind_rules())?;
+        let blind_rule = blind_rule.ok_or(errors::error_empty_blind_rules())?;
         let sb = blind_rule.sb_x as u64 * self.blind_base;
         let bb = blind_rule.bb_x as u64 * self.blind_base;
         let game = self
             .games
             .get_mut(&table_id)
-            .ok_or(error_table_not_fonud())?;
+            .ok_or(errors::error_table_not_fonud())?;
         game.sb = sb;
         game.bb = bb;
         Ok(())
@@ -539,7 +536,7 @@ impl Mtt {
                 let mut game_to_close = self
                     .games
                     .remove(&close_table_id)
-                    .ok_or(error_table_not_fonud())?;
+                    .ok_or(errors::error_table_not_fonud())?;
 
                 // Iterate all other games, move player if there're empty
                 // seats available.  The iteration should be sorted by
@@ -583,11 +580,11 @@ impl Mtt {
                 let from_table = self
                     .games
                     .get_mut(&from_table_id)
-                    .ok_or(error_table_not_fonud())?;
+                    .ok_or(errors::error_table_not_fonud())?;
                 let (addr, p) = from_table
                     .player_map
                     .pop_first()
-                    .ok_or(error_table_is_empty())?;
+                    .ok_or(errors::error_table_is_empty())?;
                 let add_players = vec![InternalPlayerJoin {
                     addr: p.addr,
                     chips: p.chips,
@@ -595,7 +592,7 @@ impl Mtt {
                 let to_table = self
                     .games
                     .get_mut(&to_table_id)
-                    .ok_or(error_player_not_found())?;
+                    .ok_or(errors::error_player_not_found())?;
                 to_table.internal_add_players(add_players)?;
                 self.table_assigns.insert(addr, to_table_id);
             }
