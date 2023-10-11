@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::prelude::{CustomEvent, HandleError};
 use std::collections::BTreeMap;
 
-pub const MAX_ACTION_TIMEOUT_COUNT: u8 = 5;
+pub const MAX_ACTION_TIMEOUT_COUNT: u8 = 2;
 pub const ACTION_TIMEOUT_PREFLOP: u64 = 12_000;
 pub const ACTION_TIMEOUT_POSTFLOP: u64 = 15_000;
 pub const ACTION_TIMEOUT_TURN: u64 = 20_000;

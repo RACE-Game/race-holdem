@@ -64,7 +64,7 @@ impl Holdem {
         }
     }
 
-    // Remove players with `Leave` status.
+    // Remove players with `Leave` or `Out` status.
     fn remove_leave_and_out_players(&mut self) -> Vec<String> {
         let mut removed = Vec::with_capacity(self.player_map.len());
         self.player_map.retain(|_, p| {
@@ -75,6 +75,7 @@ impl Holdem {
                 true
             }
         });
+        println!("== Remove these players: {:?}", removed);
         removed
     }
 
@@ -342,8 +343,14 @@ impl Holdem {
             // Pot with only 1 owner should return the bet in it to the owner
             if owners.len() == 1 {
                 let owner = owners.first().ok_or(errors::internal_pot_has_no_owner())?;
-                let receiver = self.player_map.get_mut(owner).ok_or(errors::internal_player_not_found())?;
-                let total_bet = self.total_bet_map.get_mut(owner).ok_or(errors::internal_malformed_total_bet())?;
+                let receiver = self
+                    .player_map
+                    .get_mut(owner)
+                    .ok_or(errors::internal_player_not_found())?;
+                let total_bet = self
+                    .total_bet_map
+                    .get_mut(owner)
+                    .ok_or(errors::internal_malformed_total_bet())?;
                 receiver.chips += amount;
                 *total_bet -= amount;
                 continue;
@@ -1247,13 +1254,15 @@ impl GameHandler for Holdem {
 
                 // In Cash game, mark those who've reached T/O for
                 // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
-                if player.timeout > MAX_ACTION_TIMEOUT_COUNT && self.mode == GameMode::Cash {
-                    player.status = PlayerStatus::Leave;
-                    self.acting_player = None;
-                    self.next_state(effect)?;
-                    return Ok(());
-                } else {
-                    player.timeout += 1;
+                if self.mode == GameMode::Cash {
+                    if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
+                        player.status = PlayerStatus::Leave;
+                        self.acting_player = None;
+                        self.next_state(effect)?;
+                        return Ok(());
+                    } else {
+                        player.timeout += 1;
+                    }
                 }
 
                 let street_bet = self.street_bet;
@@ -1496,9 +1505,10 @@ impl GameHandler for Holdem {
                 // Ending, comparing cards
                 HoldemStage::Runner => {
                     self.display.clear();
+                    let prev_board_cnt = self.board.len();
                     self.update_board(effect)?;
                     self.display.push(Display::DealBoard {
-                        prev: 0,
+                        prev: prev_board_cnt,
                         board: self.board.clone(),
                     });
                     self.settle(effect)?;
