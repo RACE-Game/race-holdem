@@ -984,6 +984,11 @@ impl Holdem {
         sender: String,
     ) -> Result<(), HandleError> {
         self.display.clear();
+
+        let Some(player) = self.player_map.get(&sender) else {
+            return Err(HandleError::InvalidPlayer)
+        };
+
         match event {
             GameEvent::Bet(amount) => {
                 if !self.is_acting_player(&sender) {
@@ -1071,14 +1076,8 @@ impl Holdem {
                     ));
                 }
 
-                if amount == 0 || amount < self.street_bet {
-                    return Err(HandleError::Custom(
-                        "Invalid raise amount: 0 or less than street bet".to_string(),
-                    ));
-                }
-
                 let betted = self.get_player_bet(&sender);
-                if amount + betted < self.street_bet + self.min_raise {
+                if amount + betted < self.street_bet + self.min_raise && amount != player.chips {
                     return Err(HandleError::Custom("Player raises too small".to_string()));
                 }
                 let (allin, real_bet) = self.take_bet(sender.clone(), amount)?;
