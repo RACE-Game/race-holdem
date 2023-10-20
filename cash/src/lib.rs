@@ -1,5 +1,5 @@
 use race_api::prelude::*;
-use race_holdem_base::game::Holdem;
+use race_holdem_base::game::{Holdem, HoldemCheckpoint};
 use race_proc_macro::game_handler;
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -7,9 +7,7 @@ use race_proc_macro::game_handler;
 pub struct Cash(Holdem);
 
 #[derive(BorshSerialize, BorshDeserialize)]
-pub struct CashCheckpoint {
-    btn: usize,
-}
+pub struct CashCheckpoint(HoldemCheckpoint);
 
 impl GameHandler for Cash {
     type Checkpoint = CashCheckpoint;
@@ -23,6 +21,6 @@ impl GameHandler for Cash {
     }
 
     fn into_checkpoint(self) -> Result<CashCheckpoint, HandleError> {
-        Ok(CashCheckpoint { btn: self.0.btn })
+        Ok(CashCheckpoint(self.0.into()))
     }
 }

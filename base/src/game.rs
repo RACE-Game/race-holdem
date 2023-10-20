@@ -42,11 +42,21 @@ pub struct Holdem {
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct HoldemCheckpoint {
     pub btn: usize,
+    pub player_timeouts: BTreeMap<String, u8>,
 }
 
 impl From<Holdem> for HoldemCheckpoint {
     fn from(value: Holdem) -> Self {
-        Self { btn: value.btn }
+        let Holdem {
+            player_map, btn, ..
+        } = value;
+
+        let player_timeouts = player_map
+            .into_iter()
+            .map(|p| (p.0, p.1.timeout))
+            .collect::<BTreeMap<String, u8>>();
+
+        Self { btn, player_timeouts }
     }
 }
 
@@ -1191,19 +1201,25 @@ impl GameHandler for Holdem {
     type Checkpoint = HoldemCheckpoint;
 
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
+        let HoldemAccount { sb, bb, rake, .. } = init_account.data()?;
+        let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
+        let (player_timeouts, btn) = if let Some(checkpoint) = checkpoint {
+            (checkpoint.player_timeouts, checkpoint.btn)
+        } else {
+            (BTreeMap::default(), 0)
+        };
+
         let player_map: BTreeMap<String, Player> = init_account
             .players
             .iter()
             .map(|p| {
                 let addr = p.addr.clone();
-                let player = Player::new(p.addr.clone(), p.balance, p.position);
+                let timeout = player_timeouts.get(&addr).cloned().unwrap_or_default();
+                let player = Player::new(p.addr.clone(), p.balance, p.position, timeout);
                 (addr, player)
             })
             .collect();
 
-        let HoldemAccount { sb, bb, rake, .. } = init_account.data()?;
-        let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
-        let btn = checkpoint.map_or_else(|| 0, |cp| cp.btn);
 
         effect.allow_exit(true);
 
@@ -1247,6 +1263,11 @@ impl GameHandler for Holdem {
 
             Event::ActionTimeout { player_addr } => {
                 self.display.clear();
+
+                if !self.is_acting_player(&player_addr) {
+                    return Err(HandleError::Custom("Player is not acting".to_string()));
+                }
+
                 let Some(player) = self.player_map.get_mut(&player_addr) else {
                     return Err(HandleError::Custom("Player not found in game".to_string()));
                 };
@@ -1309,7 +1330,7 @@ impl GameHandler for Holdem {
                                 balance,
                                 ..
                             } = p;
-                            let player = Player::new(addr, balance, position);
+                            let player = Player::new(addr, balance, position, 0);
                             self.player_map.insert(player.addr(), player);
                         }
 
@@ -1535,6 +1556,6 @@ impl GameHandler for Holdem {
 
     /// The implementation depends on the game type
     fn into_checkpoint(self) -> HandleResult<HoldemCheckpoint> {
-        Ok(HoldemCheckpoint { btn: self.btn })
+        Ok(self.into())
     }
 }

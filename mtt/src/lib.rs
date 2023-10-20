@@ -331,7 +331,7 @@ impl Mtt {
             while let Some(r) = self.ranks.get(j as usize) {
                 player_map.insert(
                     r.addr.to_owned(),
-                    Player::new(r.addr.to_owned(), r.chips, (j / num_of_tables) as u16),
+                    Player::new(r.addr.to_owned(), r.chips, (j / num_of_tables) as u16, 0),
                 );
                 self.table_assigns.insert(r.addr.to_owned(), table_id);
                 j += num_of_tables;

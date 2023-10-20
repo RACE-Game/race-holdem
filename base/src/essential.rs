@@ -60,13 +60,13 @@ impl PartialEq for Player {
 }
 
 impl Player {
-    pub fn new(addr: String, chips: u64, position: u16) -> Player {
+    pub fn new(addr: String, chips: u64, position: u16, timeout: u8) -> Player {
         Self {
             addr,
             chips,
             position: position as usize,
             status: PlayerStatus::default(),
-            timeout: 0,
+            timeout,
         }
     }
 
@@ -101,7 +101,7 @@ impl Player {
 
     pub fn next_to_act(&self) -> bool {
         match self.status {
-            PlayerStatus::Allin | PlayerStatus::Fold | PlayerStatus::Init => false,
+            PlayerStatus::Allin | PlayerStatus::Fold | PlayerStatus::Init | PlayerStatus::Leave | PlayerStatus::Out => false,
             _ => true,
         }
     }
