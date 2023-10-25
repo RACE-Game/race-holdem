@@ -178,7 +178,7 @@ fn test_calc_prize() -> Result<(), HandleError> {
         state.calc_prize()?;
         assert_eq!(state.pots.len(), 1);
         assert_eq!(state.pots[0].winners.len(), 1);
-        assert_eq!(state.prize_map.len(), 1);
+        assert_eq!(state.prize_map.len(), 2); // there's odd_chips_winner
         assert_eq!(state.prize_map.get("Bob"), Some(&200));
 
         state.pots = vec![];
@@ -191,7 +191,7 @@ fn test_calc_prize() -> Result<(), HandleError> {
         state.bet_map = bet_map;
         state.collect_bets()?;
         let winners = vec![
-            // 3 players slipt pot and Bob (SB) gets the remainder
+            // 3 players slipt pot and Alice gets the remainder
             vec!["Bob".to_string(), "Dave".to_string(), "Alice".to_string()],
             vec!["Carol".to_string()],
             vec!["Eva".to_string()],
@@ -201,9 +201,9 @@ fn test_calc_prize() -> Result<(), HandleError> {
         assert_eq!(state.pots.len(), 1);
         assert_eq!(state.pots[0].winners.len(), 3);
         assert_eq!(state.prize_map.len(), 3);
-        assert_eq!(state.prize_map.get("Bob"), Some(&68));
+        assert_eq!(state.prize_map.get("Bob"), Some(&66));
         assert_eq!(state.prize_map.get("Dave"), Some(&66));
-        assert_eq!(state.prize_map.get("Alice"), Some(&66));
+        assert_eq!(state.prize_map.get("Alice"), Some(&68));
 
         state.pots = vec![];
         state.prize_map = BTreeMap::new();
@@ -311,11 +311,11 @@ fn test_update_chips_map_singe_pot() -> Result<(), HandleError> {
     state.assign_winners(winners)?;
     state.calc_prize()?;
     let chips_change_map = state.update_chips_map()?;
-    assert_eq!(chips_change_map.get("Bob"), Some(&160));
-    assert_eq!(chips_change_map.get("Alice"), Some(&-40));
-    assert_eq!(chips_change_map.get("Dave"), Some(&-40));
-    assert_eq!(chips_change_map.get("Carol"), Some(&-40));
-    assert_eq!(chips_change_map.get("Eva"), Some(&-40));
+    assert_eq!(chips_change_map.get("Bob"), Some(&200));
+    assert_eq!(chips_change_map.get("Alice"), Some(&0));
+    assert_eq!(chips_change_map.get("Dave"), Some(&0));
+    assert_eq!(chips_change_map.get("Carol"), Some(&0));
+    assert_eq!(chips_change_map.get("Eva"), Some(&0));
     let Some(Display::GameResult{ player_map }) = state.display.iter().find(|d| matches!(d, Display::GameResult { .. }))
         else {
             panic!("GameResult display is missing");
@@ -337,6 +337,7 @@ fn test_update_chips_map_with_multiple_pot() -> Result<(), HandleError> {
 
     let bet_map = make_uneven_betmap();
     state.bet_map = bet_map;
+    // [20 * 1, 60 * 1, 100 * 3] ==> [[20 * 5], [40 * 4], [40 * 3]]
     state.collect_bets()?;
     let winners = vec![
         vec!["Alice".to_string()], // winner of main pot
@@ -349,11 +350,11 @@ fn test_update_chips_map_with_multiple_pot() -> Result<(), HandleError> {
     state.calc_prize()?;
     let chips_change_map = state.update_chips_map()?;
 
-    assert_eq!(chips_change_map.get("Alice"), Some(&80));
-    assert_eq!(chips_change_map.get("Dave"), Some(&100));
-    assert_eq!(chips_change_map.get("Bob"), Some(&20));
-    assert_eq!(chips_change_map.get("Carol"), Some(&-100));
-    assert_eq!(chips_change_map.get("Eva"), Some(&-100));
+    assert_eq!(chips_change_map.get("Alice"), Some(&100));
+    assert_eq!(chips_change_map.get("Dave"), Some(&160));
+    assert_eq!(chips_change_map.get("Bob"), Some(&120));
+    assert_eq!(chips_change_map.get("Carol"), Some(&0));
+    assert_eq!(chips_change_map.get("Eva"), Some(&0));
 
     for (addr, chips_change) in chips_change_map.iter() {
         if *chips_change > 0 {
@@ -369,8 +370,8 @@ fn test_update_chips_map_with_multiple_pot() -> Result<(), HandleError> {
         panic!("GameResult display not found");
     };
     assert_eq!(player_map.get("Alice").unwrap().prize, Some(100));
-    assert_eq!(player_map.get("Bob").unwrap().prize, Some(120));
     assert_eq!(player_map.get("Dave").unwrap().prize, Some(160));
+    assert_eq!(player_map.get("Bob").unwrap().prize, Some(120));
     assert_eq!(player_map.get("Carol").unwrap().prize, None);
     assert_eq!(player_map.get("Eva").unwrap().prize, None);
     Ok(())

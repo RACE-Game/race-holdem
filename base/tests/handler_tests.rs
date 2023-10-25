@@ -2,15 +2,12 @@
 //! 1. General events such as Sync, GameStart, WaitTimeout, etc;
 //! 2. Custom events that are exclusively relevant to Holdem:
 //! Call, Bet, Raise, Leave, etc.
-//! The pivot function next_state is also covered in this test file.
 
 mod helper;
 
-use race_api::{error::Result as CoreResult};
+use race_api::error::Result as CoreResult;
 use race_test::prelude::*;
-use std::collections::BTreeMap;
-
-use helper::{create_sync_event, setup_context, setup_holdem_game, setup_two_player_holdem};
+use helper::{create_sync_event, setup_holdem_game};
 use race_holdem_base::essential::*;
 
 #[test]
@@ -65,31 +62,5 @@ fn test_preflop_fold() -> CoreResult<()> {
         assert_eq!(state.btn, 1);
     }
 
-    Ok(())
-}
-
-#[test]
-fn test_next_state() -> anyhow::Result<()> {
-    let mut state = setup_two_player_holdem()?;
-    let ctx = setup_context();
-    let mut effect = ctx.derive_effect();
-    // SB folds so next state: single player wins
-    {
-        let bet_map: BTreeMap<String, u64> = BTreeMap::from([
-            ("Alice".into(), 20u64), // BB
-            ("Bob".into(), 10u64),   // SB
-        ]);
-        state.bet_map = bet_map;
-        state.street = Street::Preflop;
-
-        let bob = state.player_map.get_mut(&("Bob".to_string())).unwrap();
-        bob.status = PlayerStatus::Fold;
-
-        // Effect is primarily for `settle' and `assign', which is
-        // outside the scope of this unit test
-        state.next_state(&mut effect)?;
-
-        assert_eq!(state.street, Street::Preflop);
-    }
     Ok(())
 }

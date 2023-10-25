@@ -1,6 +1,6 @@
-//! Test Holdem game and its several key points such as
-//! the order of players, the runner stage and hole-card
-//! dealing.  The last test shows a complete hand.
+//! Test Holdem game and its several key aspects such as
+//! order of players, runner stage and hole-card dealing.
+//! The last test shows a complete hand playing.
 //! Note: In real-world games, players join a game one after
 //! another, instead of all together as shown in the tests.
 
@@ -40,10 +40,9 @@ fn test_players_order() -> Result<()> {
         ],
     )?;
 
-    // BTN will be 1 so players should be arranged like below:
-    // Bob (SB), Carol (BB), Dave (UTG), Eva(CO), Bob(BTN)
     {
         let state = handler.get_state();
+        // BTN will be 1 so players should be arranged like below:
         assert_eq!(
             state.player_order,
             vec![
@@ -244,7 +243,7 @@ fn test_eject_loser() -> Result<()> {
         );
     }
 
-    // SB folds,
+    // SB folds
     let charlie_fold = charlie.custom_event(GameEvent::Fold);
     handler.handle_until_no_events(
         &mut ctx,
@@ -275,7 +274,8 @@ fn test_eject_loser() -> Result<()> {
         vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
     )?;
 
-    // Game enters Runner and Alice wins
+    // Game enters Runner stage and Alice wins
+    // NOTE: At this moment, chips of winner = chips lost by others - chips winner bet
     {
         let state = handler.get_state();
         assert_eq!(state.stage, HoldemStage::Runner);
@@ -287,12 +287,14 @@ fn test_eject_loser() -> Result<()> {
         for player in state.player_map.values() {
             if player.addr == "Charlie".to_string() {
                 assert_eq!(player.status, PlayerStatus::Fold);
+                assert_eq!(player.chips, 9990);
             } else if player.addr == "Bob".to_string() {
                 assert_eq!(player.status, PlayerStatus::Out);
                 assert_eq!(player.chips, 0);
             } else {
                 assert_eq!(player.status, PlayerStatus::Allin);
-                assert_eq!(player.chips, 20_010);
+                // At this moment, the 20 Alice bet has not been returned yet
+                assert_eq!(player.chips, 19_990);
             }
         }
     }
@@ -331,7 +333,7 @@ fn test_get_holecards_idxs() -> Result<()> {
     {
         println!("-- Player hand index map {:?}", holdem_state.hand_index_map);
         let alice_hole_cards = alice.decrypt(&ctx, holdem_state.deck_random_id);
-        println!("Alice hole cards {:?}", alice_hole_cards);
+        println!("-- Alice hole cards {:?}", alice_hole_cards);
 
         let alice_hand_index = holdem_state
             .hand_index_map
@@ -1055,20 +1057,14 @@ fn test_play_game() -> Result<()> {
             assert_eq!(state.street, Street::River);
             assert_eq!(state.street_bet, 0);
             assert_eq!(state.min_raise, 20);
-            assert_eq!(state.pots.len(), 2);
+            assert_eq!(state.pots.len(), 1);
             // Pot 1
-            assert_eq!(state.pots[0].amount, 160);
-            assert_eq!(state.pots[0].owners.len(), 4);
-            assert!(state.pots[0].owners.contains(&"Alice".to_string()));
+            assert_eq!(state.pots[0].amount, 340);
+            assert_eq!(state.pots[0].owners.len(), 3);
             assert!(state.pots[0].owners.contains(&"Bob".to_string()));
             assert!(state.pots[0].owners.contains(&"Carol".to_string()));
             assert!(state.pots[0].owners.contains(&"Dave".to_string()));
-            // Pot 2
-            assert_eq!(state.pots[1].amount, 180);
-            assert_eq!(state.pots[1].owners.len(), 3);
-            assert!(state.pots[1].owners.contains(&"Bob".to_string()));
-            assert!(state.pots[1].owners.contains(&"Carol".to_string()));
-            assert!(state.pots[1].owners.contains(&"Dave".to_string()));
+            // Board and display
             assert_eq!(
                 state.board,
                 vec![

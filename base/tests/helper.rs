@@ -16,19 +16,19 @@ use race_holdem_base::game::*;
 // ======================================================
 pub fn initial_two_players() -> BTreeMap<String, Player> {
     BTreeMap::from([
-        ("Alice".into(), Player::new("Alice".into(), 1000, 0u16)),
-        ("Bob".into(), Player::new("Bob".into(), 1000, 1u16)),
+        ("Alice".into(), Player::new("Alice".into(), 1000, 0u16, 0)),
+        ("Bob".into(), Player::new("Bob".into(), 1000, 1u16, 0)),
     ])
 }
 
 pub fn initial_players() -> BTreeMap<String, Player> {
     BTreeMap::from([
-        ("Alice".into(), Player::new("Alice".into(), 1000, 0u16)),
-        ("Bob".into(), Player::new("Bob".into(), 1000, 1u16)),
-        ("Carol".into(), Player::new("Carol".into(), 1000, 2u16)),
-        ("Dave".into(), Player::new("Dave".into(), 1000, 3u16)),
-        ("Eva".into(), Player::new("Eva".into(), 1000, 4u16)),
-        ("Frank".into(), Player::new("Frank".into(), 1000, 5u16)),
+        ("Alice".into(), Player::new("Alice".into(), 1000, 0u16, 0)),
+        ("Bob".into(), Player::new("Bob".into(), 1000, 1u16, 0)),
+        ("Carol".into(), Player::new("Carol".into(), 1000, 2u16, 0)),
+        ("Dave".into(), Player::new("Dave".into(), 1000, 3u16, 0)),
+        ("Eva".into(), Player::new("Eva".into(), 1000, 4u16, 0)),
+        ("Frank".into(), Player::new("Frank".into(), 1000, 5u16, 0)),
     ])
 }
 
@@ -170,7 +170,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
     Ok(state)
 }
 
-// Set up a holdem scene simiar to those in real world
+// Set up a holdem scene similar to those in real world
 pub fn setup_real_holdem() -> Holdem {
     let mut holdem = setup_holdem_state().unwrap();
     let player_map = gaming_players();
@@ -207,7 +207,7 @@ pub fn setup_context() -> GameContext {
 }
 
 // ====================================================
-// Helpers for testing Holdem with the protocol
+// Helpers for testing Holdem with the race protocol
 // ====================================================
 type Game = (InitAccount, GameContext, TestHandler<Holdem>, TestClient);
 
