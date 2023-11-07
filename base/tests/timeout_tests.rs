@@ -1,7 +1,5 @@
 mod helper;
 
-use std::collections::HashMap;
-
 use helper::{create_sync_event, setup_holdem_game};
 use race_api::{error::Result, event::Event};
 use race_holdem_base::essential::*;
@@ -25,10 +23,11 @@ fn test_headsup_action_timeout() -> Result<()> {
         let state = handler.get_mut_state();
         state
             .player_map
-            .entry("Alice".to_string())
+            .entry("Bob".to_string())
             .and_modify(|p| p.timeout = MAX_ACTION_TIMEOUT_COUNT);
     }
 
+    // Bob's ActionTimeout event
     handler.handle_dispatch_event(&mut ctx)?;
 
     {
@@ -78,13 +77,13 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
-                "Charlie".to_string(),
-                "Dave".to_string(),
                 "Eve".to_string(),
                 "Frank".to_string(),
                 "Grace".to_string(),
                 "Alice".to_string(),
                 "Bob".to_string(),
+                "Charlie".to_string(),
+                "Dave".to_string(),
             ]
         );
         assert_eq!(state.street, Street::Preflop);

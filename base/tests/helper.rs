@@ -133,6 +133,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         mode: GameMode::Cash,
         next_game_start: 0,
         table_size: 6,
+        hand_history: None,
     };
     state.arrange_players(0usize)?;
     Ok(state)
@@ -165,6 +166,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
         mode: GameMode::Cash,
         next_game_start: 0,
         table_size: 6,
+        hand_history: None,
     };
     state.arrange_players(0usize)?;
     Ok(state)

@@ -249,6 +249,8 @@ impl GameHandler for Mtt {
                 self.stage = MttStage::Playing;
                 for game in self.games.values_mut() {
                     if game.player_map.len() > 1 {
+                        game.reset_holdem_state()?;
+                        game.reset_player_map_status()?;
                         game.internal_start_game(effect)?;
                     }
                 }
@@ -264,6 +266,8 @@ impl GameHandler for Mtt {
                 MttStage::Playing => {
                     for (table_id, game) in self.games.iter_mut() {
                         if game.next_game_start != 0 && game.next_game_start <= effect.timestamp() {
+                            game.reset_holdem_state()?;
+                            game.reset_player_map_status()?;
                             game.internal_start_game(effect)?;
                             updated_table_ids.push(*table_id);
                         }
@@ -385,7 +389,7 @@ impl Mtt {
                 SettleOp::Eject => {
                     rank.status = PlayerRankStatus::Out;
                 }
-                _ => ()
+                _ => (),
             }
         }
         Ok(())
@@ -565,6 +569,8 @@ impl Mtt {
 
                     game_ref.internal_add_players(moved_players)?;
                     if game_ref.stage == HoldemStage::Init {
+                        game_ref.reset_holdem_state()?;
+                        game_ref.reset_player_map_status()?;
                         game_ref.internal_start_game(effect)?;
                     }
 
@@ -607,8 +613,8 @@ mod tests {
     use std::collections::HashMap;
 
     use race_api::prelude::*;
-    use race_test::prelude::*;
     use race_holdem_base::essential::WAIT_TIMEOUT_DEFAULT;
+    use race_test::prelude::*;
 
     use super::*;
 

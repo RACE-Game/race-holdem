@@ -46,11 +46,11 @@ fn test_players_order() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
-                "Carol".to_string(),
-                "Dave".to_string(),
                 "Eva".to_string(),
                 "Alice".to_string(),
                 "Bob".to_string(),
+                "Carol".to_string(),
+                "Dave".to_string(),
             ]
         );
     }
@@ -80,9 +80,9 @@ fn test_eject_timeout() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
+                "Bob".to_string(),     // UTG + BTN
                 "Charlie".to_string(), // SB
                 "Alice".to_string(),   // BB
-                "Bob".to_string(),     // UTG + BTN
             ]
         );
 
@@ -177,9 +177,9 @@ fn test_eject_loser() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
+                "Bob".to_string(),     // BTN
                 "Charlie".to_string(), // SB
                 "Alice".to_string(),   // BB
-                "Bob".to_string()      // BTN
             ]
         );
         assert_eq!(
@@ -395,35 +395,35 @@ fn test_runner() -> Result<()> {
             Some(DispatchEvent {
                 timeout: ACTION_TIMEOUT_POSTFLOP,
                 event: Event::ActionTimeout {
-                    player_addr: "Alice".into()
+                    player_addr: "Bob".into()
                 },
             })
         );
-        assert!(state.is_acting_player(&"Alice".to_string()));
+        assert!(state.is_acting_player(&"Bob".to_string()));
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Alice".to_string(),
-                position: 0,
+                addr: "Bob".to_string(),
+                position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP,
             })
         );
     }
 
     // ------------------------- PREFLOP ------------------------
-    // Alice decides to go all in
-    let alice_allin = alice.custom_event(GameEvent::Raise(9990));
-    handler.handle_until_no_events(
-        &mut ctx,
-        &alice_allin,
-        vec![&mut alice, &mut bob, &mut transactor],
-    )?;
-
-    // Bob is BB and she decides to make a hero call
-    let bob_allin = bob.custom_event(GameEvent::Call);
+    // Bob(BTN) decides to go all in
+    let bob_allin = bob.custom_event(GameEvent::Raise(9990));
     handler.handle_until_no_events(
         &mut ctx,
         &bob_allin,
+        vec![&mut alice, &mut bob, &mut transactor],
+    )?;
+
+    // Alice(BB) decides to make a hero call
+    let alice_call = alice.custom_event(GameEvent::Call);
+    handler.handle_until_no_events(
+        &mut ctx,
+        &alice_call,
         vec![&mut alice, &mut bob, &mut transactor],
     )?;
 
@@ -486,9 +486,9 @@ fn test_settle_stage() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
+                "Bob".to_string(),     // BTN
                 "Charlie".to_string(), // SB
                 "Alice".to_string(),   // BB
-                "Bob".to_string()      // BTN
             ]
         );
         assert_eq!(

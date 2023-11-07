@@ -3,6 +3,8 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
+use borsh::{BorshSerialize, BorshDeserialize};
+
 /// Cards are consisted of 5 community cards + 2 hole cards.
 /// Each card is represented with a string literal where
 /// suit comes first, then kind. For example: "ca" represents Club Ace.
@@ -109,7 +111,7 @@ fn sort_grouped_cards<'a>(cards: &Vec<&'a str>) -> Vec<&'a str> {
 // ============================================================
 
 /// Used to detect the type of SameKinds: One Pair, Two Pairs, FullHouse, etc.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, BorshSerialize, BorshDeserialize)]
 pub enum Category {
     RoyalFlush,
     StraightFlush,

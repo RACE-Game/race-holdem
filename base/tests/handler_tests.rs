@@ -19,6 +19,11 @@ fn test_preflop_fold() -> CoreResult<()> {
 
     let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
 
+    {
+        let state = handler.get_mut_state();
+        state.btn = 2;
+    }
+
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -29,7 +34,7 @@ fn test_preflop_fold() -> CoreResult<()> {
     {
         let state = handler.get_state();
         assert_eq!(state.street, Street::Preflop);
-        assert_eq!(state.btn, 1);
+        assert_eq!(state.btn, 0);
         assert!(state.is_acting_player(&"Alice".to_string()));
     }
 
@@ -55,8 +60,9 @@ fn test_preflop_fold() -> CoreResult<()> {
         );
     }
 
-    // Game should be able to start again
-    handler.handle_dispatch_event(&mut ctx)?;
+    // Game should be able to start again with BTN changed
+    handler.handle_dispatch_event(&mut ctx)?; // WaitingTimeout
+    handler.handle_dispatch_event(&mut ctx)?; // GameStart
     {
         let state = handler.get_state();
         assert_eq!(state.btn, 1);
