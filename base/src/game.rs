@@ -10,7 +10,7 @@ use crate::essential::{
     WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_LAST_PLAYER, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN,
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
-use crate::hand_history::HandHistory;
+use crate::hand_history::{BlindInfo, BlindType, HandHistory, PlayerAction, Showdown};
 
 // Holdem: the game state
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq)]
@@ -38,7 +38,7 @@ pub struct Holdem {
     pub mode: GameMode,
     pub next_game_start: u64, // A timestamp indicates when the next game will start
     pub table_size: u8,       // The size of table
-    pub hand_history: Option<HandHistory>,
+    pub hand_history: HandHistory,
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -294,26 +294,47 @@ impl Holdem {
     }
 
     pub fn blind_bets(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        // let mut players: Vec<String> = self.player_order.clone();
-
         let (sb_addr, bb_addr) = if self.player_order.len() == 2 {
-            let bb_addr = self.player_order.first().cloned().ok_or(errors::heads_up_missing_sb())?;
-            let sb_addr = self.player_order.last().cloned().ok_or(errors::heads_up_missing_bb())?;
+            let bb_addr = self
+                .player_order
+                .first()
+                .cloned()
+                .ok_or(errors::heads_up_missing_sb())?;
+            let sb_addr = self
+                .player_order
+                .last()
+                .cloned()
+                .ok_or(errors::heads_up_missing_bb())?;
             (sb_addr, bb_addr)
         } else {
-            let sb_addr = self.player_order.get(0).cloned().ok_or(errors::mplayers_missing_sb())?;
-            let bb_addr = self.player_order.get(1).cloned().ok_or(errors::mplayers_missing_bb())?;
+            let sb_addr = self
+                .player_order
+                .get(0)
+                .cloned()
+                .ok_or(errors::mplayers_missing_sb())?;
+            let bb_addr = self
+                .player_order
+                .get(1)
+                .cloned()
+                .ok_or(errors::mplayers_missing_bb())?;
             (sb_addr, bb_addr)
         };
 
-        let (allin, _) = self.take_bet(sb_addr.to_owned(), self.sb)?;
+        let (allin, real_sb) = self.take_bet(sb_addr.to_owned(), self.sb)?;
         if allin {
             self.set_player_status(&sb_addr, PlayerStatus::Allin)?;
         }
-        let (allin, _) = self.take_bet(bb_addr.to_owned(), self.bb)?;
+        let (allin, real_bb) = self.take_bet(bb_addr.to_owned(), self.bb)?;
         if allin {
             self.set_player_status(&bb_addr, PlayerStatus::Allin)?;
         }
+
+        let hh = &mut self.hand_history;
+        hh.set_blinds_infos(vec![
+            BlindInfo::new(&sb_addr, BlindType::Sb, real_sb),
+            BlindInfo::new(&bb_addr, BlindType::Bb, real_bb),
+        ]);
+        hh.set_pot(Street::Preflop, real_sb + real_bb);
 
         // Select next to act
         if self.player_order.len() == 2 {
@@ -339,7 +360,6 @@ impl Holdem {
 
         self.min_raise = self.bb;
         self.street_bet = self.bb;
-        // TODO: Move display a bit earlier than first SecretsReady
         self.display.push(Display::DealCards);
         Ok(())
     }
@@ -430,7 +450,7 @@ impl Holdem {
         self.display.push(Display::CollectBets {
             bet_map: self.bet_map.clone(),
         });
-        self.bet_map = BTreeMap::<String, u64>::new();
+        self.bet_map.clear();
         Ok(())
     }
 
@@ -525,11 +545,12 @@ impl Holdem {
                         return Err(errors::internal_failed_to_reveal_board());
                     }
                 }
+                let board = self.board.clone();
+                self.hand_history.set_board(board);
                 println!("== Board is {:?}", self.board);
             }
             _ => {}
         }
-
         Ok(())
     }
 
@@ -546,8 +567,8 @@ impl Holdem {
         }
         let mut total_rake = 0;
 
-        // For now, we use 1BB as rake cap
-        let rake_cap = self.bb;
+        // For now, we use 5BB as rake cap
+        let rake_cap = self.bb * 5;
 
         for (_, prize) in self.prize_map.iter_mut() {
             if *prize > 0 {
@@ -555,7 +576,7 @@ impl Holdem {
                 total_rake += r;
                 *prize = prize
                     .checked_sub(r)
-                    .ok_or(HandleError::Custom("Amount overflow".to_string()))?;
+                    .ok_or(errors::internal_amount_overflow())?;
             }
         }
 
@@ -733,6 +754,7 @@ impl Holdem {
             player_map: result_player_map,
         });
 
+        self.hand_history.set_chips_change(&chips_change_map);
         Ok(chips_change_map)
     }
 
@@ -788,6 +810,9 @@ impl Holdem {
         // Player hands
         let mut player_hands: Vec<(String, PlayerHand)> =
             Vec::with_capacity(self.player_order.len());
+
+        let mut showdowns = Vec::<(String, Showdown)>::new();
+
         for (addr, idxs) in self.hand_index_map.iter() {
             if idxs.len() != 2 {
                 return Err(HandleError::Custom(
@@ -829,10 +854,22 @@ impl Holdem {
                 let hole_cards = [first_card.as_str(), second_card.as_str()];
                 let cards = create_cards(board.as_slice(), &hole_cards);
                 let hand = evaluate_cards(cards);
+                let hole_cards = hole_cards.iter().map(|c| c.to_string()).collect();
+                let category = hand.category.clone();
+                let picks = hand.picks.iter().map(|c| c.to_string()).collect();
                 player_hands.push((player.addr(), hand));
+                showdowns.push((
+                    player.addr(),
+                    Showdown {
+                        hole_cards,
+                        category,
+                        picks,
+                    },
+                ));
             }
         }
         player_hands.sort_by(|(_, h1), (_, h2)| compare_hands(&h2.value, &h1.value));
+
         println!("Player Hands from strong to weak {:?}", player_hands);
 
         // Winners example: [[w1], [w2, w3], ... ] where w2 == w3, i.e. a draw/tie
@@ -897,6 +934,11 @@ impl Holdem {
         }
 
         effect.checkpoint();
+
+        // Save to hand history
+        for (addr, showdown) in showdowns.into_iter() {
+            self.hand_history.add_showdown(addr, showdown);
+        }
         Ok(())
     }
 
@@ -1003,13 +1045,19 @@ impl Holdem {
             }
 
             let board_start = self.hand_index_map.len() * 2;
-            effect.reveal(self.deck_random_id, (board_start..(board_start + 5)).collect());
+            effect.reveal(
+                self.deck_random_id,
+                (board_start..(board_start + 5)).collect(),
+            );
             Ok(())
         }
         // Next Street
         else if next_street != Street::Showdown {
             println!("[Next State]: Move to next street: {:?}", next_street);
             self.change_street(effect, next_street)?;
+            let street = self.street;
+            let total_pot = self.pots.iter().map(|p| p.amount).sum();
+            self.hand_history.set_pot(street, total_pot);
             Ok(())
         }
         // Showdown
@@ -1054,24 +1102,20 @@ impl Holdem {
                     return Err(errors::not_the_acting_player_to_bet());
                 }
                 if self.bet_map.get(&sender).is_some() {
-                    return Err(HandleError::Custom("Player already betted".to_string()));
+                    return Err(errors::player_already_betted());
                 }
                 // Freestyle betting not allowed in the preflop
                 if self.street_bet != 0 {
-                    return Err(HandleError::Custom(
-                        "Player can't freestyle bet".to_string(),
-                    ));
+                    return Err(errors::player_cant_bet());
                 }
                 if self.bb > amount {
-                    return Err(HandleError::Custom("Bet must be >= bb".to_string()));
+                    return Err(errors::bet_amonut_is_too_small());
                 }
 
                 let (allin, _) = self.take_bet(sender.clone(), amount)?;
                 self.set_player_acted(&sender, allin)?;
                 self.min_raise = amount;
                 self.street_bet = amount;
-                self.next_state(effect)?;
-                Ok(())
             }
 
             GameEvent::Call => {
@@ -1083,8 +1127,6 @@ impl Holdem {
                 let call_amount = self.street_bet - betted;
                 let (allin, _) = self.take_bet(sender.clone(), call_amount)?;
                 self.set_player_acted(&sender, allin)?;
-                self.next_state(effect)?;
-                Ok(())
             }
 
             GameEvent::Check => {
@@ -1094,15 +1136,10 @@ impl Holdem {
 
                 // Check is only available when player's current bet equals street bet.
                 let curr_bet = self.get_player_bet(&sender);
-                if curr_bet == self.street_bet {
-                    self.set_player_status(&sender, PlayerStatus::Acted)?;
-                    self.next_state(effect)?;
-                    Ok(())
-                } else {
-                    return Err(HandleError::Custom(
-                        "Player can't check because of not enough bet".to_string(),
-                    ));
+                if curr_bet != self.street_bet {
+                    return Err(errors::player_cant_check());
                 }
+                self.set_player_status(&sender, PlayerStatus::Acted)?;
             }
 
             GameEvent::Fold => {
@@ -1110,8 +1147,6 @@ impl Holdem {
                     return Err(errors::not_the_acting_player_to_fold());
                 }
                 self.set_player_status(&sender, PlayerStatus::Fold)?;
-                self.next_state(effect)?;
-                Ok(())
             }
 
             GameEvent::Raise(amount) => {
@@ -1120,14 +1155,12 @@ impl Holdem {
                 }
 
                 if self.street_bet == 0 || self.bet_map.is_empty() {
-                    return Err(HandleError::Custom(
-                        "Street bet is 0 so raising is not allowed".to_string(),
-                    ));
+                    return Err(errors::player_cant_raise());
                 }
 
                 let betted = self.get_player_bet(&sender);
                 if amount + betted < self.street_bet + self.min_raise && amount != player.chips {
-                    return Err(HandleError::Custom("Player raises too small".to_string()));
+                    return Err(errors::raise_amount_is_too_small());
                 }
                 let (allin, real_bet) = self.take_bet(sender.clone(), amount)?;
                 self.set_player_acted(&sender, allin)?;
@@ -1135,11 +1168,15 @@ impl Holdem {
                 let new_min_raise = new_street_bet - self.street_bet;
                 self.street_bet = new_street_bet;
                 self.min_raise = new_min_raise;
-                self.next_state(effect)?;
-
-                Ok(())
             }
         }
+
+        // Save action to hand history
+        let street = self.street;
+        self.hand_history
+            .add_action(street, PlayerAction::new(&sender, event))?;
+        self.next_state(effect)?;
+        Ok(())
     }
 
     pub fn set_player_acted(&mut self, player_addr: &str, allin: bool) -> Result<(), HandleError> {
@@ -1196,7 +1233,6 @@ impl Holdem {
         for p in add_players {
             // Since it's an internal event, we have to take care of
             // position.
-
             let occupied_pos = self
                 .player_map
                 .values()
@@ -1230,6 +1266,10 @@ impl Holdem {
             let rnd_spec = RandomSpec::deck_of_cards();
             self.deck_random_id = effect.init_random_state(rnd_spec);
         }
+
+        // Init HandHistory
+        self.hand_history = HandHistory::default();
+
         Ok(())
     }
 }
@@ -1283,7 +1323,7 @@ impl GameHandler for Holdem {
             mode: GameMode::Cash,
             next_game_start: 0,
             table_size: init_account.max_players as u8,
-            hand_history: None,
+            hand_history: HandHistory::default(),
         })
     }
 
@@ -1309,11 +1349,19 @@ impl GameHandler for Holdem {
                     return Err(HandleError::Custom("Player not found in game".to_string()));
                 };
 
+                let street = self.street;
                 // In Cash game, mark those who've reached T/O for
                 // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
                 if self.mode == GameMode::Cash {
                     if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
                         player.status = PlayerStatus::Leave;
+                        self.hand_history.add_action(
+                            street,
+                            PlayerAction {
+                                addr: player_addr.to_owned(),
+                                event: GameEvent::Fold,
+                            },
+                        )?;
                         self.next_state(effect)?;
                         return Ok(());
                     } else {
@@ -1330,10 +1378,24 @@ impl GameHandler for Holdem {
 
                 if bet == street_bet {
                     self.set_player_status(&player_addr, PlayerStatus::Acted)?;
+                    self.hand_history.add_action(
+                        street,
+                        PlayerAction {
+                            addr: player_addr.to_owned(),
+                            event: GameEvent::Check,
+                        },
+                    )?;
                     self.next_state(effect)?;
                     Ok(())
                 } else {
                     self.set_player_status(&player_addr, PlayerStatus::Fold)?;
+                    self.hand_history.add_action(
+                        street,
+                        PlayerAction {
+                            addr: player_addr.to_owned(),
+                            event: GameEvent::Fold,
+                        },
+                    )?;
                     self.next_state(effect)?;
                     Ok(())
                 }
@@ -1400,6 +1462,10 @@ impl GameHandler for Holdem {
                 // Prepare randomness (shuffling cards)
                 let rnd_spec = RandomSpec::deck_of_cards();
                 self.deck_random_id = effect.init_random_state(rnd_spec);
+
+                // Init HandHistory
+                self.hand_history = HandHistory::default();
+
                 Ok(())
             }
 
@@ -1499,7 +1565,7 @@ impl GameHandler for Holdem {
                                 prev: board_prev_cnt,
                                 board: self.board.clone(),
                             });
-
+                            self.hand_history.set_board(self.board.clone());
                             self.next_state(effect)?;
                         }
 
@@ -1518,6 +1584,7 @@ impl GameHandler for Holdem {
                                 ));
                             }
 
+                            self.hand_history.set_board(self.board.clone());
                             self.next_state(effect)?;
                         }
 
@@ -1535,6 +1602,8 @@ impl GameHandler for Holdem {
                                     "Failed to reveal the river card".to_string(),
                                 ));
                             }
+
+                            self.hand_history.set_board(self.board.clone());
                             self.next_state(effect)?;
                         }
 

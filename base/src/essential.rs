@@ -116,8 +116,8 @@ impl Player {
             self.chips -= bet;
             (false, bet)
         } else {
-            println!("== {} ALL IN: {}", &self.addr, bet);
             let real_bet = self.chips;
+            println!("== {} ALL IN: {}", &self.addr, real_bet);
             self.chips = 0;
             (true, real_bet)
         }
@@ -153,7 +153,7 @@ impl Pot {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default, Copy, Clone)]
 pub enum Street {
     #[default]
     Init,

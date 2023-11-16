@@ -294,7 +294,7 @@ fn test_eject_loser() -> Result<()> {
             } else {
                 assert_eq!(player.status, PlayerStatus::Allin);
                 // At this moment, the 20 Alice bet has not been returned yet
-                assert_eq!(player.chips, 19_990);
+                assert_eq!(player.chips, 19_950);
             }
         }
     }

@@ -5,10 +5,12 @@
 
 mod helper;
 
-use race_api::error::Result as CoreResult;
-use race_test::prelude::*;
+use std::collections::HashMap;
+
 use helper::{create_sync_event, setup_holdem_game};
+use race_api::{error::Result as CoreResult, prelude::Event};
 use race_holdem_base::essential::*;
+use race_test::prelude::*;
 
 #[test]
 fn test_preflop_fold() -> CoreResult<()> {
@@ -66,6 +68,95 @@ fn test_preflop_fold() -> CoreResult<()> {
     {
         let state = handler.get_state();
         assert_eq!(state.btn, 1);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_2() -> Result<()> {
+    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+
+    let mut alice = TestClient::player("Alice");
+    let mut bob = TestClient::player("Bob");
+    let mut carol = TestClient::player("Carol");
+
+    let mut sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol], &transactor);
+
+    {
+        match &mut sync_evt {
+            Event::Sync { new_players, .. } => {
+                new_players[0].balance = 83380001;
+                new_players[1].balance = 212870000;
+                new_players[2].balance = 375929168;
+            }
+            _ => (),
+        }
+        let state = handler.get_mut_state();
+        state.btn = 1;
+        state.rake = 3;
+    }
+
+    handler.handle_until_no_events(
+        &mut ctx,
+        &sync_evt,
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
+    )?;
+
+    {
+        let state = handler.get_mut_state();
+        assert_eq!(state.btn, 2);
+        assert_eq!(
+            state
+                .acting_player
+                .as_ref()
+                .and_then(|a| Some(a.addr.as_str())),
+            Some("Carol")
+        );
+
+        let runner_revealed = HashMap::from([
+            // Alice
+            (0, "st".to_string()),
+            (1, "ct".to_string()),
+            // Bob
+            (2, "ht".to_string()),
+            (3, "dt".to_string()),
+            // Carol
+            (4, "h7".to_string()),
+            (5, "d2".to_string()),
+            // Board
+            (6, "s5".to_string()),
+            (7, "c6".to_string()),
+            (8, "h2".to_string()),
+            (9, "h8".to_string()),
+            (10, "d7".to_string()),
+        ]);
+        let holdem_state = handler.get_state();
+        ctx.add_revealed_random(holdem_state.deck_random_id, runner_revealed)?;
+    }
+
+    let evts = [
+        carol.custom_event(GameEvent::Fold),
+        alice.custom_event(GameEvent::Call),
+        bob.custom_event(GameEvent::Check),
+        alice.custom_event(GameEvent::Check),
+        bob.custom_event(GameEvent::Check),
+        alice.custom_event(GameEvent::Bet(750000)),
+        bob.custom_event(GameEvent::Raise(212870000)),
+        alice.custom_event(GameEvent::Call),
+    ];
+
+    for evt in evts {
+        handler.handle_until_no_events(
+            &mut ctx,
+            &evt,
+            vec![&mut alice, &mut bob, &mut carol, &mut transactor],
+        )?;
+    }
+
+    {
+        let state = handler.get_state();
+        assert_eq!(state.stage, HoldemStage::Runner);
     }
 
     Ok(())

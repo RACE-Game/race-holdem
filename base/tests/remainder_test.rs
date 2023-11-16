@@ -74,8 +74,8 @@ fn test_remainder() -> Result<()> {
 
     {
         let state = handler.get_state();
-        assert_eq!(state.prize_map.get("Alice"), Some(&861u64));
-        assert_eq!(state.prize_map.get("Bob"), Some(&860u64));
+        assert_eq!(state.prize_map.get("Alice"), Some(&831u64));
+        assert_eq!(state.prize_map.get("Bob"), Some(&830u64));
         assert_eq!(state.stage, HoldemStage::Runner);
         assert_eq!(state.street, Street::Showdown);
     }

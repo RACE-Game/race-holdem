@@ -16,7 +16,6 @@ pub fn create_cards<'a>(community_cards: &[&'a str], hole_cards: &[&'a str]) -> 
     let mut cards: Vec<&str> = Vec::with_capacity(7);
     cards.extend_from_slice(community_cards);
     cards.extend_from_slice(hole_cards);
-    // cards.sort_by(|&c1, &c2| compare_kinds(c1, c2));
     cards
 }
 
@@ -111,7 +110,7 @@ fn sort_grouped_cards<'a>(cards: &Vec<&'a str>) -> Vec<&'a str> {
 // ============================================================
 
 /// Used to detect the type of SameKinds: One Pair, Two Pairs, FullHouse, etc.
-#[derive(Debug, PartialEq, BorshSerialize, BorshDeserialize)]
+#[derive(Debug, PartialEq, BorshSerialize, BorshDeserialize, Copy, Clone)]
 pub enum Category {
     RoyalFlush,
     StraightFlush,

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use borsh::BorshSerialize;
 use race_api::prelude::*;
+use race_holdem_base::hand_history::HandHistory;
 use race_test::prelude::*;
 
 use race_holdem_base::essential::*;
@@ -133,7 +134,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         mode: GameMode::Cash,
         next_game_start: 0,
         table_size: 6,
-        hand_history: None,
+        hand_history: HandHistory::default(),
     };
     state.arrange_players(0usize)?;
     Ok(state)
@@ -166,7 +167,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
         mode: GameMode::Cash,
         next_game_start: 0,
         table_size: 6,
-        hand_history: None,
+        hand_history: HandHistory::default(),
     };
     state.arrange_players(0usize)?;
     Ok(state)
