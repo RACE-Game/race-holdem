@@ -1190,6 +1190,14 @@ impl Holdem {
         )
     }
 
+    pub fn reset_player_timeout(&mut self, player_addr: &str) -> Result<(), HandleError> {
+        let Some(player) = self.player_map.get_mut(player_addr) else {
+            return Err(HandleError::InvalidPlayer);
+        };
+        player.timeout = 0;
+        Ok(())
+    }
+
     pub fn set_player_status(
         &mut self,
         player_addr: &str,
@@ -1328,10 +1336,12 @@ impl GameHandler for Holdem {
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
+
         match event {
             // Handle holdem specific (custom) events
             Event::Custom { sender, raw } => {
                 self.display.clear();
+                self.reset_player_timeout(&sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
                 println!("== Player action event: {:?}, sender: {:?}", event, sender);
                 self.handle_custom_event(effect, event, sender.clone())?;
