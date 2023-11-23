@@ -1,6 +1,6 @@
 {
   "name": "RACE Holdem",
-  "symbol": "RHT10",
+  "symbol": "RHT11",
   "description": "Race Holdem Test",
   "seller_fee_basis_points": 0,
   "image": "https://arweave.net/fkanqLM3Cy9g-gFvv8pMu9zrYyYIKeMckWPz8kPD7UI",
@@ -13,7 +13,7 @@
         "type": "image/png"
       },
       {
-        "uri": "https://arweave.net/Nq8JIQbZ6e7tsecjbg4GyyNhPNr3Vp859a01VWHBdd0",
+        "uri": "https://arweave.net/f2H5g981YmCe7J5Bf7EwRVdPRpbN_icac7RfjcQ6LRA",
         "type": "application/wasm"
       }
     ],
