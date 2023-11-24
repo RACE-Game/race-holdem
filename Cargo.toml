@@ -11,9 +11,9 @@ lto = true
 opt-level = 3
 
 [workspace.dependencies]
-race-api = "0.2.2"
-race-proc-macro = "0.2.2"
-race-test = "0.2.2"
+race-api = "0.2.5"
+race-proc-macro = "0.2.5"
+race-test = "0.2.5"
 # race-api.path = "../race/api"
 # race-proc-macro.path = "../race/proc-macro"
 # race-test.path = "../race/test"

@@ -574,9 +574,9 @@ dependencies = [
 
 [[package]]
 name = "race-api"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b953304f0e5cb4b9f018f00f778e21d6c4dcb891881780ac1725e1e883e6207e"
+checksum = "7bfa8e81a291f7ce4fc614a4604230f9265dda6a01d27dca2a7f46958a88cb36"
 dependencies = [
  "async-trait",
  "borsh",
@@ -585,9 +585,9 @@ dependencies = [
 
 [[package]]
 name = "race-client"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "656df19272f820a9192e6d9205a31e59f18ca7a773e736d221acb74385f05eb7"
+checksum = "8030ee392a00827299688d2ba5f00ecd3867d37e38a686429b158c6cfa334f5f"
 dependencies = [
  "race-api",
  "race-core",
@@ -595,9 +595,9 @@ dependencies = [
 
 [[package]]
 name = "race-core"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d6f6fa8365403e1cb6df31d09dc7f84d7b29c5349ee8c8c7f13dee267da2b2d"
+checksum = "873b88f2376b448a86864538c790f608fff686dd4f133c12164c9abb3967a43b"
 dependencies = [
  "async-trait",
  "borsh",
@@ -607,9 +607,9 @@ dependencies = [
 
 [[package]]
 name = "race-encryptor"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b99c579b79ea95aa98db2e7d6c7971361928639e149c61b61acb978d0be08f79"
+checksum = "01007e63a52e480082c3997a05fc154e2d153a0d34398a65b2e21844c10af587"
 dependencies = [
  "aes",
  "arrayref",
@@ -660,9 +660,9 @@ dependencies = [
 
 [[package]]
 name = "race-proc-macro"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bf2abf32ad827c3a6cce0e15678fbfdb0d86215ef8c237c123e8d2a0258be98"
+checksum = "cd9d8932dbffa8ee0b37a7a7436a2f642d4128573406405d94652834eff6de24"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -670,9 +670,9 @@ dependencies = [
 
 [[package]]
 name = "race-test"
-version = "0.2.2"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171fde1c82707bb91bf2ab89c951dfb27dece509f908dd5b583da5de937e0357"
+checksum = "9a2eeeed0a79e30039e27d7172ba9ea90612deebca9fd79d710dfc3fb8ae4a4d"
 dependencies = [
  "async-trait",
  "base64",
