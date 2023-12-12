@@ -11,7 +11,7 @@
 //!
 //! The game will start at `start-time`, saved in the account data.
 //! Depends on the number of players and the table size, some tables
-//! will be created.  The same data structure with cash table is used
+//! will be created.  The same data structure as in cash table is used
 //! for each table in the tournament.
 //!
 
@@ -82,16 +82,16 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
 
 #[derive(Default, Debug, BorshDeserialize, BorshSerialize, Clone)]
 enum TableUpdate {
-    /// The last event affected this table, but no player has to be
+    /// The last event affects this table, but no player has to be
     /// moved.
     #[default]
     Noop,
-    /// This table has the least players, if there are enough empty
-    /// seats in other tables, close this table and move its players
+    /// This table has the least players. If there are enough empty
+    /// seats at other tables, close this table and move its players
     /// to other tables
     CloseTable { close_table_id: TableId },
-    /// This table has the most players, if the number of players on
-    /// this table is greater than the number of the table with least
+    /// This table has the most players. If the number of players at
+    /// this table is greater than that of the table with least
     /// players, move one player to that table
     MovePlayer {
         from_table_id: TableId,
@@ -561,6 +561,7 @@ impl Mtt {
                                 addr: player.addr,
                                 chips: player.chips,
                             });
+                            println!("Player {} will be moved", player_addr);
                             self.table_assigns.insert(player_addr, *id);
                         } else {
                             break;
@@ -600,6 +601,7 @@ impl Mtt {
                     .get_mut(&to_table_id)
                     .ok_or(errors::error_player_not_found())?;
                 to_table.internal_add_players(add_players)?;
+                println!("Moved player {} to table {}", addr, to_table_id);
                 self.table_assigns.insert(addr, to_table_id);
             }
         }
@@ -909,6 +911,207 @@ mod tests {
                 ]
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_rebalance_table() -> anyhow::Result<()> {
+        let mtt_props = MttProperties {
+            table_size: 6,
+            blind_base: 50,
+            blind_interval: 10000000,
+            start_time: 0,
+            ..Default::default()
+        };
+
+        let mut transactor = TestClient::transactor("Tx");
+        let game_account = TestGameAccountBuilder::default()
+            .with_data(mtt_props)
+            .set_transactor(&transactor)
+            .build();
+        let mut ctx = GameContext::try_new(&game_account).unwrap();
+        let mut handler = TestHandler::<Mtt>::init_state(&mut ctx, &game_account).unwrap();
+
+        let p0 = TestClient::player("p0");
+        let p1 = TestClient::player("p1");
+        let p2 = TestClient::player("p2");
+        let p3 = TestClient::player("p3");
+        let p4 = TestClient::player("p4");
+        let p5 = TestClient::player("p5");
+        let p6 = TestClient::player("p6");
+        let p7 = TestClient::player("p7");
+        let p8 = TestClient::player("p8");
+        let p9 = TestClient::player("p9");
+        let pa = TestClient::player("pa");
+        let pb = TestClient::player("pb");
+        let pc = TestClient::player("pc");
+        let pd = TestClient::player("pd");
+        let pe = TestClient::player("pe");
+        let pf = TestClient::player("pf");
+
+        let sync_evt = create_sync_event(
+            &ctx,
+            &[
+                &p0, &p1, &p2, &p3, &p4, &p5, &p6, &p7, &p8, &p9, &pa, &pb, &pc, &pd, &pe, &pf,
+            ],
+            &transactor,
+        );
+
+        handler.handle_until_no_events(&mut ctx, &sync_evt, vec![&mut transactor])?;
+
+        let wait_timeout_evt = Event::WaitingTimeout;
+        handler.handle_until_no_events(&mut ctx, &wait_timeout_evt, vec![&mut transactor])?;
+        {
+            let state = handler.get_state();
+            assert_eq!(state.games.len(), 3);
+            for game in state.games.values() {
+                assert!(game.player_map.len() == 6 || game.player_map.len() == 5);
+                assert_eq!(game.stage, HoldemStage::Play);
+            }
+            // Table assigns:
+            // 1. 6 players: ["p6", "p9", "pc", "pf", "p0", "p3"]
+            // 2. 5 players: ["p7", "pa", "pd", "p1", "p4"]
+            // 3. 5 players: ["p8", "pb", "pe", "p2", "p5"]
+        }
+
+        // For table #1, kick out 3 players: pc, pf, p0
+        let t1_allins = vec![
+            pc.custom_event(GameEvent::Raise(10000)),
+            pf.custom_event(GameEvent::Call),
+            p0.custom_event(GameEvent::Call),
+            p3.custom_event(GameEvent::Call),
+            p6.custom_event(GameEvent::Fold),
+            p9.custom_event(GameEvent::Fold),
+        ];
+        ctx.add_revealed_random(
+            1,
+            HashMap::from([
+                (0, "sk".to_string()), // p0
+                (1, "s2".to_string()),
+                (2, "ca".to_string()), // p3
+                (3, "da".to_string()),
+                (4, "d7".to_string()), // p6
+                (5, "c5".to_string()),
+                (6, "h4".to_string()), // p9
+                (7, "h6".to_string()),
+                (8, "sa".to_string()), // pc
+                (9, "sj".to_string()),
+                (10, "da".to_string()), // pf
+                (11, "dq".to_string()),
+                (12, "st".to_string()), // board
+                (13, "ct".to_string()),
+                (14, "d4".to_string()),
+                (15, "d8".to_string()),
+                (16, "s9".to_string()),
+            ]),
+        )?;
+        for evt in t1_allins {
+            handler.handle_until_no_events(&mut ctx, &evt, vec![&mut transactor])?;
+        }
+
+        // For table #2 and #3, kick out 2 players from each
+        // table #2: pd, p1
+        // table #3: pe, p5
+        let t2_allins = vec![
+            pd.custom_event(GameEvent::Raise(10000)),
+            p1.custom_event(GameEvent::Call),
+            p4.custom_event(GameEvent::Call),
+        ];
+        ctx.add_revealed_random(
+            2,
+            HashMap::from([
+                (0, "sk".to_string()), // p1
+                (1, "s2".to_string()),
+                (2, "ca".to_string()), // p4
+                (3, "da".to_string()),
+                (4, "d7".to_string()), // p7
+                (5, "c5".to_string()),
+                (6, "h4".to_string()), // pa
+                (7, "h6".to_string()),
+                (8, "sa".to_string()), // pd
+                (9, "sj".to_string()),
+                (10, "st".to_string()), // board
+                (11, "ct".to_string()),
+                (12, "d4".to_string()),
+                (13, "d8".to_string()),
+                (14, "s9".to_string()),
+            ]),
+        )?;
+
+        // for evt in t2_allins {
+        //     handler.handle_until_no_events(&mut ctx, &evt, vec![&mut transactor])?;
+        // }
+        //
+        // let t3_allins = vec![
+        //     pe.custom_event(GameEvent::Raise(10000)),
+        //     p2.custom_event(GameEvent::Call),
+        //     p5.custom_event(GameEvent::Call),
+        // ];
+        ctx.add_revealed_random(
+            3,
+            HashMap::from([
+                (0, "sk".to_string()), // p2
+                (1, "s2".to_string()),
+                (2, "ca".to_string()), // p5
+                (3, "da".to_string()),
+                (4, "d7".to_string()), // p8
+                (5, "c5".to_string()),
+                (6, "h4".to_string()), // pb
+                (7, "h6".to_string()),
+                (8, "sa".to_string()), // pe
+                (9, "sj".to_string()),
+                (10, "st".to_string()), // board
+                (11, "ct".to_string()),
+                (12, "d4".to_string()),
+                (13, "d8".to_string()),
+                (14, "s9".to_string()),
+            ]),
+        )?;
+
+        // for evt in t3_allins {
+        //     handler.handle_until_no_events(&mut ctx, &evt, vec![&mut transactor])?;
+        // }
+        //
+        // let t1_fold = vec![
+        //     p6.custom_event(GameEvent::Fold),
+        //     p9.custom_event(GameEvent::Fold),
+        // ];
+        //
+        // for evt in t1_fold {
+        //     handler.handle_until_no_events(&mut ctx, &evt, vec![&mut transactor])?;
+        // }
+        //
+        // let t2_fold = vec![
+        //     p7.custom_event(GameEvent::Fold),
+        //     pa.custom_event(GameEvent::Fold),
+        // ];
+        // for evt in t2_fold {
+        //     handler.handle_until_no_events(&mut ctx, &evt, vec![&mut transactor])?;
+        // }
+        //
+        // let t3_fold = vec![
+        //     p8.custom_event(GameEvent::Fold),
+        //     pb.custom_event(GameEvent::Fold),
+        // ];
+        //
+        // for evt in t3_fold {
+        //     handler.handle_until_no_events(&mut ctx, &evt, vec![&mut transactor])?;
+        // }
+
+        // {
+        //     let state = handler.get_state();
+        //     assert_eq!(state.games.len(), 3);
+        //     assert_eq!(
+        //         *state.ranks.first().unwrap(),
+        //         PlayerRank::new("p3", 40150, PlayerRankStatus::Alive)
+        //     );
+        //     println!("Ranks: {:?}", state.ranks);
+        //     assert_eq!(
+        //         *state.ranks.last().unwrap(),
+        //         PlayerRank::new("pf", 0, PlayerRankStatus::Out)
+        //     );
+        // }
 
         Ok(())
     }

@@ -90,7 +90,7 @@ impl Holdem {
                 true
             }
         });
-        println!("== Remove these players: {:?}", removed);
+        println!("Remove these players: {:?}", removed);
         removed
     }
 
@@ -253,7 +253,7 @@ impl Holdem {
     ) -> Result<(), HandleError> {
         let timeout = self.get_action_time();
         if let Some(player) = self.player_map.get_mut(&player_addr) {
-            println!("== Asking {} to act", player.addr);
+            println!("Asking {} to act", player.addr);
             player.status = PlayerStatus::Acting;
             self.acting_player = Some(ActingPlayer {
                 addr: player.addr(),
@@ -288,7 +288,7 @@ impl Holdem {
             .collect();
         player_pos.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
         let player_order: Vec<String> = player_pos.into_iter().map(|(addr, _)| addr).collect();
-        println!("== Player order {:?}", player_order);
+        println!("Player order {:?}", player_order);
         self.player_order = player_order;
         Ok(())
     }
@@ -392,7 +392,7 @@ impl Holdem {
         bets.sort_by(|b1, b2| b1.cmp(b2));
         bets.dedup();
         println!(
-            "== In Street {:?} with these Bets: {:?}",
+            "In Street {:?} with these Bets: {:?}",
             self.street, self.bet_map
         );
 
@@ -446,7 +446,7 @@ impl Holdem {
             }
         }
 
-        println!("== Pots after collecting bets: {:?}", self.pots);
+        println!("Pots after collecting bets: {:?}", self.pots);
         self.display.push(Display::CollectBets {
             bet_map: self.bet_map.clone(),
         });
@@ -466,7 +466,7 @@ impl Holdem {
         }
         self.collect_bets()?;
         self.street = new_street;
-        println!("== Street changes to {:?}", self.street);
+        println!("Street changes to {:?}", self.street);
         self.min_raise = self.bb;
         self.street_bet = 0;
         self.acting_player = None;
@@ -519,19 +519,19 @@ impl Holdem {
                     (players_cnt..(players_cnt + 3)).collect::<Vec<usize>>(),
                 );
                 self.stage = HoldemStage::ShareKey;
-                println!("== Board is {:?}", self.board);
+                println!("Board is {:?}", self.board);
             }
 
             Street::Turn => {
                 effect.reveal(self.deck_random_id, vec![players_cnt + 3]);
                 self.stage = HoldemStage::ShareKey;
-                println!("== Board is {:?}", self.board);
+                println!("Board is {:?}", self.board);
             }
 
             Street::River => {
                 effect.reveal(self.deck_random_id, vec![players_cnt + 4]);
                 self.stage = HoldemStage::ShareKey;
-                println!("== Board is {:?}", self.board);
+                println!("Board is {:?}", self.board);
             }
 
             // For Runner, update 5 community cards at once
@@ -547,7 +547,7 @@ impl Holdem {
                 }
                 let board = self.board.clone();
                 self.hand_history.set_board(board);
-                println!("== Board is {:?}", self.board);
+                println!("Board is {:?}", self.board);
             }
             _ => {}
         }
@@ -613,7 +613,7 @@ impl Holdem {
             .ok_or(errors::internal_player_not_found())?;
 
         println!(
-            "== Player {} to get the {} odd chips",
+            "Player {} to get the {} odd chips",
             remainder_player, odd_chips
         );
         prize_map
@@ -633,10 +633,10 @@ impl Holdem {
             match self.prize_map.get(&player.addr) {
                 Some(prize) => {
                     player.chips += *prize;
-                    println!("== Player {} won {} chips", player.addr, *prize);
+                    println!("Player {} won {} chips", player.addr, *prize);
                 }
                 None => {
-                    println!("== Player {} lost the bet", player.addr);
+                    println!("Player {} lost the bet", player.addr);
                 }
             }
         }
@@ -708,8 +708,8 @@ impl Holdem {
 
         self.winners = Vec::<String>::with_capacity(self.player_map.len());
 
-        println!("== Chips map before awarding: {:?}", chips_change_map);
-        println!("== Totol bet map: {:?}", self.total_bet_map);
+        println!("Chips map before awarding: {:?}", chips_change_map);
+        println!("Totol bet map: {:?}", self.total_bet_map);
 
         for (player, total_bet) in self.total_bet_map.iter() {
             chips_change_map
@@ -726,7 +726,7 @@ impl Holdem {
                 .and_modify(|chips| *chips += *prize as i64);
         }
 
-        println!("== Chips map after awarding: {:?}", chips_change_map);
+        println!("Chips map after awarding: {:?}", chips_change_map);
 
         for (addr, player) in self.player_map.iter() {
             let prize = if let Some(p) = self.prize_map.get(addr).copied() {
@@ -903,7 +903,7 @@ impl Holdem {
             winners.extend_from_slice(&weaker);
         }
 
-        println!("== Player rankings in order: {:?}", winners);
+        println!("Player rankings in order: {:?}", winners);
 
         self.assign_winners(winners)?;
         self.calc_prize()?;
@@ -1036,6 +1036,7 @@ impl Holdem {
 
             // Reveal all cards for eligible players: not folded and without init status
             for (addr, idxs) in self.hand_index_map.iter() {
+                println!("player {} with hand idxs {:?}", addr, idxs);
                 let Some(player) = self.player_map.get(addr) else {
                     return Err(errors::internal_player_not_in_game_but_assigned_cards());
                 };
@@ -1263,11 +1264,11 @@ impl Holdem {
         self.display.clear();
 
         let next_btn = self.get_next_btn()?;
-        println!("== Next BTN: {}", next_btn);
+        println!("Next BTN: {}", next_btn);
         self.btn = next_btn;
 
         let player_num = self.player_map.len();
-        println!("== {} players in game", player_num);
+        println!("{} players in game", player_num);
 
         if player_num >= 2 {
             // Prepare randomness (shuffling cards)
@@ -1343,7 +1344,7 @@ impl GameHandler for Holdem {
                 self.display.clear();
                 self.reset_player_timeout(&sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
-                println!("== Player action event: {:?}, sender: {:?}", event, sender);
+                println!("Player action event: {:?}, sender: {:?}", event, sender);
                 self.handle_custom_event(effect, event, sender.clone())?;
                 Ok(())
             }
@@ -1466,7 +1467,7 @@ impl GameHandler for Holdem {
                 self.display.clear();
 
                 let next_btn = self.get_next_btn()?;
-                println!("== Game starts and next BTN: {}", next_btn);
+                println!("Game starts and next BTN: {}", next_btn);
                 self.btn = next_btn;
 
                 // Prepare randomness (shuffling cards)
@@ -1482,7 +1483,7 @@ impl GameHandler for Holdem {
             Event::Leave { player_addr } => {
                 // TODO: Leaving is not allowed in SNG game
                 self.display.clear();
-                println!("== Player {} decides to leave game", player_addr);
+                println!("Player {} decides to leave game", player_addr);
 
                 let Some(leaving_player) = self.player_map.get_mut(&player_addr) else {
                     return Err(HandleError::Custom(
