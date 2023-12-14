@@ -20,6 +20,7 @@
               extensions = [ "rust-src" ];
               targets = [ "wasm32-unknown-unknown" ];
             })
+            rust-analyzer
             openssl
             pkg-config
             cargo
