@@ -32,7 +32,7 @@ mod tests;
 
 pub type TableId = u8;
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug)]
 pub enum MttStage {
     #[default]
     Init,
@@ -604,7 +604,6 @@ impl Mtt {
                     .get_mut(&to_table_id)
                     .ok_or(errors::error_player_not_found())?;
                 to_table.internal_add_players(add_players)?;
-                println!("Moved player {} to table {}", addr, to_table_id);
                 self.table_assigns.insert(addr, to_table_id);
             }
         }

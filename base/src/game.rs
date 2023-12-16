@@ -1036,7 +1036,6 @@ impl Holdem {
 
             // Reveal all cards for eligible players: not folded and without init status
             for (addr, idxs) in self.hand_index_map.iter() {
-                println!("player {} with hand idxs {:?}", addr, idxs);
                 let Some(player) = self.player_map.get(addr) else {
                     return Err(errors::internal_player_not_in_game_but_assigned_cards());
                 };
