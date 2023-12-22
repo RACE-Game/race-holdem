@@ -420,6 +420,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
     let mut sorted_cards: Vec<&str> = cards.iter().map(|c| *c).collect();
     sorted_cards.sort_by(|&c1, &c2| compare_kinds(c1, c2));
     let (has_straights, straights) = find_straights(&sorted_cards);
+    let sflush = find_straight_flush(&flush_cards, &straights);
 
     // royal flush
     if has_royal {
@@ -431,8 +432,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         }
     }
     // straight flush
-    else if has_flush && has_straights {
-        let sflush = find_straight_flush(&flush_cards, &straights);
+    else if !sflush.is_empty() {
         let picks = sflush[0].to_vec();
         let value = tag_value(&picks, 8);
         PlayerHand {
