@@ -702,6 +702,7 @@ fn test_play_game() -> Result<()> {
         // In state.player_order: [Carol, Dave, Eva, Alice, Bob]
 
         // UTG decides to leave
+        println!("context {:?}", ctx);
         let eva_leave = Event::Leave {
             player_addr: "Eva".to_string(),
         };
