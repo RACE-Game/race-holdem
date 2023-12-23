@@ -1,7 +1,7 @@
 //! Holdem essentials such as bet, player, pot, street and so on.
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_api::prelude::{CustomEvent, HandleError};
+use race_api::prelude::{CustomEvent, HandleError, Settle};
 use std::collections::BTreeMap;
 
 pub const MAX_ACTION_TIMEOUT_COUNT: u8 = 2;
@@ -17,6 +17,7 @@ pub const WAIT_TIMEOUT_RUNNER: u64 = 13_000;
 
 pub const RAKE_SLOT_ID: u8 = 0;
 
+/// Holdem Modes in which a specific table type is defined
 #[derive(BorshSerialize, BorshDeserialize, Default, PartialEq, Debug, Clone, Copy)]
 pub enum GameMode {
     #[default]
@@ -25,6 +26,7 @@ pub enum GameMode {
     Mtt,
 }
 
+/// Players' status during the entire game life
 #[derive(BorshSerialize, BorshDeserialize, Default, PartialEq, Debug, Clone, Copy)]
 pub enum PlayerStatus {
     #[default]
@@ -38,12 +40,14 @@ pub enum PlayerStatus {
     Out,
 }
 
+
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub struct InternalPlayerJoin {
     pub addr: String,
     pub chips: u64,
 }
 
+/// Representation of a specific player in the game
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct Player {
     pub addr: String,
@@ -124,6 +128,8 @@ impl Player {
     }
 }
 
+
+/// Representation of the player who should be acting at the moment
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 pub struct ActingPlayer {
     pub addr: String,
@@ -131,6 +137,7 @@ pub struct ActingPlayer {
     pub clock: u64, // action clock
 }
 
+/// Representation of Holdem pot
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 pub struct Pot {
     pub owners: Vec<String>,
@@ -153,6 +160,7 @@ impl Pot {
     }
 }
 
+/// Holdem Streets
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default, Copy, Clone)]
 pub enum Street {
     #[default]
@@ -164,6 +172,7 @@ pub enum Street {
     Showdown,
 }
 
+/// Holdem stages for micro-management of the game
 #[derive(Default, BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub enum HoldemStage {
     #[default]
@@ -175,6 +184,7 @@ pub enum HoldemStage {
     Showdown,
 }
 
+/// Representation of a specific on-chain Holdem game account
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct HoldemAccount {
     pub sb: u64,
@@ -196,6 +206,8 @@ impl Default for HoldemAccount {
     }
 }
 
+/// Holdem specific custom events.  Transactor will pass through such events to the game handler.
+/// Also see [`race_api::event::Event::Custom`].
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub enum GameEvent {
     Bet(u64),
@@ -207,6 +219,25 @@ pub enum GameEvent {
 
 impl CustomEvent for GameEvent {}
 
+/// Holdem specific bridge events for interaction with the `mtt` crate.  Transactor will pass
+/// through such events to the mtt handler.  Also see [`race_api::event::Event::Bridge`].
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
+pub enum HoldemBridge {
+    MovePlayer,
+    CloseTable,
+    GameResult,
+    CanStart,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
+pub struct GameResult {
+    pub table_id: usize,
+    pub settles: Vec<Settle>,
+}
+// impl BrigeEvent for HoldemBridge{}
+
+
+/// The following structs are used for the front-end to display animations.
 // A pot used for awarding winners
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
 pub struct AwardPot {
@@ -223,7 +254,6 @@ pub struct PlayerResult {
     pub position: usize,
 }
 
-/// Used for animation (with necessary audio effects)
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub enum Display {
     DealCards,

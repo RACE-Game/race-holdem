@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::errors;
 use crate::essential::{
-    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage,
+    ActingPlayer, AwardPot, Display, GameEvent, GameMode, GameResult, HoldemAccount, HoldemBridge, HoldemStage,
     InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP,
     ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT,
     WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_LAST_PLAYER, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN,
@@ -927,6 +927,11 @@ impl Holdem {
             for addr in removed_addrs {
                 effect.settle(Settle::eject(addr));
             }
+        } else if self.mode == GameMode::Mtt {
+            let game_result = GameResult {
+                table_id: 0,
+                settles: effect.settles.clone()
+            };
         }
 
         if rake > 0 {

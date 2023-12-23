@@ -16,9 +16,9 @@
 //!
 
 mod errors;
+mod mtt_table;
 
 use std::collections::BTreeMap;
-
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::{prelude::*, types::SettleOp};
 use race_holdem_base::{
