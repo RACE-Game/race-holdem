@@ -17,7 +17,7 @@ fn test_join_on_preflop() -> Result<()> {
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -33,7 +33,7 @@ fn test_join_on_preflop() -> Result<()> {
         );
     }
 
-    let charlie_sync_evt = create_sync_event(&ctx, &[&charlie], &transactor);
+    let charlie_sync_evt = create_sync_event(&mut ctx, &[&charlie], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &charlie_sync_evt,
@@ -80,7 +80,7 @@ fn test_on_preflop_then_runner() -> Result<()> {
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
 
     handler.handle_until_no_events(
         &mut ctx,
@@ -97,7 +97,7 @@ fn test_on_preflop_then_runner() -> Result<()> {
         );
     }
 
-    let charlie_sync_evt = create_sync_event(&ctx, &[&charlie], &transactor);
+    let charlie_sync_evt = create_sync_event(&mut ctx, &[&charlie], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &charlie_sync_evt,

@@ -180,121 +180,169 @@ fn find_flush<'a>(cards: &Vec<&'a str>) -> (bool, Vec<&'a str>) {
     (false, vec![])
 }
 
-/// Check the cards against each straight of all straights.
-/// In each loop, immediately add the first match to results.
-/// To be used only inside the `find_straights` below.
-fn match_straight<'a>(cards: Vec<&'a str>, result: &mut Vec<Vec<&'a str>>) {
-    let straights: [[u8; 5]; 10] = [
-        [14, 13, 12, 11, 10],
-        [13, 12, 11, 10, 9],
-        [12, 11, 10, 9, 8],
-        [11, 10, 9, 8, 7],
-        [10, 9, 8, 7, 6],
-        [9, 8, 7, 6, 5],
-        [8, 7, 6, 5, 4],
-        [7, 6, 5, 4, 3],
-        [6, 5, 4, 3, 2],
-        [5, 4, 3, 2, 14],
-    ];
+const POSSIBLE_STRAIGHTS_ORDERS: [[u8; 5]; 10] = [
+    [14, 13, 12, 11, 10],
+    [13, 12, 11, 10, 9],
+    [12, 11, 10, 9, 8],
+    [11, 10, 9, 8, 7],
+    [10, 9, 8, 7, 6],
+    [9, 8, 7, 6, 5],
+    [8, 7, 6, 5, 4],
+    [7, 6, 5, 4, 3],
+    [6, 5, 4, 3, 2],
+    [5, 4, 3, 2, 14],
+];
 
-    for straight in straights {
-        let hit: Vec<&str> = cards
-            .iter()
-            .zip(straight.iter())
-            .filter(|(&c, &k)| kind_to_order(c) == k)
-            .map(|(&c, _)| c)
-            .collect();
-
-        if hit.len() == 5 {
-            result.push(hit);
-            break;
-        }
-    }
-}
-
-/// This fn accpets only sorted-by-kind cards.
 fn find_straights<'a>(cards: &Vec<&'a str>) -> (bool, Vec<Vec<&'a str>>) {
-    let sorted_by_kinds: Vec<&str> = cards.iter().copied().collect();
-    let mut result: Vec<Vec<&str>> = vec![];
-    let cards_to_kinds: Vec<u8> = sorted_by_kinds.iter().map(|&c| kind_to_order(c)).collect();
-
-    // Group cards by kind to check if any 2 or more cards have the same kind
-    // Each same kind will produce one straight
-    let mut groups: HashMap<u8, Vec<&str>> = HashMap::with_capacity(7);
-    for (idx, kind) in cards_to_kinds.iter().enumerate() {
-        groups
-            .entry(*kind)
-            .and_modify(|grp| grp.push(sorted_by_kinds[idx]))
-            .or_insert(vec![sorted_by_kinds[idx]]);
-    }
-
-    // Four of a kind so no straights
-    if groups.len() == 4 {
-        return (false, vec![vec!["Four of A Kind"]]);
-    }
-
-    let same_kinds: Vec<Vec<&str>> = groups
-        .values()
-        .filter(|c| c.len() > 1)
-        .map(|c| c[..].to_vec())
-        .collect();
-
-    // Flatten vec of same kinds to a vec of a single kind and collect results
-    // into a collection (2d vec) for all possible straights
-    let mut coll: Vec<Vec<&str>> = if same_kinds.len() > 0 {
-        same_kinds
-            .into_iter()
-            .flatten()
-            .into_iter()
-            .map(|kind| vec![kind])
-            .collect()
-    } else {
-        vec![vec![]]
+    let order_to_cards = |o: u8| {
+        cards
+            .iter()
+            .filter(|c| kind_to_order(c) == o)
+            .map(|c| *c)
+            .collect::<Vec<&str>>()
     };
 
-    let other_kinds: Vec<&str> = groups
-        .values()
-        .filter(|c| c.len() == 1)
-        .map(|c| c[0])
-        .collect();
+    let mut results = Vec::new();
+    for orders in POSSIBLE_STRAIGHTS_ORDERS {
+        let cards_vec = orders
+            .iter()
+            .map(|o| order_to_cards(*o))
+            .collect::<Vec<Vec<&str>>>();
 
-    // Also need to create combination with Ace ("_a", if any) for 5-high straight
-    let mut cards_with_ace: Vec<Vec<&str>> = Vec::new();
-    for ele in coll.iter_mut() {
-        ele.extend_from_slice(&other_kinds);
-        ele.sort_by(|&c1, &c2| compare_kinds(c1, c2));
-        if ele[0].contains("a") {
-            let mut new_ele = ele.iter().skip(1).copied().collect::<Vec<&str>>();
-            new_ele.push(ele[0]);
-            cards_with_ace.push(new_ele);
+        for ca in cards_vec[0].iter() {
+            for cb in cards_vec[1].iter() {
+                for cc in cards_vec[2].iter() {
+                    for cd in cards_vec[3].iter() {
+                        for ce in cards_vec[4].iter() {
+                            results.push(vec![*ca, *cb, *cc, *cd, *ce])
+                        }
+                    }
+                }
+            }
         }
     }
 
-    coll.append(&mut cards_with_ace);
-
-    for ele in coll.into_iter() {
-        if ele.len() == 7 {
-            for start in 0..=2 {
-                let hand: Vec<&str> = ele[start..=(start + 4)].to_vec();
-                match_straight(hand, &mut result);
-            }
-        } else if ele.len() == 6 {
-            for start in 0..=1 {
-                let hand: Vec<&str> = ele[start..=(start + 4)].to_vec();
-                match_straight(hand, &mut result);
-            }
-        } else {
-            match_straight(ele, &mut result);
-        }
-    }
-
-    if result.len() >= 1 {
-        (true, result)
+    if results.is_empty() {
+        (false, results)
     } else {
-        (false, result)
+        (true, results)
     }
-
 }
+
+// /// Check the cards against each straight of all straights.
+// /// In each loop, immediately add the first match to results.
+// /// To be used only inside the `find_straights` below.
+// fn match_straight<'a>(cards: Vec<&'a str>, result: &mut Vec<Vec<&'a str>>) {
+//     let straights: [[u8; 5]; 10] = [
+//         [14, 13, 12, 11, 10],
+//         [13, 12, 11, 10, 9],
+//         [12, 11, 10, 9, 8],
+//         [11, 10, 9, 8, 7],
+//         [10, 9, 8, 7, 6],
+//         [9, 8, 7, 6, 5],
+//         [8, 7, 6, 5, 4],
+//         [7, 6, 5, 4, 3],
+//         [6, 5, 4, 3, 2],
+//         [5, 4, 3, 2, 14],
+//     ];
+
+//     for straight in straights {
+//         let hit: Vec<&str> = cards
+//             .iter()
+//             .zip(straight.iter())
+//             .filter(|(&c, &k)| kind_to_order(c) == k)
+//             .map(|(&c, _)| c)
+//             .collect();
+
+//         if hit.len() == 5 {
+//             result.push(hit);
+//             break;
+//         }
+//     }
+// }
+
+// /// This fn accpets only sorted-by-kind cards.
+// fn find_straights<'a>(cards: &Vec<&'a str>) -> (bool, Vec<Vec<&'a str>>) {
+//     let sorted_by_kinds: Vec<&str> = cards.iter().copied().collect();
+//     let mut result: Vec<Vec<&str>> = vec![];
+//     let cards_to_kinds: Vec<u8> = sorted_by_kinds.iter().map(|&c| kind_to_order(c)).collect();
+
+//     // Group cards by kind to check if any 2 or more cards have the same kind
+//     // Each same kind will produce one straight
+//     let mut groups: HashMap<u8, Vec<&str>> = HashMap::with_capacity(7);
+//     for (idx, kind) in cards_to_kinds.iter().enumerate() {
+//         groups
+//             .entry(*kind)
+//             .and_modify(|grp| grp.push(sorted_by_kinds[idx]))
+//             .or_insert(vec![sorted_by_kinds[idx]]);
+//     }
+
+//     // Four of a kind so no straights
+//     if groups.len() == 4 {
+//         return (false, vec![vec!["Four of A Kind"]]);
+//     }
+
+//     let same_kinds: Vec<Vec<&str>> = groups
+//         .values()
+//         .filter(|c| c.len() > 1)
+//         .map(|c| c[..].to_vec())
+//         .collect();
+
+//     // Flatten vec of same kinds to a vec of a single kind and collect results
+//     // into a collection (2d vec) for all possible straights
+//     let mut coll: Vec<Vec<&str>> = if same_kinds.len() > 0 {
+//         same_kinds
+//             .into_iter()
+//             .flatten()
+//             .into_iter()
+//             .map(|kind| vec![kind])
+//             .collect()
+//     } else {
+//         vec![vec![]]
+//     };
+
+//     let other_kinds: Vec<&str> = groups
+//         .values()
+//         .filter(|c| c.len() == 1)
+//         .map(|c| c[0])
+//         .collect();
+
+//     // Also need to create combination with Ace ("_a", if any) for 5-high straight
+//     let mut cards_with_ace: Vec<Vec<&str>> = Vec::new();
+//     for ele in coll.iter_mut() {
+//         ele.extend_from_slice(&other_kinds);
+//         ele.sort_by(|&c1, &c2| compare_kinds(c1, c2));
+//         if ele[0].contains("a") {
+//             let mut new_ele = ele.iter().skip(1).copied().collect::<Vec<&str>>();
+//             new_ele.push(ele[0]);
+//             cards_with_ace.push(new_ele);
+//         }
+//     }
+
+//     coll.append(&mut cards_with_ace);
+
+//     for ele in coll.into_iter() {
+//         if ele.len() == 7 {
+//             for start in 0..=2 {
+//                 let hand: Vec<&str> = ele[start..=(start + 4)].to_vec();
+//                 match_straight(hand, &mut result);
+//             }
+//         } else if ele.len() == 6 {
+//             for start in 0..=1 {
+//                 let hand: Vec<&str> = ele[start..=(start + 4)].to_vec();
+//                 match_straight(hand, &mut result);
+//             }
+//         } else {
+//             match_straight(ele, &mut result);
+//         }
+//     }
+
+//     if result.len() >= 1 {
+//         (true, result)
+//     } else {
+//         (false, result)
+//     }
+// }
 
 /// This fn accepts either sorted-by-kind or unsorted cards (preferable).
 /// It returns sorted-by-kind cards anyway.
@@ -544,7 +592,7 @@ mod tests {
 
         let (has_straights1, straights1) = find_straights(&cards1);
         assert!(has_straights1);
-        assert_eq!(4, straights1.len());
+        assert_eq!(2, straights1.len());
         assert_eq!(vec!["d9", "d8", "c7", "d6", "s5"], straights1[0]);
         assert_eq!(vec!["d9", "d8", "c7", "h6", "s5"], straights1[1]);
 
@@ -592,10 +640,26 @@ mod tests {
         let mut cards5 = create_cards(&board5, &hole_cards5);
         cards5.sort_by(|c1, c2| compare_kinds(c1, c2));
 
-        let (has_straights5, straights5) = find_straights(&cards5);
+        let (has_straights5, _straights5) = find_straights(&cards5);
         assert!(!has_straights5);
-        assert_eq!(vec!["Four of A Kind"], straights5[0]);
     }
+
+    #[test]
+    fn test_fullhouse() {
+        let hole_cards: [&str; 2] = ["sa", "h7"];
+        let board: [&str; 5] = ["ca", "d7", "c2", "ha", "d4"];
+        let result = evaluate_cards(create_cards(&board, &hole_cards));
+        assert_eq!(result.category, Category::FullHouse);
+    }
+
+    #[test]
+    fn test_four_of_a_kind() {
+        let hole_cards: [&str; 2] = ["sa", "h7"];
+        let board: [&str; 5] = ["ca", "d7", "da", "ha", "d4"];
+        let result = evaluate_cards(create_cards(&board, &hole_cards));
+        assert_eq!(result.category, Category::FourOfAKind);
+    }
+
 
     #[test]
     fn test_royal_flush() {
@@ -624,10 +688,10 @@ mod tests {
         assert!(has_f);
         assert!(has_s);
         assert_eq!(7, flush.len());
-        assert_eq!(5, straights.len());
+        assert_eq!(3, straights.len());
         assert_eq!(vec!["h7", "h6", "h5", "h4", "h3"], sf[0]);
         assert_eq!(vec!["h6", "h5", "h4", "h3", "h2"], sf[1]);
-        assert_eq!(vec!["h7", "h6", "h5", "h4", "h3"], sf[2]);
+        assert_eq!(vec!["h5", "h4", "h3", "h2", "ha"], sf[2]);
     }
 
     #[test]

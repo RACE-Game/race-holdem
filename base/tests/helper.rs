@@ -17,19 +17,19 @@ use race_holdem_base::game::*;
 // ======================================================
 pub fn initial_two_players() -> BTreeMap<String, Player> {
     BTreeMap::from([
-        ("Alice".into(), Player::new("Alice".into(), 1000, 0u16, 0)),
-        ("Bob".into(), Player::new("Bob".into(), 1000, 1u16, 0)),
+        ("Alice".into(), Player::new("Alice", 1000, 0u16, 0)),
+        ("Bob".into(), Player::new("Bob", 1000, 1u16, 0)),
     ])
 }
 
 pub fn initial_players() -> BTreeMap<String, Player> {
     BTreeMap::from([
-        ("Alice".into(), Player::new("Alice".into(), 1000, 0u16, 0)),
-        ("Bob".into(), Player::new("Bob".into(), 1000, 1u16, 0)),
-        ("Carol".into(), Player::new("Carol".into(), 1000, 2u16, 0)),
-        ("Dave".into(), Player::new("Dave".into(), 1000, 3u16, 0)),
-        ("Eva".into(), Player::new("Eva".into(), 1000, 4u16, 0)),
-        ("Frank".into(), Player::new("Frank".into(), 1000, 5u16, 0)),
+        ("Alice".into(), Player::new("Alice", 1000, 0u16, 0)),
+        ("Bob".into(), Player::new("Bob", 1000, 1u16, 0)),
+        ("Carol".into(), Player::new("Carol", 1000, 2u16, 0)),
+        ("Dave".into(), Player::new("Dave", 1000, 3u16, 0)),
+        ("Eva".into(), Player::new("Eva", 1000, 4u16, 0)),
+        ("Frank".into(), Player::new("Frank", 1000, 5u16, 0)),
     ])
 }
 
@@ -37,27 +37,27 @@ pub fn gaming_players() -> BTreeMap<String, Player> {
     BTreeMap::from([
         (
             "Alice".into(),
-            Player::new_with_status("Alice".into(), 1000, 0usize, PlayerStatus::Acting),
+            Player::new_with_status("Alice", 1000, 0usize, PlayerStatus::Acting),
         ),
         (
             "Bob".into(),
-            Player::new_with_status("Bob".into(), 200, 1usize, PlayerStatus::Acted),
+            Player::new_with_status("Bob", 200, 1usize, PlayerStatus::Acted),
         ),
         (
             "Carol".into(),
-            Player::new_with_status("Carol".into(), 0, 2usize, PlayerStatus::Allin),
+            Player::new_with_status("Carol", 0, 2usize, PlayerStatus::Allin),
         ),
         (
             "Dave".into(),
-            Player::new_with_status("Dave".into(), 780, 3usize, PlayerStatus::Acted),
+            Player::new_with_status("Dave", 780, 3usize, PlayerStatus::Acted),
         ),
         (
             "Eva".into(),
-            Player::new_with_status("Eva".into(), 650, 4usize, PlayerStatus::Acted),
+            Player::new_with_status("Eva", 650, 4usize, PlayerStatus::Acted),
         ),
         (
             "Frank".into(),
-            Player::new_with_status("Frank".into(), 800, 5usize, PlayerStatus::Fold),
+            Player::new_with_status("Frank", 800, 5usize, PlayerStatus::Fold),
         ),
     ])
 }
@@ -230,37 +230,19 @@ pub fn setup_holdem_game() -> Game {
 }
 
 pub fn create_sync_event(
-    ctx: &GameContext,
+    ctx: &mut GameContext,
     players: &[&TestClient],
     transactor: &TestClient,
 ) -> Event {
-    let av = ctx.get_access_version() + 1;
-    let max_players = 9usize;
-    let used_pos: Vec<usize> = ctx.get_players().iter().map(|p| p.position).collect();
+    ctx.add_node(transactor.get_addr(), ctx.get_access_version());
     let mut new_players = Vec::new();
     for (i, p) in players.iter().enumerate() {
-        let mut position = i;
-        // If a position already taken, append the new player to the last
-        if used_pos.get(position).is_some() {
-            if position + 1 < max_players {
-                position = ctx.count_players() as usize + 1;
-            } else {
-                println!("Game is full");
-            }
-        }
-        new_players.push(PlayerJoin {
+        new_players.push(GamePlayer {
             addr: p.get_addr(),
             balance: 10_000,
-            position: position as u16,
-            access_version: av,
-            verify_key: p.get_addr(),
+            position: i as _,
         })
     }
 
-    Event::Sync {
-        new_players,
-        new_servers: vec![],
-        transactor_addr: transactor.get_addr(),
-        access_version: av,
-    }
+    Event::Sync { new_players }
 }

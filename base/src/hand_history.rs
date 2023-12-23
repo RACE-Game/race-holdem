@@ -61,7 +61,7 @@ pub struct StreetActions {
     pub actions: Vec<PlayerAction>,
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct Showdown {
     pub hole_cards: Vec<String>,
     pub category: Category,

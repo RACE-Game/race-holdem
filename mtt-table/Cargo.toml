@@ -1,0 +1,17 @@
+[package]
+name = "race-holdem-mtt-table"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+race-api.workspace = true
+race-proc-macro.workspace = true
+borsh.workspace = true
+race-holdem-base = { path = "../base" }
+
+[dev-dependencies]
+race-test.workspace = true
+anyhow.workspace = true

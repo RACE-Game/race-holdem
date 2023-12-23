@@ -18,7 +18,7 @@ fn test_allin_case1() -> Result<()> {
     let mut carol = TestClient::player("Carol");
     let mut dave = TestClient::player("Dave");
 
-    let mut sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave], &transactor);
 
     {
         match &mut sync_evt {
@@ -111,7 +111,7 @@ fn test_allin_case2() -> Result<()> {
     let mut dave = TestClient::player("Dave");
     let mut frank = TestClient::player("Frank");
 
-    let mut sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave, &frank], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &frank], &transactor);
 
     {
         match &mut sync_evt {

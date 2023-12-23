@@ -23,7 +23,7 @@ fn test_players_order() -> Result<()> {
     let mut dave = TestClient::player("Dave");
     let mut eva = TestClient::player("Eva");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
 
     // ------------------------- GAMESTART ------------------------
     handler.handle_until_no_events(
@@ -64,7 +64,7 @@ fn test_eject_timeout() -> Result<()> {
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -163,7 +163,7 @@ fn test_eject_loser() -> Result<()> {
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -320,7 +320,7 @@ fn test_get_holecards_idxs() -> Result<()> {
     let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     // Syncing players to the game, i.e. they join the game and game kicks start
     handler.handle_until_no_events(
         &mut ctx,
@@ -348,7 +348,7 @@ fn test_runner() -> Result<()> {
     let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
 
     // Syncing players to the game, i.e. they join the game and game kicks start
     handler.handle_until_no_events(
@@ -387,7 +387,7 @@ fn test_runner() -> Result<()> {
 
         let state = handler.get_state();
         assert_eq!(state.street, Street::Preflop,);
-        assert_eq!(ctx.count_players(), 2);
+        assert_eq!(state.player_map.len(), 2);
         assert_eq!(ctx.get_status(), GameStatus::Running);
         assert_eq!(
             *ctx.get_dispatch(),
@@ -467,7 +467,7 @@ fn test_settle_stage() -> Result<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
 
     // Syncing players to the game, i.e. they join the game and game kicks start
     handler.handle_until_no_events(
@@ -557,7 +557,7 @@ fn test_abnormal_street() -> Result<()> {
     let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
 
     handler.handle_until_no_events(
         &mut ctx,
@@ -646,7 +646,7 @@ fn test_play_game() -> Result<()> {
     let mut dave = TestClient::player("Dave");
     let mut eva = TestClient::player("Eva");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
 
     // ------------------------- GAMESTART ------------------------
     handler.handle_until_no_events(
@@ -828,7 +828,7 @@ fn test_play_game() -> Result<()> {
         // 2. Frank should be in player_map but not in player_order
         // 3. Frank should not be assgined any cards, i.e., not in hand_index_map
         let mut frank = TestClient::player("Frank");
-        let frank_join = create_sync_event(&ctx, &[&frank], &transactor);
+        let frank_join = create_sync_event(&mut ctx, &[&frank], &transactor);
 
         handler.handle_until_no_events(
             &mut ctx,

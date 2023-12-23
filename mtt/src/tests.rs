@@ -138,7 +138,7 @@ fn test_close_table_success() -> anyhow::Result<()> {
     let alice = TestClient::player("Alice");
     let bob = TestClient::player("Bob");
     let carol = TestClient::player("Carol");
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol], &transactor);
 
     handler.handle_until_no_events(&mut ctx, &sync_evt, vec![&mut transactor])?;
     handler.handle_until_no_events(&mut ctx, &Event::WaitingTimeout, vec![&mut transactor])?;
@@ -317,7 +317,7 @@ pub fn integration_simple_game_test() -> anyhow::Result<()> {
     let alice = TestClient::player("Alice");
     let bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
 
     handler.handle_until_no_events(&mut ctx, &sync_evt, vec![&mut transactor])?;
 
@@ -399,7 +399,7 @@ pub fn integration_table_merge_test() -> anyhow::Result<()> {
     let dave = TestClient::player("Dave");
     let eva = TestClient::player("Eva");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
 
     handler.handle_until_no_events(&mut ctx, &sync_evt, vec![&mut transactor])?;
 

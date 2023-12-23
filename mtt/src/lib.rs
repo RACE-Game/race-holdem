@@ -16,7 +16,6 @@
 //!
 
 mod errors;
-mod mtt_table;
 
 use std::collections::BTreeMap;
 use borsh::{BorshDeserialize, BorshSerialize};

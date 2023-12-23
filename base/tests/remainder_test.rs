@@ -15,7 +15,7 @@ fn test_remainder() -> Result<()> {
     let mut bob = TestClient::player("Bob"); // BTN
     let mut carol = TestClient::player("Carol");
 
-    let mut sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol], &transactor);
 
     {
         match &mut sync_evt {

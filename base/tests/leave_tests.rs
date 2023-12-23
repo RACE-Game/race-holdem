@@ -17,7 +17,7 @@ fn test_players_leave() -> Result<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -99,7 +99,7 @@ fn test_settle_leave() -> Result<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -188,7 +188,7 @@ fn test_runner_leave() -> Result<()> {
         (8, "d4".to_string()),
     ]);
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -274,7 +274,7 @@ fn test_showdown_leave() -> Result<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -438,7 +438,7 @@ fn test_leave_in_multiplayers() -> Result<()> {
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -544,7 +544,7 @@ fn test_play_leave() -> Result<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,

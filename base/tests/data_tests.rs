@@ -14,7 +14,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 #[test]
 fn test_borsh_player() {
-    let player = Player::new("Alice".into(), 1000, 1u16, 0);
+    let player = Player::new("Alice", 1000, 1u16, 0);
     let player_ser = player.try_to_vec().unwrap();
     let player_de = Player::try_from_slice(&player_ser).unwrap();
     assert_eq!(player_de, player);

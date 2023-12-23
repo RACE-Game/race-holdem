@@ -19,7 +19,7 @@ fn test_preflop_fold() -> CoreResult<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
 
     {
         let state = handler.get_mut_state();
@@ -81,7 +81,7 @@ fn test_2() -> Result<()> {
     let mut bob = TestClient::player("Bob");
     let mut carol = TestClient::player("Carol");
 
-    let mut sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol], &transactor);
 
     {
         match &mut sync_evt {

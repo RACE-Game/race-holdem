@@ -12,7 +12,7 @@ fn test_headsup_action_timeout() -> Result<()> {
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -50,7 +50,7 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     // For sake of convenience, assume all players join the game at the same time
     let sync_evt = create_sync_event(
-        &ctx,
+        &mut ctx,
         &[&alice, &bob, &charlie, &dave, &eve, &frank, &grace],
         &transactor,
     );
