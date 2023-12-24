@@ -112,29 +112,31 @@ impl MttTable {
             HoldemBridgeEvent::StartGame {
                 sb,
                 bb,
-                checkpoint,
-                player_lookup,
+                left_players,
             } => {
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
-                self.player_lookup = player_lookup;
-                self.holdem.player_map.clear();
-                for p in checkpoint.players {
-                    let addr = self
-                        .find_player_addr(p.mtt_position)
-                        .ok_or(errors::internal_player_addr_missing())?;
-                    self.holdem.player_map.insert(
-                        addr.clone(),
-                        Player::new(addr, p.chips, p.table_position as _, 0),
-                    );
+                for mtt_pos in left_players {
+                    let p = self.player_lookup.remove(&mtt_pos).ok_or(errors::internal_player_position_missing())?;
+                    self.holdem.player_map.remove(&p.addr);
                 }
                 effect.start_game();
             }
+            HoldemBridgeEvent::AddPlayers { mut player_lookup } => {
+                for (_, player) in player_lookup.iter() {
+                    self.holdem.player_map.insert(player.addr.clone(), player.clone());
+                }
+                self.player_lookup.append(&mut player_lookup);
+            }
+            HoldemBridgeEvent::CloseTable => {
+                self.holdem.player_map.clear();
+            },
             _ => return Err(errors::internal_invalid_bridge_event()),
         };
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn find_player_addr(&self, game_position: u16) -> Option<String> {
         self.player_lookup
             .get(&game_position)

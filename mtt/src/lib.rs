@@ -19,16 +19,12 @@ mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::{prelude::*, types::SettleOp};
-use race_holdem_base::{
-    essential::{ActingPlayer, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
-    game::Holdem,
-};
-use race_holdem_mtt_base::{MttTableCheckpoint, MttTablePlayer};
+use race_holdem_base::essential::Player;
+use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
-use std::{collections::BTreeMap, string::Drain};
+use std::collections::BTreeMap;
 
-#[cfg(test)]
-mod tests;
+const SUBGAME_BUNDLE_ADDR: &str = "";
 
 pub type TableId = u8;
 
@@ -53,7 +49,22 @@ pub struct PlayerRank {
     chips: u64,
     status: PlayerRankStatus,
     position: u16,
-    table_id: u8,
+}
+
+impl PlayerRank {
+    pub fn new<S: Into<String>>(
+        addr: S,
+        chips: u64,
+        status: PlayerRankStatus,
+        position: u16,
+    ) -> Self {
+        Self {
+            addr: addr.into(),
+            chips,
+            status,
+            position,
+        }
+    }
 }
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
@@ -63,17 +74,7 @@ pub struct PlayerRankCheckpoint {
     table_id: u8,
 }
 
-impl PlayerRank {
-    pub fn new<S: Into<String>>(addr: S, chips: u64, status: PlayerRankStatus) -> Self {
-        Self {
-            addr: addr.into(),
-            chips,
-            status,
-        }
-    }
-}
-
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindRuleItem {
     sb_x: u16,
     bb_x: u16,
@@ -92,11 +93,29 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
         .collect()
 }
 
-#[derive(Default, BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindInfo {
     blind_base: u64,
     blind_interval: u64,
     blind_rules: Vec<BlindRuleItem>,
+}
+
+impl Default for BlindInfo {
+    fn default() -> Self {
+        Self {
+            blind_base: 10,
+            blind_interval: 60_000,
+            blind_rules: default_blind_rules(),
+        }
+    }
+}
+
+impl BlindInfo {
+    pub fn with_default_blind_rules(&mut self) {
+        if self.blind_rules.is_empty() {
+            self.blind_rules = default_blind_rules();
+        }
+    }
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
@@ -114,48 +133,49 @@ pub struct MttCheckpoint {
     time_elapsed: u64,
 }
 
-impl MttCheckpoint {
-    fn find_rank_by_pos(&self, mtt_position: u16) -> Result<&PlayerRankCheckpoint, HandleError> {
-        self.ranks
-            .iter()
-            .find(|rank| rank.mtt_position.eq(&mtt_position))
-            .ok_or(errors::error_player_mtt_position_not_found())
-    }
+#[allow(dead_code)]
+fn find_checkpoint_rank_by_pos(
+    ranks: &[PlayerRankCheckpoint],
+    mtt_position: u16,
+) -> Result<&PlayerRankCheckpoint, HandleError> {
+    ranks
+        .iter()
+        .find(|rank| rank.mtt_position.eq(&mtt_position))
+        .ok_or(errors::error_player_mtt_position_not_found())
 }
 
-impl From<Mtt> for MttCheckpoint {
-    fn from(value: Mtt) -> Self {
+impl TryFrom<Mtt> for MttCheckpoint {
+    type Error = HandleError;
+
+    fn try_from(value: Mtt) -> HandleResult<Self> {
         let Mtt {
             start_time,
-            blind_info,
             time_elapsed,
             tables,
             ranks,
+            table_assigns,
             ..
         } = value;
 
-        let ranks = ranks
-            .into_iter()
-            .map(
-                |PlayerRank {
-                     chips,
-                     position,
-                     table_id,
-                     ..
-                 }| PlayerRankCheckpoint {
-                    mtt_position: position,
-                    chips,
-                    table_id,
-                },
-            )
-            .collect::<Vec<PlayerRankCheckpoint>>();
+        let mut ranks_checkpoint = Vec::new();
 
-        Self {
+        for rank in ranks {
+            let table_id = *table_assigns
+                .get(&rank.addr)
+                .ok_or(errors::error_player_not_found())?;
+            ranks_checkpoint.push(PlayerRankCheckpoint {
+                mtt_position: rank.position,
+                chips: rank.chips,
+                table_id,
+            });
+        }
+
+        Ok(Self {
             start_time,
-            ranks,
+            ranks: ranks_checkpoint,
             tables,
             time_elapsed,
-        }
+        })
     }
 }
 
@@ -181,7 +201,7 @@ impl GameHandler for Mtt {
         let MttAccountData {
             start_time,
             table_size,
-            blind_info,
+            mut blind_info,
         } = init_account.data()?;
         let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
 
@@ -192,25 +212,18 @@ impl GameHandler for Mtt {
                 let mut ranks = Vec::<PlayerRank>::new();
 
                 for p in init_account.players.into_iter() {
-                    let table_id = checkpoint.find_rank_by_pos(p.position)?.table_id;
-                    let GamePlayer {
-                        addr,
-                        position,
-                        balance,
-                    } = p;
-
-                    table_assigns.insert(p.addr.clone(), table_id);
-
+                    let GamePlayer { addr, position, .. } = p;
+                    let r = find_checkpoint_rank_by_pos(&checkpoint.ranks, p.position)?;
+                    table_assigns.insert(addr.clone(), r.table_id);
                     ranks.push(PlayerRank {
                         addr,
-                        chips: balance,
-                        status: if balance > 0 {
+                        chips: r.chips,
+                        status: if r.chips > 0 {
                             PlayerRankStatus::Alive
                         } else {
                             PlayerRankStatus::Out
                         },
                         position,
-                        table_id,
                     });
                 }
                 (
@@ -237,6 +250,8 @@ impl GameHandler for Mtt {
             .filter(|rank| rank.status == PlayerRankStatus::Alive)
             .count();
 
+        blind_info.with_default_blind_rules();
+
         Ok(Self {
             start_time,
             alives,
@@ -256,9 +271,6 @@ impl GameHandler for Mtt {
         self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
         self.timestamp = effect.timestamp();
 
-        let mut updated_table_ids: Vec<TableId> = Vec::with_capacity(5);
-        let mut no_timeout = false; // We try to dispatch ActionTimeout by default
-
         match event {
             Event::Ready => {
                 // Schedule the startup
@@ -269,21 +281,48 @@ impl GameHandler for Mtt {
                 }
             }
 
-            Event::Sync { new_players, .. } => {
-            }
+            Event::Sync { new_players } => match self.stage {
+                MttStage::Init => {
+                    for p in new_players {
+                        self.ranks.push(PlayerRank {
+                            addr: p.addr,
+                            chips: p.balance,
+                            status: PlayerRankStatus::Alive,
+                            position: p.position,
+                        });
+                    }
+                }
+                _ => {
+                    for p in new_players {
+                        effect.settle(Settle::eject(p.addr))
+                    }
+                    effect.checkpoint();
+                }
+            },
 
             Event::GameStart { .. } => {
+                self.create_tables(effect)?;
             }
 
-            Event::Bridge { dest, raw } => {
-
+            Event::Bridge { raw, .. } => {
+                let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
+                match bridge_event {
+                    HoldemBridgeEvent::GameResult {
+                        table_id,
+                        settles,
+                        checkpoint,
+                    } => {
+                        self.tables.insert(table_id, checkpoint);
+                        self.apply_settles(settles)?;
+                        self.update_tables(effect, table_id)?;
+                    }
+                    _ => return Err(errors::error_invalid_bridge_event()),
+                }
             }
 
             Event::WaitingTimeout => match self.stage {
-                MttStage::Init => {
-                }
-                MttStage::Playing => {
-                }
+                MttStage::Init => {}
+                MttStage::Playing => {}
                 _ => (),
             },
             _ => (),
@@ -293,53 +332,80 @@ impl GameHandler for Mtt {
     }
 
     fn into_checkpoint(self) -> HandleResult<MttCheckpoint> {
-        Ok(self.into())
+        Ok(self.try_into()?)
     }
 }
 
 impl Mtt {
-    fn create_tables(&mut self) -> Result<(), HandleError> {
-        let num_of_players = self.ranks.len();
-        let num_of_tables = (self.table_size + num_of_players as u8 - 1) / self.table_size;
-        for i in 0..num_of_tables {
-            let mut players = Vec::<MttTablePlayer>::new();
-            let mut j = i;
-            let table_id = i + 1;
-            while let Some(r) = self.ranks.get(j as usize) {
-                players.push(MttTablePlayer::new(r.position, r.chips, (j / num_of_tables) as usize));
-                self.table_assigns.insert(r.addr.to_owned(), table_id);
-                j += num_of_tables;
-            }
-            let sb = self
-                .blind_info
-                .blind_rules
-                .first()
-                .ok_or(errors::error_empty_blind_rules())?
-                .sb_x as u64
-                * self.blind_info.blind_base;
-            let bb = self
-                .blind_info
-                .blind_rules
-                .first()
-                .ok_or(errors::error_empty_blind_rules())?
-                .bb_x as u64
-                * self.blind_info.blind_base;
-            let table = MttTableCheckpoint {
-                btn: 0,
-                players,
-            };
+    fn find_player_rank_by_pos(&self, position: u16) -> Result<&PlayerRank, HandleError> {
+        self.ranks
+            .iter()
+            .find(|rank| rank.position.eq(&position))
+            .ok_or(errors::error_player_mtt_position_not_found())
+    }
 
-            self.tables.insert(table_id, table);
+    fn launch_table(
+        &self,
+        effect: &mut Effect,
+        table_id: u8,
+        table: &MttTableCheckpoint,
+    ) -> Result<(), HandleError> {
+        let (sb, bb) = self.calc_blinds()?;
+        let mut player_lookup = BTreeMap::new();
+        for p in table.players.iter() {
+            let pos = p.mtt_position;
+            let rank = self.find_player_rank_by_pos(pos)?;
+            let player = Player::new(rank.addr.clone(), rank.chips, p.table_position as _, 0);
+            player_lookup.insert(pos, player);
+        }
+        let init_table_data = InitTableData {
+            btn: table.btn,
+            table_id,
+            sb,
+            bb,
+            table_size: self.table_size,
+            player_lookup,
+        };
+        effect.launch_sub_game(
+            table_id as _,
+            SUBGAME_BUNDLE_ADDR.to_string(),
+            init_table_data,
+        )?;
+        Ok(())
+    }
+
+    fn create_tables(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        if !self.tables.is_empty() {
+            for (id, table) in self.tables.iter() {
+                self.launch_table(effect, *id, table)?;
+            }
+        } else {
+            let num_of_players = self.ranks.len();
+            let num_of_tables = (self.table_size + num_of_players as u8 - 1) / self.table_size;
+            for i in 0..num_of_tables {
+                let mut players = Vec::<MttTablePlayer>::new();
+                let mut j = i;
+                let table_id = i + 1;
+                while let Some(r) = self.ranks.get(j as usize) {
+                    players.push(MttTablePlayer::new(
+                        r.position,
+                        r.chips,
+                        (j / num_of_tables) as usize,
+                    ));
+                    self.table_assigns.insert(r.addr.to_owned(), table_id);
+                    j += num_of_tables;
+                }
+                let table = MttTableCheckpoint { btn: 0, players };
+                self.launch_table(effect, table_id, &table)?;
+                self.tables.insert(table_id, table);
+            }
         }
 
         Ok(())
     }
 
-    fn apply_settles(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        if !effect.settles.is_empty() {
-            println!("Settles: {:?}", effect.settles);
-        }
-        for s in effect.settles.iter() {
+    fn apply_settles(&mut self, settles: Vec<Settle>) -> Result<(), HandleError> {
+        for s in settles.iter() {
             let rank = self
                 .ranks
                 .iter_mut()
@@ -355,12 +421,10 @@ impl Mtt {
                         rank.status = PlayerRankStatus::Out;
                     }
                 }
-                SettleOp::Eject => {
-                    rank.status = PlayerRankStatus::Out;
-                }
                 _ => (),
             }
         }
+        self.sort_ranks();
         Ok(())
     }
 
@@ -368,156 +432,354 @@ impl Mtt {
         self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
     }
 
-    fn maybe_raise_blinds(&mut self, table_id: TableId) -> Result<(), HandleError> {
+    fn calc_blinds(&self) -> Result<(u64, u64), HandleError> {
         let time_elapsed = self.time_elapsed;
-        let level = time_elapsed / self.blind_interval;
-        let mut blind_rule = self.blind_rules.get(level as usize);
+        let level = time_elapsed / self.blind_info.blind_interval;
+        let mut blind_rule = self.blind_info.blind_rules.get(level as usize);
         if blind_rule.is_none() {
-            blind_rule = self.blind_rules.last();
+            blind_rule = self.blind_info.blind_rules.last();
         }
         let blind_rule = blind_rule.ok_or(errors::error_empty_blind_rules())?;
-        let sb = blind_rule.sb_x as u64 * self.blind_base;
-        let bb = blind_rule.bb_x as u64 * self.blind_base;
-        let game = self
-            .games
-            .get_mut(&table_id)
-            .ok_or(errors::error_table_not_fonud())?;
-        game.sb = sb;
-        game.bb = bb;
-        Ok(())
+        let sb = blind_rule.sb_x as u64 * self.blind_info.blind_base;
+        let bb = blind_rule.bb_x as u64 * self.blind_info.blind_base;
+        Ok((sb, bb))
     }
 
     /// Update tables by balancing the players.
     fn update_tables(&mut self, effect: &mut Effect, table_id: TableId) -> Result<(), HandleError> {
         // No-op for final table
-        if self.games.len() == 1 {
-            self.table_updates.insert(table_id, TableUpdate::Noop);
+        if self.tables.len() == 1 {
             return Ok(());
         }
 
         let table_size = self.table_size as usize;
 
-        let table_update = {
-            let Some(first_table) = self.games.first_key_value() else {
-                return Ok(())
-            };
-
-            let mut table_with_least = first_table;
-            let mut table_with_most = first_table;
-
-            for (id, game) in self.games.iter() {
-                if game.player_map.len() < table_with_least.1.player_map.len() {
-                    table_with_least = (id, game);
-                }
-                if game.player_map.len() > table_with_most.1.player_map.len() {
-                    table_with_most = (id, game);
-                }
-            }
-            let total_empty_seats = self
-                .games
-                .iter()
-                .map(|(id, g)| {
-                    if id == table_with_least.0 {
-                        0
-                    } else {
-                        table_size - g.player_map.len()
-                    }
-                })
-                .sum::<usize>();
-
-            println!("Table with least: {}", table_with_least.0);
-            println!("Table with most: {}", table_with_most.0);
-            if table_id == *table_with_least.0
-                && table_with_least.1.player_map.len() <= total_empty_seats
-            {
-                TableUpdate::CloseTable {
-                    close_table_id: table_id,
-                }
-            } else if table_id == *table_with_most.0
-                && table_with_most.1.player_map.len() > table_with_least.1.player_map.len() + 1
-            {
-                TableUpdate::MovePlayer {
-                    from_table_id: table_id,
-                    to_table_id: *table_with_least.0,
-                }
-            } else {
-                TableUpdate::Noop
-            }
+        let Some(first_table) = self.tables.first_key_value() else {
+            return Ok(())
         };
 
-        self.table_updates.insert(table_id, table_update.clone());
+        let mut table_with_least = first_table;
+        let mut table_with_most = first_table;
 
-        match table_update {
-            TableUpdate::Noop => (),
-            TableUpdate::CloseTable { close_table_id } => {
-                // Remove this game
-                let mut game_to_close = self
-                    .games
-                    .remove(&close_table_id)
-                    .ok_or(errors::error_table_not_fonud())?;
-
-                // Iterate all other games, move player if there're empty
-                // seats available.  The iteration should be sorted by
-                // game's player numbers in ascending order
-                let mut game_refs = self
-                    .games
-                    .iter_mut()
-                    .collect::<Vec<(&TableId, &mut Holdem)>>();
-
-                game_refs.sort_by_key(|(_id, g)| g.player_map.len());
-
-                for (id, game_ref) in game_refs {
-                    let cnt = table_size - game_ref.player_map.len();
-                    let mut moved_players = Vec::with_capacity(cnt);
-                    for _ in 0..cnt {
-                        if let Some((player_addr, player)) = game_to_close.player_map.pop_first() {
-                            moved_players.push(InternalPlayerJoin {
-                                addr: player.addr,
-                                chips: player.chips,
-                            });
-                            println!("Player {} will be moved", player_addr);
-                            self.table_assigns.insert(player_addr, *id);
-                        } else {
-                            break;
-                        }
-                    }
-
-                    game_ref.internal_add_players(moved_players)?;
-                    if game_ref.stage == HoldemStage::Init {
-                        game_ref.reset_holdem_state()?;
-                        game_ref.reset_player_map_status()?;
-                        game_ref.internal_start_game(effect)?;
-                    }
-
-                    if game_to_close.player_map.is_empty() {
-                        break;
-                    }
-                }
+        for (id, table) in self.tables.iter() {
+            if table.players.len() < table_with_least.1.players.len() {
+                table_with_least = (id, table);
             }
-            TableUpdate::MovePlayer {
-                from_table_id,
-                to_table_id,
-            } => {
-                let from_table = self
-                    .games
-                    .get_mut(&from_table_id)
-                    .ok_or(errors::error_table_not_fonud())?;
-                let (addr, p) = from_table
-                    .player_map
-                    .pop_first()
-                    .ok_or(errors::error_table_is_empty())?;
-                let add_players = vec![InternalPlayerJoin {
-                    addr: p.addr,
-                    chips: p.chips,
-                }];
-                let to_table = self
-                    .games
-                    .get_mut(&to_table_id)
-                    .ok_or(errors::error_player_not_found())?;
-                to_table.internal_add_players(add_players)?;
-                self.table_assigns.insert(addr, to_table_id);
+            if table.players.len() > table_with_most.1.players.len() {
+                table_with_most = (id, table);
             }
         }
+
+        let smallest_table_id = *table_with_least.0;
+        let largest_table_id = *table_with_most.0;
+        let smallest_table_players_count = table_with_least.1.players.len();
+        let largest_table_players_count = table_with_most.1.players.len();
+
+        let total_empty_seats = self
+            .tables
+            .iter()
+            .map(|(id, t)| {
+                if *id == table_id {
+                    0
+                } else {
+                    table_size - t.players.len()
+                }
+            })
+            .sum::<usize>();
+
+        let target_table_ids: Vec<u8> = {
+            let mut table_refs = self
+                .tables
+                .iter()
+                .collect::<Vec<(&TableId, &MttTableCheckpoint)>>();
+            table_refs.sort_by_key(|(_id, t)| t.players.len());
+            table_refs
+                .into_iter()
+                .map(|(id, _)| *id)
+                .filter(|id| id.ne(&table_id))
+                .collect()
+        };
+
+        let mut evts = Vec::<(TableId, HoldemBridgeEvent)>::new();
+        if table_id == smallest_table_id && smallest_table_players_count <= total_empty_seats {
+            // Close current table, move players to other tables
+            let mut table_to_close = self
+                .tables
+                .remove(&table_id)
+                .ok_or(errors::error_table_not_fonud())?;
+
+            let mut i = 0;
+            loop {
+                if i == target_table_ids.len() {
+                    i = 0;
+                    continue;
+                }
+
+                let target_table_id = target_table_ids
+                    .get(i)
+                    .ok_or(errors::error_invalid_index_usage())?;
+
+                if let Some(player) = table_to_close.players.pop() {
+                    let rank = self.find_player_rank_by_pos(player.mtt_position)?;
+                    let addr = rank.addr.clone();
+                    let chips = rank.chips;
+                    let table_ref = self
+                        .tables
+                        .get_mut(&target_table_id)
+                        .ok_or(errors::error_table_not_fonud())?;
+                    let pos = table_ref.add_player(player.mtt_position, player.chips);
+                    evts.push((
+                        target_table_ids[i],
+                        HoldemBridgeEvent::AddPlayers {
+                            player_lookup: BTreeMap::from([(
+                                player.mtt_position,
+                                Player::new(addr, chips, pos as _, 0),
+                            )]),
+                        },
+                    ));
+                } else {
+                    break;
+                }
+            }
+
+            evts.push((table_id, HoldemBridgeEvent::CloseTable));
+        } else if table_id == largest_table_id
+            && largest_table_players_count > smallest_table_players_count + 1
+        {
+            // Move players to the table with least players
+            let num_to_move = (largest_table_players_count - smallest_table_players_count) / 2;
+
+            let players: Vec<MttTablePlayer> = self
+                .tables
+                .get_mut(&largest_table_id)
+                .ok_or(errors::error_invalid_index_usage())?
+                .players
+                .drain(0..num_to_move)
+                .collect();
+            let left_players = players.iter().map(|p| p.mtt_position).collect();
+
+            let mut player_lookup = BTreeMap::new();
+            for p in players {
+                let pos = self
+                    .tables
+                    .get_mut(&largest_table_id)
+                    .ok_or(errors::error_invalid_index_usage())?
+                    .add_player(p.mtt_position, p.chips);
+
+                let rank = self.find_player_rank_by_pos(p.mtt_position)?;
+                player_lookup.insert(
+                    p.mtt_position,
+                    Player::new(rank.addr.clone(), rank.chips, pos as _, 0),
+                );
+            }
+            evts.push((
+                smallest_table_id,
+                HoldemBridgeEvent::AddPlayers { player_lookup },
+            ));
+
+            let (sb, bb) = self.calc_blinds()?;
+            evts.push((
+                table_id,
+                HoldemBridgeEvent::StartGame {
+                    sb,
+                    bb,
+                    left_players,
+                },
+            ));
+        }
+
+        for (table_id, evt) in evts {
+            effect.bridge_event(table_id as _, evt)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use race_test::prelude::*;
+
+    use crate::{MttAccountData, MttCheckpoint};
+
+    fn init_test_state() -> anyhow::Result<Mtt> {
+        let alice = TestClient::player("alice");
+        let bob = TestClient::player("bob");
+        let carol = TestClient::player("carol");
+        let dave = TestClient::player("dave");
+        let acc = TestGameAccountBuilder::default()
+            .with_data(MttAccountData {
+                start_time: 1000,
+                table_size: 2,
+                blind_info: BlindInfo::default(),
+            })
+            .add_player(&alice, 1000)
+            .add_player(&bob, 1000)
+            .add_player(&carol, 1000)
+            .add_player(&dave, 1000)
+            .with_checkpoint(MttCheckpoint {
+                start_time: 1001,
+                ranks: vec![
+                    PlayerRankCheckpoint {
+                        mtt_position: 0,
+                        chips: 1000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        mtt_position: 1,
+                        chips: 1000,
+                        table_id: 2,
+                    },
+                    PlayerRankCheckpoint {
+                        mtt_position: 2,
+                        chips: 2000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        mtt_position: 3,
+                        chips: 0,
+                        table_id: 2,
+                    },
+                ],
+                tables: BTreeMap::from([
+                    (
+                        1,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![
+                                MttTablePlayer {
+                                    mtt_position: 0,
+                                    chips: 1000,
+                                    table_position: 0,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 2,
+                                    chips: 1000,
+                                    table_position: 1,
+                                },
+                            ],
+                        },
+                    ),
+                    (
+                        2,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![MttTablePlayer {
+                                mtt_position: 1,
+                                chips: 2000,
+                                table_position: 0,
+                            }],
+                        },
+                    ),
+                ]),
+                time_elapsed: 50,
+            })
+            .build();
+        let init_account = acc.derive_init_account();
+        let mut effect = Effect::default();
+        Ok(Mtt::init_state(&mut effect, init_account)?)
+    }
+
+    #[test]
+    fn test_init_state_with_new_game() -> anyhow::Result<()> {
+        let acc = TestGameAccountBuilder::default()
+            .with_data(MttAccountData {
+                start_time: 1000,
+                table_size: 6,
+                blind_info: BlindInfo::default(),
+            })
+            .build();
+        let init_account = acc.derive_init_account();
+        let mut effect = Effect::default();
+        let mtt = Mtt::init_state(&mut effect, init_account)?;
+        assert_eq!(mtt.start_time, 1000);
+        assert_eq!(mtt.alives, 0);
+        assert_eq!(mtt.stage, MttStage::Init);
+        assert!(mtt.table_assigns.is_empty());
+        assert!(mtt.ranks.is_empty());
+        assert!(mtt.tables.is_empty());
+        assert_eq!(mtt.table_size, 6);
+        assert_eq!(mtt.time_elapsed, 0);
+        assert_eq!(mtt.timestamp, effect.timestamp);
+        assert_eq!(mtt.blind_info, BlindInfo::default());
+        Ok(())
+    }
+
+    #[test]
+    fn test_init_state_with_checkpoint() -> anyhow::Result<()> {
+        let mtt = init_test_state()?;
+        assert_eq!(mtt.start_time, 1001);
+        assert_eq!(mtt.alives, 3);
+        assert_eq!(mtt.stage, MttStage::Playing);
+        assert_eq!(mtt.table_assigns.len(), 4);
+        assert_eq!(mtt.ranks.len(), 4);
+        assert_eq!(mtt.tables.len(), 2);
+        assert_eq!(mtt.table_size, 2);
+        assert_eq!(mtt.time_elapsed, 50);
+        assert_eq!(mtt.timestamp, Effect::default().timestamp);
+        assert_eq!(mtt.blind_info, BlindInfo::default());
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_tables() -> anyhow::Result<()> {
+        let mut mtt = init_test_state()?;
+        let evt = Event::GameStart { access_version: 0 };
+        let mut effect = Effect::default();
+        mtt.handle_event(&mut effect, evt)?;
+        assert_eq!(
+            mtt.table_assigns,
+            BTreeMap::from([
+                ("alice".to_string(), 1),
+                ("bob".to_string(), 2),
+                ("carol".to_string(), 1),
+                ("dave".to_string(), 2),
+            ])
+        );
+        assert_eq!(
+            effect.launch_sub_games,
+            vec![
+                LaunchSubGame::try_new(
+                    1,
+                    SUBGAME_BUNDLE_ADDR.into(),
+                    InitTableData {
+                        btn: 0,
+                        table_id: 1,
+                        sb: 10,
+                        bb: 20,
+                        table_size: 2,
+                        player_lookup: BTreeMap::from([
+                            (0, Player::new("alice", 1000, 0, 0)),
+                            (2, Player::new("carol", 2000, 1, 0))
+                        ])
+                    }
+                )?,
+                LaunchSubGame::try_new(
+                    2,
+                    SUBGAME_BUNDLE_ADDR.into(),
+                    InitTableData {
+                        btn: 0,
+                        table_id: 2,
+                        sb: 10,
+                        bb: 20,
+                        table_size: 2,
+                        player_lookup: BTreeMap::from([(1, Player::new("bob", 1000, 0, 0)),])
+                    }
+                )?,
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_move_players() -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    #[test]
+    fn test_close_table() -> anyhow::Result<()> {
         Ok(())
     }
 }
