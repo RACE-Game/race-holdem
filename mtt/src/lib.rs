@@ -24,6 +24,7 @@ use race_holdem_base::{
     essential::{ActingPlayer, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
     game::Holdem,
 };
+use race_holdem_mtt_table::MttTableCheckpoint;
 use race_proc_macro::game_handler;
 
 #[cfg(test)]
@@ -51,6 +52,15 @@ pub struct PlayerRank {
     addr: String,
     chips: u64,
     status: PlayerRankStatus,
+    position: u16,
+    table_id: u8,
+}
+
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+pub struct PlayerRankCheckpoint {
+    mtt_position: u16,
+    chips: u64,
+    table_id: u8,
 }
 
 impl PlayerRank {
@@ -82,100 +92,52 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
         .collect()
 }
 
-#[derive(Default, Debug, BorshDeserialize, BorshSerialize, Clone)]
-enum TableUpdate {
-    /// The last event affects this table, but no player has to be
-    /// moved.
-    #[default]
-    Noop,
-    /// This table has the least players. If there are enough empty
-    /// seats at other tables, close this table and move its players
-    /// to other tables
-    CloseTable { close_table_id: TableId },
-    /// This table has the most players. If the number of players at
-    /// this table is greater than that of the table with least
-    /// players, move one player to that table
-    MovePlayer {
-        from_table_id: TableId,
-        to_table_id: TableId,
-    },
-}
-
 #[derive(Default, BorshSerialize, BorshDeserialize)]
-pub struct MttProperties {
-    start_time: u64,
-    table_size: u8,
+pub struct BlindInfo {
     blind_base: u64,
     blind_interval: u64,
     blind_rules: Vec<BlindRuleItem>,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize)]
+pub struct MttAccountData {
+    start_time: u64,
+    table_size: u8,
+    blind_info: BlindInfo,
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+pub struct MttCheckpoint {
+    start_time: u64,
+    ranks: Vec<PlayerRankCheckpoint>,
+    tables: BTreeMap<TableId, MttTableCheckpoint>,
+    time_elapsed: u64,
 }
 
 #[game_handler]
 #[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
     start_time: u64,
-    // The number of alive players
-    alives: usize,
+    alives: usize,              // The number of alive players
     stage: MttStage,
-    // The mapping from player addresses to table IDs
-    table_assigns: BTreeMap<String, TableId>,
-    // All players in rank order, including eliminated players
+    table_assigns: BTreeMap<String, TableId>, // The mapping from player address to its table id
     ranks: Vec<PlayerRank>,
-    // The mapping from table IDs to game states
-    games: BTreeMap<TableId, Holdem>,
-    // Must be between 2 and 9
+    tables: BTreeMap<TableId, MttTableCheckpoint>,
     table_size: u8,
-    // Inherited from properties
-    // How much time spend so far. Usually it should match current time - start time,
-    // unless the game was interrupted in the middle
-    time_spend: u64,
+    time_elapsed: u64,
     timestamp: u64,
-    // The minimal blind unit, used to calculate blinds structure
-    blind_base: u64,
-    // Blind rules
-    blind_interval: u64,
-    blind_rules: Vec<BlindRuleItem>,
-    // Table updates in this event
-    table_updates: BTreeMap<TableId, TableUpdate>,
+    blind_info: BlindInfo,
 }
-
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct MttCheckpoint {}
 
 impl GameHandler for Mtt {
     type Checkpoint = MttCheckpoint;
 
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
-        let props = MttProperties::try_from_slice(&init_account.data)
+        let props = MttAccountData::try_from_slice(&init_account.data)
             .map_err(|_| HandleError::MalformedGameAccountData)?;
-        let mut ranks: Vec<PlayerRank> = Vec::default();
+        let checkpoint: MttCheckpoint = init_account.checkponit()?;
 
-        for p in init_account.players {
-            let status = if p.balance == 0 {
-                PlayerRankStatus::Out
-            } else {
-                PlayerRankStatus::Alive
-            };
-            ranks.push(PlayerRank::new(p.addr, p.balance, status));
-        }
-
-        // Unregister is not supported for now
-        effect.allow_exit(false);
-
-        Ok(Self {
-            start_time: props.start_time,
-            ranks,
-            timestamp: effect.timestamp(),
-            table_size: props.table_size,
-            blind_base: props.blind_base,
-            blind_interval: props.blind_interval,
-            blind_rules: if props.blind_rules.is_empty() {
-                default_blind_rules()
-            } else {
-                props.blind_rules
-            },
-            ..Default::default()
-        })
+        unimplemented!()
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {

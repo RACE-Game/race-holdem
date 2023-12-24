@@ -11,6 +11,7 @@ race-api.workspace = true
 race-proc-macro.workspace = true
 borsh.workspace = true
 race-holdem-base = { path = "../base" }
+race-holdem-mtt-table = { path = "../mtt-table" }
 
 [dev-dependencies]
 race-test.workspace = true
