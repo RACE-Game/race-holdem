@@ -3,6 +3,8 @@ resolver = "2"
 members = [
   "base",
   "mtt",
+  "mtt-table",
+  "mtt-base",
   "cash",
 ]
 

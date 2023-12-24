@@ -63,11 +63,11 @@ pub fn validate_cards(cards: &Vec<&str>) -> bool {
     }
 }
 
-/// Sort the 7 cards first by the number of grouped kinds.
-/// If two groups have equal number of cards, the higher-kind group wins:
+/// Sort the 7 cards by the number of suited kinds.
+/// If two groups have equal number of cards, the higher-kind suit wins:
 /// Input:  ["ht", "s8", "st", "c8", "h5", "d3", "h3"]
-/// Output: ["ht", "st", "s8", "c8", "d3", "h3", "h5"]
-fn sort_grouped_cards<'a>(cards: &Vec<&'a str>) -> Vec<&'a str> {
+/// Output: ["ht", "st", "s8", "c8", "h5", "h3", "d3"]
+fn sort_suited_cards<'a>(cards: &Vec<&'a str>) -> Vec<&'a str> {
     // Group cards by their kinds
     let cards_to_kinds: Vec<u8> = cards.iter().map(|&c| kind_to_order(c)).collect();
     let mut groups: HashMap<u8, Vec<&str>> = HashMap::with_capacity(7);
@@ -312,7 +312,7 @@ pub fn compare_hands(handv1: &Vec<u8>, handv2: &Vec<u8>) -> Ordering {
 
 /// This fn accpets unsorted cards.
 pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
-    let sorted_by_group: Vec<&str> = sort_grouped_cards(&cards);
+    let sorted_by_group: Vec<&str> = sort_suited_cards(&cards);
     let sorted_kinds: Vec<&str> = sorted_by_group
         .iter()
         .map(|&c| -> &str {
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(vec!["sa", "ca", "c7", "d5", "c4", "c2", "h2"], cards);
 
         // Test sorting cards by grouped-kinds
-        let sorted_cards = sort_grouped_cards(&cards);
+        let sorted_cards = sort_suited_cards(&cards);
         assert_eq!(7, sorted_cards.len());
         assert_eq!(vec!["sa", "ca", "c2", "h2", "c7", "d5", "c4"], sorted_cards);
     }
@@ -585,7 +585,7 @@ mod tests {
         let hole_cards: [&str; 2] = ["ha", "h5"];
         let board: [&str; 5] = ["d7", "c6", "s7", "c7", "st"];
         let cards = create_cards(&board, &hole_cards);
-        let sorted_by_group: Vec<&str> = sort_grouped_cards(&cards);
+        let sorted_by_group: Vec<&str> = sort_suited_cards(&cards);
         let sorted_kinds: Vec<&str> = sorted_by_group
             .iter()
             .map(|&c| -> &str {

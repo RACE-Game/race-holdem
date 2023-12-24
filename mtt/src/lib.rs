@@ -17,15 +17,15 @@
 
 mod errors;
 
-use std::collections::BTreeMap;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::{prelude::*, types::SettleOp};
 use race_holdem_base::{
     essential::{ActingPlayer, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
     game::Holdem,
 };
-use race_holdem_mtt_table::MttTableCheckpoint;
+use race_holdem_mtt_base::MttTableCheckpoint;
 use race_proc_macro::game_handler;
+use std::{collections::BTreeMap, string::Drain};
 
 #[cfg(test)]
 mod tests;
@@ -114,11 +114,56 @@ pub struct MttCheckpoint {
     time_elapsed: u64,
 }
 
+impl MttCheckpoint {
+    fn find_rank_by_pos(&self, mtt_position: u16) -> Result<&PlayerRankCheckpoint, HandleError> {
+        self.ranks
+            .iter()
+            .find(|rank| rank.mtt_position.eq(&mtt_position))
+            .ok_or(errors::error_player_mtt_position_not_found())
+    }
+}
+
+impl From<Mtt> for MttCheckpoint {
+    fn from(value: Mtt) -> Self {
+        let Mtt {
+            start_time,
+            blind_info,
+            time_elapsed,
+            tables,
+            ranks,
+            ..
+        } = value;
+
+        let ranks = ranks
+            .into_iter()
+            .map(
+                |PlayerRank {
+                     chips,
+                     position,
+                     table_id,
+                     ..
+                 }| PlayerRankCheckpoint {
+                    mtt_position: position,
+                    chips,
+                    table_id,
+                },
+            )
+            .collect::<Vec<PlayerRankCheckpoint>>();
+
+        Self {
+            start_time,
+            ranks,
+            tables,
+            time_elapsed,
+        }
+    }
+}
+
 #[game_handler]
 #[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
     start_time: u64,
-    alives: usize,              // The number of alive players
+    alives: usize, // The number of alive players
     stage: MttStage,
     table_assigns: BTreeMap<String, TableId>, // The mapping from player address to its table id
     ranks: Vec<PlayerRank>,
@@ -132,17 +177,83 @@ pub struct Mtt {
 impl GameHandler for Mtt {
     type Checkpoint = MttCheckpoint;
 
-    fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
-        let props = MttAccountData::try_from_slice(&init_account.data)
-            .map_err(|_| HandleError::MalformedGameAccountData)?;
-        let checkpoint: MttCheckpoint = init_account.checkponit()?;
+    fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
+        let MttAccountData {
+            start_time,
+            table_size,
+            blind_info,
+        } = init_account.data()?;
+        let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
 
-        unimplemented!()
+        // let mut table_assigns = BTreeMap::<String, TableId>::new();
+        let (start_time, tables, time_elapsed, stage, table_assigns, ranks) =
+            if let Some(checkpoint) = checkpoint {
+                let mut table_assigns = BTreeMap::<String, TableId>::new();
+                let mut ranks = Vec::<PlayerRank>::new();
+
+                for p in init_account.players.into_iter() {
+                    let table_id = checkpoint.find_rank_by_pos(p.position)?.table_id;
+                    let GamePlayer {
+                        addr,
+                        position,
+                        balance,
+                    } = p;
+
+                    table_assigns.insert(p.addr.clone(), table_id);
+
+                    ranks.push(PlayerRank {
+                        addr,
+                        chips: balance,
+                        status: if balance > 0 {
+                            PlayerRankStatus::Alive
+                        } else {
+                            PlayerRankStatus::Out
+                        },
+                        position,
+                        table_id,
+                    });
+                }
+                (
+                    checkpoint.start_time,
+                    checkpoint.tables,
+                    checkpoint.time_elapsed,
+                    MttStage::Playing,
+                    table_assigns,
+                    ranks,
+                )
+            } else {
+                (
+                    start_time,
+                    BTreeMap::<TableId, MttTableCheckpoint>::new(),
+                    0,
+                    MttStage::Init,
+                    BTreeMap::<String, TableId>::new(),
+                    Vec::<PlayerRank>::new(),
+                )
+            };
+
+        let alives: usize = ranks
+            .iter()
+            .filter(|rank| rank.status == PlayerRankStatus::Alive)
+            .count();
+
+        Ok(Self {
+            start_time,
+            alives,
+            stage,
+            table_assigns,
+            ranks,
+            tables,
+            table_size,
+            time_elapsed,
+            timestamp: effect.timestamp,
+            blind_info,
+        })
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
-        // Update time spend for blinds calculation.
-        self.time_spend = self.time_spend + effect.timestamp() - self.timestamp;
+        // Update time elapsed for blinds calculation.
+        self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
         self.timestamp = effect.timestamp();
         self.table_updates.clear();
 
@@ -284,7 +395,7 @@ impl GameHandler for Mtt {
     }
 
     fn into_checkpoint(self) -> HandleResult<MttCheckpoint> {
-        Ok(MttCheckpoint {})
+        Ok(self.into())
     }
 }
 
@@ -419,8 +530,8 @@ impl Mtt {
     }
 
     fn maybe_raise_blinds(&mut self, table_id: TableId) -> Result<(), HandleError> {
-        let time_spend = self.time_spend;
-        let level = time_spend / self.blind_interval;
+        let time_elapsed = self.time_elapsed;
+        let level = time_elapsed / self.blind_interval;
         let mut blind_rule = self.blind_rules.get(level as usize);
         if blind_rule.is_none() {
             blind_rule = self.blind_rules.last();

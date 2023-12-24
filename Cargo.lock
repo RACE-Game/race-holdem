@@ -646,7 +646,19 @@ dependencies = [
  "borsh",
  "race-api",
  "race-holdem-base",
- "race-holdem-mtt-table",
+ "race-holdem-mtt-base",
+ "race-proc-macro",
+ "race-test",
+]
+
+[[package]]
+name = "race-holdem-mtt-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "race-api",
+ "race-holdem-base",
  "race-proc-macro",
  "race-test",
 ]
@@ -659,6 +671,7 @@ dependencies = [
  "borsh",
  "race-api",
  "race-holdem-base",
+ "race-holdem-mtt-base",
  "race-proc-macro",
  "race-test",
 ]
