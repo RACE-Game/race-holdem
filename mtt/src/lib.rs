@@ -23,7 +23,7 @@ use race_holdem_base::{
     essential::{ActingPlayer, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player},
     game::Holdem,
 };
-use race_holdem_mtt_base::MttTableCheckpoint;
+use race_holdem_mtt_base::{MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
 use std::{collections::BTreeMap, string::Drain};
 
@@ -255,7 +255,6 @@ impl GameHandler for Mtt {
         // Update time elapsed for blinds calculation.
         self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
         self.timestamp = effect.timestamp();
-        self.table_updates.clear();
 
         let mut updated_table_ids: Vec<TableId> = Vec::with_capacity(5);
         let mut no_timeout = false; // We try to dispatch ActionTimeout by default
@@ -270,127 +269,26 @@ impl GameHandler for Mtt {
                 }
             }
 
-            // XXX
-            // EventLoop will dispatch SecretsReady event which can be overwritten by our action timeout
-            Event::ShareSecrets { .. } => {
-                no_timeout = true;
-            }
-
-            // Delegate the custom events to sub event handlers
-            // Single table update
-            Event::Custom { sender, raw } => {
-                if let Some(table_id) = self.table_assigns.get(&sender) {
-                    let game = self
-                        .games
-                        .get_mut(table_id)
-                        .ok_or(errors::error_table_not_fonud())?;
-                    let event = GameEvent::try_parse(&raw)?;
-                    game.handle_custom_event(effect, event, sender)?;
-                    updated_table_ids.push(*table_id);
-                } else {
-                    return Err(HandleError::InvalidPlayer);
-                }
-            }
-
-            // Delegate to the corresponding game
-            // Single table update
-            Event::RandomnessReady { random_id } => {
-                if let Some((table_id, game)) = self
-                    .games
-                    .iter_mut()
-                    .find(|(_, g)| g.deck_random_id == random_id)
-                {
-                    game.handle_event(effect, event)?;
-                    updated_table_ids.push(*table_id);
-                }
-            }
-
-            // Add current event to ranks
-            // Reject buy-in if the game is already started
             Event::Sync { new_players, .. } => {
-                if self.stage == MttStage::Init {
-                    for p in new_players {
-                        self.ranks.push(PlayerRank::new(
-                            p.addr,
-                            p.balance,
-                            PlayerRankStatus::Alive,
-                        ));
-                    }
-                }
             }
 
             Event::GameStart { .. } => {
-                self.create_tables()?;
-                self.stage = MttStage::Playing;
-                for game in self.games.values_mut() {
-                    if game.player_map.len() > 1 {
-                        game.reset_holdem_state()?;
-                        game.reset_player_map_status()?;
-                        game.internal_start_game(effect)?;
-                    }
-                }
             }
 
-            // The first is used to start game
-            // The rest are for sub game start
-            // Multiple table updates
+            Event::Bridge { dest, raw } => {
+
+            }
+
             Event::WaitingTimeout => match self.stage {
                 MttStage::Init => {
-                    effect.start_game();
                 }
                 MttStage::Playing => {
-                    for (table_id, game) in self.games.iter_mut() {
-                        if game.next_game_start != 0 && game.next_game_start <= effect.timestamp() {
-                            game.reset_holdem_state()?;
-                            game.reset_player_map_status()?;
-                            game.internal_start_game(effect)?;
-                            updated_table_ids.push(*table_id);
-                        }
-                    }
                 }
                 _ => (),
             },
-
-            // Delegate to the player's table
-            // Single table update
-            Event::ActionTimeout { ref player_addr } => {
-                let table_id = self
-                    .table_assigns
-                    .get(player_addr)
-                    .ok_or(errors::error_player_not_found())?;
-                let game = self
-                    .games
-                    .get_mut(table_id)
-                    .ok_or(errors::error_table_not_fonud())?;
-                game.handle_event(effect, event)?;
-                updated_table_ids.push(*table_id);
-            }
-
-            // Multiple table updates
-            Event::SecretsReady { ref random_ids } => {
-                for random_id in random_ids {
-                    for (id, game) in self.games.iter_mut() {
-                        if game.deck_random_id == *random_id {
-                            game.handle_event(effect, event.clone())?;
-                            updated_table_ids.push(*id);
-                        }
-                    }
-                }
-            }
             _ => (),
         }
 
-        println!("Updated table ids: {:?}", updated_table_ids);
-        for table_id in updated_table_ids {
-            self.maybe_raise_blinds(table_id)?;
-            self.update_tables(effect, table_id)?;
-        }
-        self.apply_settles(effect)?;
-        effect.settles.clear();
-        self.sort_ranks();
-        if !no_timeout {
-            self.handle_dispatch_timeout(effect)?;
-        }
         Ok(())
     }
 
@@ -404,38 +302,34 @@ impl Mtt {
         let num_of_players = self.ranks.len();
         let num_of_tables = (self.table_size + num_of_players as u8 - 1) / self.table_size;
         for i in 0..num_of_tables {
-            let mut player_map = BTreeMap::<String, Player>::default();
+            let mut players = Vec::<MttTablePlayer>::new();
             let mut j = i;
             let table_id = i + 1;
             while let Some(r) = self.ranks.get(j as usize) {
-                player_map.insert(
-                    r.addr.to_owned(),
-                    Player::new(r.addr.to_owned(), r.chips, (j / num_of_tables) as u16, 0),
-                );
+                players.push(MttTablePlayer::new(r.position, r.chips, (j / num_of_tables) as usize));
                 self.table_assigns.insert(r.addr.to_owned(), table_id);
                 j += num_of_tables;
             }
             let sb = self
+                .blind_info
                 .blind_rules
                 .first()
                 .ok_or(errors::error_empty_blind_rules())?
                 .sb_x as u64
-                * self.blind_base;
+                * self.blind_info.blind_base;
             let bb = self
+                .blind_info
                 .blind_rules
                 .first()
                 .ok_or(errors::error_empty_blind_rules())?
                 .bb_x as u64
-                * self.blind_base;
-            let game = Holdem {
-                sb,
-                bb,
-                player_map,
-                mode: GameMode::Mtt,
-                table_size: self.table_size,
-                ..Default::default()
+                * self.blind_info.blind_base;
+            let table = MttTableCheckpoint {
+                btn: 0,
+                players,
             };
-            self.games.insert(table_id, game);
+
+            self.tables.insert(table_id, table);
         }
 
         Ok(())
@@ -472,61 +366,6 @@ impl Mtt {
 
     fn sort_ranks(&mut self) {
         self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
-    }
-
-    // Dispatch the ActionTimeout or WaitingTimeout event which has
-    // highest priority based on timestamp.  With Mtt mode, sub games
-    // wouldn't dispatch ActionTimeout event.  The current acting
-    // player can be found in `acting_player` field.  No op if there's
-    // an instant dispatch already.
-    fn handle_dispatch_timeout(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        // Option<&str>, the addr of action timeout or none for waiting timeout
-        // u64, the expected timeout timestamp
-        let mut first_to_timeout: Option<(Option<&str>, u64)> = None;
-
-        for game in self.games.values() {
-            let curr_timestamp = if let Some((_, t)) = first_to_timeout {
-                t
-            } else {
-                u64::MAX
-            };
-
-            match (&game.acting_player, game.next_game_start) {
-                // action timeout only
-                (Some(ActingPlayer { addr, clock, .. }), 0) => {
-                    if *clock < curr_timestamp {
-                        first_to_timeout = Some((Some(addr), *clock))
-                    }
-                }
-                // both
-                (Some(ActingPlayer { addr, clock, .. }), next_game_start) => {
-                    if *clock < u64::min(next_game_start, curr_timestamp) {
-                        first_to_timeout = Some((Some(addr), *clock))
-                    } else if next_game_start < u64::min(*clock, curr_timestamp) {
-                        first_to_timeout = Some((None, next_game_start))
-                    }
-                }
-                // waiting timeout only
-                (None, next_game_start) if next_game_start > 0 => {
-                    first_to_timeout = Some((None, next_game_start))
-                }
-                _ => (),
-            }
-        }
-
-        println!("Handle dispatch result: {:?}", first_to_timeout);
-        if let Some((addr, timestamp)) = first_to_timeout {
-            let timeout = timestamp - effect.timestamp();
-            if let Some(addr) = addr {
-                println!("Dispatch action timeout");
-                effect.action_timeout(addr, timeout)
-            } else {
-                println!("Dispatch wait timeout");
-                effect.wait_timeout(timeout);
-            }
-        }
-
-        Ok(())
     }
 
     fn maybe_raise_blinds(&mut self, table_id: TableId) -> Result<(), HandleError> {

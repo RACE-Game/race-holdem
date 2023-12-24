@@ -7,7 +7,7 @@ use race_holdem_base::essential::{GameMode, Player};
 use race_holdem_base::game::Holdem;
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
-use race_holdem_mtt_base::{MttTablePlayer, InitTableData, MttTableCheckpoint, HoldemBridgeEvent, GameResult};
+use race_holdem_mtt_base::{MttTablePlayer, InitTableData, MttTableCheckpoint, HoldemBridgeEvent};
 
 #[game_handler]
 #[derive(BorshSerialize, BorshDeserialize, Default)]
@@ -74,7 +74,7 @@ impl GameHandler for MttTable {
                 settles,
                 table_id: self.table_id,
             };
-            effect.bridge_event(evt)?;
+            effect.bridge_event(0, evt)?;
         }
         Ok(())
     }
