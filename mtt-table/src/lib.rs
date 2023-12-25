@@ -192,8 +192,8 @@ mod tests {
 
     #[test]
     fn settle_should_emit_game_result() -> anyhow::Result<()> {
-        let alice = TestClient::player("alice");
-        let bob = TestClient::player("bob");
+        let mut alice = TestClient::player("alice");
+        let mut bob = TestClient::player("bob");
         let mut tx = TestClient::transactor("tx");
         let player_lookup = BTreeMap::from([
             (0, Player::new("alice", 10000, 0, 0)),

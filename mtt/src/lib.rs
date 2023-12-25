@@ -608,10 +608,10 @@ mod tests {
     use crate::{MttAccountData, MttCheckpoint};
 
     fn init_test_state() -> anyhow::Result<Mtt> {
-        let alice = TestClient::player("alice");
-        let bob = TestClient::player("bob");
-        let carol = TestClient::player("carol");
-        let dave = TestClient::player("dave");
+        let mut alice = TestClient::player("alice");
+        let mut bob = TestClient::player("bob");
+        let mut carol = TestClient::player("carol");
+        let mut dave = TestClient::player("dave");
         let acc = TestGameAccountBuilder::default()
             .with_data(MttAccountData {
                 start_time: 1000,
@@ -687,18 +687,18 @@ mod tests {
 
     // Like init_test_state but with larger table size and more players
     fn setup_mtt_state() -> anyhow::Result<Mtt> {
-        let pa = TestClient::player("pa");
-        let pb = TestClient::player("pb");
-        let pc = TestClient::player("pc");
-        let pd = TestClient::player("pd");
-        let pe = TestClient::player("pe");
-        let pf = TestClient::player("pf");
-        let pg = TestClient::player("pg");
-        let ph = TestClient::player("ph");
-        let pi = TestClient::player("pi");
-        let pj = TestClient::player("pj");
-        let pk = TestClient::player("pk");
-        let pl = TestClient::player("pl");
+        let mut pa = TestClient::player("pa");
+        let mut pb = TestClient::player("pb");
+        let mut pc = TestClient::player("pc");
+        let mut pd = TestClient::player("pd");
+        let mut pe = TestClient::player("pe");
+        let mut pf = TestClient::player("pf");
+        let mut pg = TestClient::player("pg");
+        let mut ph = TestClient::player("ph");
+        let mut pi = TestClient::player("pi");
+        let mut pj = TestClient::player("pj");
+        let mut pk = TestClient::player("pk");
+        let mut pl = TestClient::player("pl");
         let acc = TestGameAccountBuilder::default()
             .with_max_players(20)
             .with_data(MttAccountData {
