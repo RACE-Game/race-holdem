@@ -11,14 +11,14 @@ use race_holdem_base::essential::*;
 // One player goes all in early and the rest keep playing until showdown
 #[test]
 fn test_allin_case1() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
 
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let mut carol = TestClient::player("Carol");
     let mut dave = TestClient::player("Dave");
 
-    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob, &mut carol, &mut dave], &transactor);
 
     {
         match &mut sync_evt {
@@ -103,7 +103,7 @@ fn test_allin_case1() -> Result<()> {
 
 #[test]
 fn test_allin_case2() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
 
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -111,7 +111,7 @@ fn test_allin_case2() -> Result<()> {
     let mut dave = TestClient::player("Dave");
     let mut frank = TestClient::player("Frank");
 
-    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &frank], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut frank], &transactor);
 
     {
         match &mut sync_evt {

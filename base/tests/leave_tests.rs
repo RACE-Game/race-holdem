@@ -13,11 +13,11 @@ use race_test::prelude::*;
 // Two players leave one after another
 #[test]
 fn test_players_leave() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -28,12 +28,12 @@ fn test_players_leave() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".into(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -45,7 +45,7 @@ fn test_players_leave() -> Result<()> {
 
     // Bob (SB/BTN) is the acting player and decides to leave
     let bob_leave = Event::Leave {
-        player_addr: "Bob".to_string(),
+        player_id: bob.id(),
     };
     handler.handle_until_no_events(
         &mut ctx,
@@ -60,7 +60,7 @@ fn test_players_leave() -> Result<()> {
         assert_eq!(state.acting_player, None);
         assert_eq!(state.player_map.len(), 1);
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Wait
         );
     }
@@ -69,7 +69,7 @@ fn test_players_leave() -> Result<()> {
 
     // Alice decides leaves as well
     let alice_leave = Event::Leave {
-        player_addr: "Alice".to_string(),
+        player_id: alice.id()
     };
     handler.handle_until_no_events(
         &mut ctx,
@@ -95,11 +95,11 @@ fn test_players_leave() -> Result<()> {
 // Expect Bob to leave instantly
 #[test]
 fn test_settle_leave() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -110,12 +110,12 @@ fn test_settle_leave() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".into(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -136,14 +136,14 @@ fn test_settle_leave() -> Result<()> {
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Wait
         );
     }
 
     // Bob then decides to leave
     let sb_leave = Event::Leave {
-        player_addr: "Bob".to_string(),
+        player_id: bob.id(),
     };
     handler.handle_until_no_events(
         &mut ctx,
@@ -156,7 +156,7 @@ fn test_settle_leave() -> Result<()> {
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.acting_player, None);
         assert_eq!(state.player_map.len(), 1);
-        assert!(state.player_map.contains_key(&"Alice".to_string()));
+        assert!(state.player_map.contains_key(&alice.id()));
         println!("Game state {:?}", state);
     }
 
@@ -170,7 +170,7 @@ fn test_settle_leave() -> Result<()> {
 // Expect alice to leave instantly.
 #[test]
 fn test_runner_leave() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let revealed = HashMap::from([
@@ -188,7 +188,7 @@ fn test_runner_leave() -> Result<()> {
         (8, "d4".to_string()),
     ]);
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -199,12 +199,12 @@ fn test_runner_leave() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".into(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -225,7 +225,7 @@ fn test_runner_leave() -> Result<()> {
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Acting
         );
     }
@@ -248,7 +248,7 @@ fn test_runner_leave() -> Result<()> {
 
     // Alice then decides to leave
     let sb_leave = Event::Leave {
-        player_addr: "Alice".to_string(),
+        player_id: alice.id(),
     };
     handler.handle_until_no_events(
         &mut ctx,
@@ -270,11 +270,11 @@ fn test_runner_leave() -> Result<()> {
 // Test player leaving in showdown
 #[test]
 fn test_showdown_leave() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -285,12 +285,12 @@ fn test_showdown_leave() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".into(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -311,7 +311,7 @@ fn test_showdown_leave() -> Result<()> {
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Acting
         );
     }
@@ -330,7 +330,7 @@ fn test_showdown_leave() -> Result<()> {
         assert_eq!(state.street, Street::Flop);
         // Acting player is now Alice
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Acting
         );
     }
@@ -356,7 +356,7 @@ fn test_showdown_leave() -> Result<()> {
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.street, Street::Turn);
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Acting
         );
     }
@@ -381,7 +381,7 @@ fn test_showdown_leave() -> Result<()> {
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Alice".to_string(),
+                id: alice.id(),
                 position: 0,
                 clock: 30_000
             })
@@ -410,7 +410,7 @@ fn test_showdown_leave() -> Result<()> {
 
     // Alice decides to leave
     let sb_leave = Event::Leave {
-        player_addr: "Alice".to_string(),
+        player_id: alice.id(),
     };
     handler.handle_until_no_events(
         &mut ctx,
@@ -421,7 +421,7 @@ fn test_showdown_leave() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(state.stage, HoldemStage::Showdown);
         assert_eq!(state.player_map.len(), 1);
-        assert!(!state.player_map.contains_key("Alice"));
+        assert!(!state.player_map.contains_key(&alice.id()));
     }
 
     Ok(())
@@ -433,12 +433,12 @@ fn test_showdown_leave() -> Result<()> {
 /// Bob and Charlie check to showdown.
 #[test]
 fn test_leave_in_multiplayers() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob, &mut charlie], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -449,12 +449,12 @@ fn test_leave_in_multiplayers() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Charlie".to_string(), "Alice".to_string()]
+            vec![bob.id(), charlie.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".into(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP,
             })
@@ -468,7 +468,7 @@ fn test_leave_in_multiplayers() -> Result<()> {
         vec![&mut alice, &mut bob, &mut charlie, &mut transactor]
     )?;
     let alice_leave = Event::Leave {
-        player_addr: "Alice".into(),
+        player_id: alice.id(),
     };
 
     {
@@ -540,11 +540,11 @@ fn test_leave_in_multiplayers() -> Result<()> {
 
 #[test]
 fn test_play_leave() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -555,12 +555,12 @@ fn test_play_leave() -> Result<()> {
         let state = handler.get_state();
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".into(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -581,14 +581,14 @@ fn test_play_leave() -> Result<()> {
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
-            state.player_map.get("Alice").unwrap().status,
+            state.player_map.get(&alice.id()).unwrap().status,
             PlayerStatus::Wait
         );
     }
 
     // Alice then decides to leave
     let bb_leave = Event::Leave {
-        player_addr: "Alice".to_string(),
+        player_id: alice.id()
     };
     handler.handle_until_no_events(
         &mut ctx,
@@ -601,7 +601,7 @@ fn test_play_leave() -> Result<()> {
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.acting_player, None);
         assert_eq!(state.player_map.len(), 1);
-        assert!(state.player_map.contains_key(&"Bob".to_string()));
+        assert!(state.player_map.contains_key(&bob.id()));
         println!("Game state {:?}", state);
     }
 

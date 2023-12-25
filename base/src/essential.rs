@@ -43,14 +43,14 @@ pub enum PlayerStatus {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub struct InternalPlayerJoin {
-    pub addr: String,
+    pub id: u64,
     pub chips: u64,
 }
 
 /// Representation of a specific player in the game
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Player {
-    pub addr: String,
+    pub id: u64,
     pub chips: u64,
     pub position: usize, // zero indexed
     pub status: PlayerStatus,
@@ -58,9 +58,9 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new<S: Into<String>>(addr: S, chips: u64, position: u16, timeout: u8) -> Player {
+    pub fn new(id: u64, chips: u64, position: u16, timeout: u8) -> Player {
         Self {
-            addr: addr.into(),
+            id,
             chips,
             position: position as usize,
             status: PlayerStatus::default(),
@@ -68,14 +68,14 @@ impl Player {
         }
     }
 
-    pub fn new_with_status<S: Into<String>>(
-        addr: S,
+    pub fn new_with_status(
+        id: u64,
         chips: u64,
         position: usize,
         status: PlayerStatus,
     ) -> Player {
         Self {
-            addr: addr.into(),
+            id,
             chips,
             position,
             status,
@@ -83,9 +83,9 @@ impl Player {
         }
     }
 
-    pub fn init(addr: String, chips: u64, position: u16) -> Player {
+    pub fn init(id: u64, chips: u64, position: u16) -> Player {
         Self {
-            addr,
+            id,
             chips,
             position: position as usize,
             status: PlayerStatus::Init,
@@ -93,8 +93,8 @@ impl Player {
         }
     }
 
-    pub fn addr(&self) -> String {
-        self.addr.clone()
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn next_to_act(&self) -> bool {
@@ -110,12 +110,12 @@ impl Player {
     // 3. the player's remaining chips after the bet
     pub fn take_bet(&mut self, bet: u64) -> (bool, u64) {
         if bet < self.chips {
-            println!("{} bets: {}", &self.addr, bet);
+            println!("{} bets: {}", self.id, bet);
             self.chips -= bet;
             (false, bet)
         } else {
             let real_bet = self.chips;
-            println!("{} ALL IN: {}", &self.addr, real_bet);
+            println!("{} ALL IN: {}", self.id, real_bet);
             self.chips = 0;
             (true, real_bet)
         }
@@ -126,7 +126,7 @@ impl Player {
 /// Representation of the player who should be acting at the moment
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 pub struct ActingPlayer {
-    pub addr: String,
+    pub id: u64,
     pub position: usize,
     pub clock: u64, // action clock
 }
@@ -134,16 +134,16 @@ pub struct ActingPlayer {
 /// Representation of Holdem pot
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 pub struct Pot {
-    pub owners: Vec<String>,
-    pub winners: Vec<String>,
+    pub owners: Vec<u64>,
+    pub winners: Vec<u64>,
     pub amount: u64,
 }
 
 impl Pot {
     pub fn new() -> Self {
         Self {
-            owners: Vec::<String>::new(),
-            winners: Vec::<String>::new(),
+            owners: Vec::new(),
+            winners: Vec::new(),
             amount: 0,
         }
     }
@@ -217,13 +217,13 @@ impl CustomEvent for GameEvent {}
 // A pot used for awarding winners
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
 pub struct AwardPot {
-    pub winners: Vec<String>,
+    pub winners: Vec<u64>,
     pub amount: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub struct PlayerResult {
-    pub addr: String,
+    pub id: u64,
     pub chips: u64,
     pub prize: Option<u64>,
     pub status: PlayerStatus,
@@ -238,12 +238,12 @@ pub enum Display {
         board: Vec<String>,
     },
     CollectBets {
-        bet_map: BTreeMap<String, u64>,
+        bet_map: BTreeMap<u64, u64>,
     },
     AwardPots {
         pots: Vec<AwardPot>,
     },
     GameResult {
-        player_map: BTreeMap<String, PlayerResult>,
+        player_map: BTreeMap<u64, PlayerResult>,
     },
 }

@@ -14,12 +14,12 @@ use race_test::prelude::*;
 
 #[test]
 fn test_preflop_fold() -> CoreResult<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
 
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
 
     {
         let state = handler.get_mut_state();
@@ -37,7 +37,7 @@ fn test_preflop_fold() -> CoreResult<()> {
         let state = handler.get_state();
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(state.btn, 0);
-        assert!(state.is_acting_player(&"Alice".to_string()));
+        assert!(state.is_acting_player(alice.id()));
     }
 
     // SB(Alice) folds so BB(Bob), the single player, wins
@@ -50,14 +50,14 @@ fn test_preflop_fold() -> CoreResult<()> {
 
     {
         let state = handler.get_state();
-        let alice = state.player_map.get("Alice").unwrap();
-        let bob = state.player_map.get("Bob").unwrap();
+        let alice = state.player_map.get(&alice.id()).unwrap();
+        let bob = state.player_map.get(&bob.id()).unwrap();
         // Street should remain unchanged
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(alice.chips, 9990);
         assert_eq!(bob.chips, 10_010);
         assert_eq!(
-            state.player_map.get("Bob").unwrap().status,
+            state.player_map.get(&bob.id()).unwrap().status,
             PlayerStatus::Wait
         );
     }
@@ -75,13 +75,13 @@ fn test_preflop_fold() -> CoreResult<()> {
 
 #[test]
 fn test_2() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
 
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let mut carol = TestClient::player("Carol");
 
-    let mut sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob, &mut carol], &transactor);
 
     {
         match &mut sync_evt {
@@ -108,10 +108,10 @@ fn test_2() -> Result<()> {
         assert_eq!(state.btn, 2);
         assert_eq!(
             state
-                .acting_player
-                .as_ref()
-                .and_then(|a| Some(a.addr.as_str())),
-            Some("Carol")
+            .acting_player
+            .as_ref()
+            .and_then(|a| Some(a.id)),
+            Some(carol.id())
         );
 
         let runner_revealed = HashMap::from([

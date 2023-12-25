@@ -8,11 +8,11 @@ use race_test::prelude::*;
 // Test one player reaches the maximum number of timeouts in heads up
 #[test]
 fn test_headsup_action_timeout() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -23,7 +23,7 @@ fn test_headsup_action_timeout() -> Result<()> {
         let state = handler.get_mut_state();
         state
             .player_map
-            .entry("Bob".to_string())
+            .entry(bob.id())
             .and_modify(|p| p.timeout = MAX_ACTION_TIMEOUT_COUNT);
     }
 
@@ -39,7 +39,7 @@ fn test_headsup_action_timeout() -> Result<()> {
 
 #[test]
 fn test_multiplayers_consecutive_timeout() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let mut charlie = TestClient::player("Charlie");
@@ -51,7 +51,8 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     // For sake of convenience, assume all players join the game at the same time
     let sync_evt = create_sync_event(
         &mut ctx,
-        &[&alice, &bob, &charlie, &dave, &eve, &frank, &grace],
+        &mut game_acct,
+        vec![&mut alice, &mut bob, &mut charlie, &mut dave, &mut eve, &mut frank, &mut grace],
         &transactor,
     );
 
@@ -77,32 +78,34 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
-                "Eve".to_string(),
-                "Frank".to_string(),
-                "Grace".to_string(),
-                "Alice".to_string(),
-                "Bob".to_string(),
-                "Charlie".to_string(),
-                "Dave".to_string(),
+                eve.id(),
+                frank.id(),
+                grace.id(),
+                alice.id(),
+                bob.id(),
+                charlie.id(),
+                dave.id(),
             ]
         );
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Eve".to_string(),
+                id: eve.id(),
                 position: 4,
                 clock: 15000
             })
         );
 
         for p in state.player_map.values() {
-            println!("Player {} with status {:?}", p.addr, p.status);
+            println!("Player {} with status {:?}", p.id, p.status);
         }
-     }
+    }
 
     // Let players act timeout one by one
-    let action_timeout = Event::ActionTimeout {player_addr: "Eve".to_string()};
+    let action_timeout = Event::ActionTimeout {
+        player_id: eve.id(),
+    };
     handler.handle_until_no_events(
         &mut ctx,
         &action_timeout,
@@ -120,20 +123,22 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     {
         let state = handler.get_state();
-        let timeout_player = state.player_map.get("Eve").unwrap();
+        let timeout_player = state.player_map.get(&eve.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Frank".to_string(),
+                id: frank.id(),
                 position: 5,
                 clock: 12000,
             })
         );
     }
 
-    let action_timeout = Event::ActionTimeout {player_addr: "Frank".to_string()};
+    let action_timeout = Event::ActionTimeout {
+        player_id: frank.id(),
+    };
     handler.handle_until_no_events(
         &mut ctx,
         &action_timeout,
@@ -151,20 +156,22 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     {
         let state = handler.get_state();
-        let timeout_player = state.player_map.get("Frank").unwrap();
+        let timeout_player = state.player_map.get(&frank.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Grace".to_string(),
+                id: grace.id(),
                 position: 6,
                 clock: 12000,
             })
         );
     }
 
-    let action_timeout = Event::ActionTimeout {player_addr: "Grace".to_string()};
+    let action_timeout = Event::ActionTimeout {
+        player_id: grace.id(),
+    };
     handler.handle_until_no_events(
         &mut ctx,
         &action_timeout,
@@ -182,12 +189,14 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     {
         let state = handler.get_state();
-        let timeout_player = state.player_map.get("Grace").unwrap();
+        let timeout_player = state.player_map.get(&grace.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
     }
 
-    let action_timeout = Event::ActionTimeout {player_addr: "Alice".to_string()};
+    let action_timeout = Event::ActionTimeout {
+        player_id: alice.id(),
+    };
     handler.handle_until_no_events(
         &mut ctx,
         &action_timeout,
@@ -205,12 +214,14 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     {
         let state = handler.get_state();
-        let timeout_player = state.player_map.get("Alice").unwrap();
+        let timeout_player = state.player_map.get(&alice.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
     }
 
-    let action_timeout = Event::ActionTimeout {player_addr: "Bob".to_string()};
+    let action_timeout = Event::ActionTimeout {
+        player_id: bob.id(),
+    };
     handler.handle_until_no_events(
         &mut ctx,
         &action_timeout,
@@ -228,12 +239,14 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     {
         let state = handler.get_state();
-        let timeout_player = state.player_map.get("Bob").unwrap();
+        let timeout_player = state.player_map.get(&bob.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
     }
 
-    let action_timeout = Event::ActionTimeout {player_addr: "Charlie".to_string()};
+    let action_timeout = Event::ActionTimeout {
+        player_id: charlie.id(),
+    };
     handler.handle_until_no_events(
         &mut ctx,
         &action_timeout,
@@ -251,14 +264,14 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
 
     {
         let state = handler.get_state();
-        let timeout_player = state.player_map.get("Charlie").unwrap();
+        let timeout_player = state.player_map.get(&charlie.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
     }
 
     {
         let state = handler.get_state();
-        let winner = state.player_map.get("Dave").unwrap();
+        let winner = state.player_map.get(&dave.id()).unwrap();
         assert_eq!(winner.status, PlayerStatus::Wait);
         assert_eq!(winner.timeout, 0);
     }

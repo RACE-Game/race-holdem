@@ -11,11 +11,11 @@ use race_test::prelude::*;
 use std::collections::HashMap;
 
 use helper::{create_sync_event, setup_holdem_game};
-use race_holdem_base::{essential::*, game::Holdem};
+use race_holdem_base::essential::*;
 
 #[test]
 fn test_players_order() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
 
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -23,7 +23,12 @@ fn test_players_order() -> Result<()> {
     let mut dave = TestClient::player("Dave");
     let mut eva = TestClient::player("Eva");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut eva],
+        &transactor,
+    );
 
     // ------------------------- GAMESTART ------------------------
     handler.handle_until_no_events(
@@ -44,13 +49,7 @@ fn test_players_order() -> Result<()> {
         // BTN will be 1 so players should be arranged like below:
         assert_eq!(
             state.player_order,
-            vec![
-                "Eva".to_string(),
-                "Alice".to_string(),
-                "Bob".to_string(),
-                "Carol".to_string(),
-                "Dave".to_string(),
-            ]
+            vec![eva.id(), alice.id(), bob.id(), carol.id(), dave.id(),]
         );
     }
 
@@ -59,34 +58,38 @@ fn test_players_order() -> Result<()> {
 
 #[test]
 fn test_eject_timeout() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let mut charlie = TestClient::player("Charlie");
+    let mut carol = TestClient::player("Carol");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob, &mut carol],
+        &transactor,
+    );
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     // --------------------- INIT ------------------------
     {
         let state = handler.get_mut_state();
-        let bob = state.player_map.get_mut("Bob").unwrap();
-        bob.timeout = 3;
+        state.player_map.get_mut(&bob.id()).unwrap().timeout = 3;
         assert_eq!(
             state.player_order,
             vec![
-                "Bob".to_string(),     // UTG + BTN
-                "Charlie".to_string(), // SB
-                "Alice".to_string(),   // BB
+                bob.id(),   // UTG + BTN
+                carol.id(), // SB
+                alice.id(), // BB
             ]
         );
 
         for p in state.player_map.values() {
-            if p.addr == "Alice".to_string() || p.addr == "Charlie".to_string() {
+            if p.id == alice.id() || p.id == carol.id() {
                 assert_eq!(p.timeout, 0)
             } else {
                 assert_eq!(p.timeout, 3)
@@ -96,7 +99,7 @@ fn test_eject_timeout() -> Result<()> {
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".to_string(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -106,12 +109,12 @@ fn test_eject_timeout() -> Result<()> {
     // --------------------- PREFLOP ------------------------
     // Bob (UTG/BTN) reaches action timeout, meets 3 action timeout
     let bob_timeout = Event::ActionTimeout {
-        player_addr: "Bob".to_string(),
+        player_id: bob.id(),
     };
     handler.handle_until_no_events(
         &mut ctx,
         &bob_timeout,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     {
@@ -119,16 +122,16 @@ fn test_eject_timeout() -> Result<()> {
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Charlie".to_string(),
+                id: carol.id(),
                 position: 2,
                 clock: ACTION_TIMEOUT_PREFLOP
             })
         );
         for p in state.player_map.values() {
-            if p.addr == "Alice".to_string() {
+            if p.id == alice.id() {
                 assert_eq!(p.timeout, 0);
                 assert_eq!(p.status, PlayerStatus::Wait);
-            } else if p.addr == "Charlie".to_string() {
+            } else if p.id == carol.id() {
                 assert_eq!(p.status, PlayerStatus::Acting);
                 assert_eq!(p.timeout, 0);
             } else {
@@ -138,19 +141,19 @@ fn test_eject_timeout() -> Result<()> {
         }
     }
 
-    // Charlie (SB) folds, and Alice (BB) wins
-    let charlie_fold = charlie.custom_event(GameEvent::Fold);
+    // Carol (SB) folds, and Alice (BB) wins
+    let carol_fold = carol.custom_event(GameEvent::Fold);
     handler.handle_until_no_events(
         &mut ctx,
-        &charlie_fold,
-        vec![&mut charlie, &mut alice, &mut bob, &mut transactor],
+        &carol_fold,
+        vec![&mut carol, &mut alice, &mut bob, &mut transactor],
     )?;
 
     {
         let state = handler.get_state();
         assert_eq!(state.player_map.len(), 2);
-        assert!(state.player_map.contains_key(&"Alice".to_string()));
-        assert!(state.player_map.contains_key(&"Charlie".to_string()));
+        assert!(state.player_map.contains_key(&alice.id()));
+        assert!(state.player_map.contains_key(&carol.id()));
     }
 
     Ok(())
@@ -158,16 +161,21 @@ fn test_eject_timeout() -> Result<()> {
 
 #[test]
 fn test_eject_loser() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let mut charlie = TestClient::player("Charlie");
+    let mut carol = TestClient::player("Carol");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob, &mut carol],
+        &transactor,
+    );
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
     {
         let state = handler.get_state();
@@ -176,15 +184,15 @@ fn test_eject_loser() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
-                "Bob".to_string(),     // BTN
-                "Charlie".to_string(), // SB
-                "Alice".to_string(),   // BB
+                bob.id(),   // BTN
+                carol.id(), // SB
+                alice.id(), // BB
             ]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".to_string(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -199,7 +207,7 @@ fn test_eject_loser() -> Result<()> {
         // Bob
         (2, "ht".to_string()),
         (3, "dq".to_string()),
-        // Charlie
+        // Carol
         (4, "s2".to_string()),
         (5, "d5".to_string()),
         // Board
@@ -221,13 +229,13 @@ fn test_eject_loser() -> Result<()> {
     handler.handle_until_no_events(
         &mut ctx,
         &bob_allin,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     {
         let state = handler.get_state();
         assert_eq!(
-            state.player_map.get("Bob").unwrap().status,
+            state.player_map.get(&bob.id()).unwrap().status,
             PlayerStatus::Allin
         );
         assert_eq!(state.street_bet, 10_000);
@@ -235,7 +243,7 @@ fn test_eject_loser() -> Result<()> {
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Charlie".to_string(),
+                id: carol.id(),
                 position: 2,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -243,22 +251,22 @@ fn test_eject_loser() -> Result<()> {
     }
 
     // SB folds
-    let charlie_fold = charlie.custom_event(GameEvent::Fold);
+    let carol_fold = carol.custom_event(GameEvent::Fold);
     handler.handle_until_no_events(
         &mut ctx,
-        &charlie_fold,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        &carol_fold,
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
     {
         let state = handler.get_state();
         assert_eq!(
-            state.player_map.get("Charlie").unwrap().status,
+            state.player_map.get(&carol.id()).unwrap().status,
             PlayerStatus::Fold
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Alice".to_string(),
+                id: alice.id(),
                 position: 0,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -270,7 +278,7 @@ fn test_eject_loser() -> Result<()> {
     handler.handle_until_no_events(
         &mut ctx,
         &alice_allin,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     // Game enters Runner stage and Alice wins
@@ -284,10 +292,10 @@ fn test_eject_loser() -> Result<()> {
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(state.acting_player, None);
         for player in state.player_map.values() {
-            if player.addr == "Charlie".to_string() {
+            if player.id == carol.id() {
                 assert_eq!(player.status, PlayerStatus::Fold);
                 assert_eq!(player.chips, 9990);
-            } else if player.addr == "Bob".to_string() {
+            } else if player.id == bob.id() {
                 assert_eq!(player.status, PlayerStatus::Out);
                 assert_eq!(player.chips, 0);
             } else {
@@ -317,10 +325,15 @@ fn test_eject_loser() -> Result<()> {
 
 #[test]
 fn test_get_holecards_idxs() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob],
+        &transactor,
+    );
     // Syncing players to the game, i.e. they join the game and game kicks start
     handler.handle_until_no_events(
         &mut ctx,
@@ -334,10 +347,7 @@ fn test_get_holecards_idxs() -> Result<()> {
         let alice_hole_cards = alice.decrypt(&ctx, holdem_state.deck_random_id);
         println!("-- Alice hole cards {:?}", alice_hole_cards);
 
-        let alice_hand_index = holdem_state
-            .hand_index_map
-            .get(&"Alice".to_string())
-            .unwrap();
+        let alice_hand_index = holdem_state.hand_index_map.get(&alice.id()).unwrap();
         assert_eq!(alice_hand_index, &vec![0, 1]);
     }
     Ok(())
@@ -345,10 +355,15 @@ fn test_get_holecards_idxs() -> Result<()> {
 
 #[test]
 fn test_runner() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob],
+        &transactor,
+    );
 
     // Syncing players to the game, i.e. they join the game and game kicks start
     handler.handle_until_no_events(
@@ -394,15 +409,15 @@ fn test_runner() -> Result<()> {
             Some(DispatchEvent {
                 timeout: ACTION_TIMEOUT_POSTFLOP,
                 event: Event::ActionTimeout {
-                    player_addr: "Bob".into()
+                    player_id: bob.id()
                 },
             })
         );
-        assert!(state.is_acting_player(&"Bob".to_string()));
+        assert!(state.is_acting_player(bob.id()));
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".to_string(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP,
             })
@@ -433,8 +448,8 @@ fn test_runner() -> Result<()> {
         assert_eq!(state.pots[0].owners.len(), 2);
         assert_eq!(state.pots[0].winners.len(), 2); // a draw
 
-        let alice = state.player_map.get("Alice").unwrap();
-        let bob = state.player_map.get("Bob").unwrap();
+        let alice = state.player_map.get(&alice.id()).unwrap();
+        let bob = state.player_map.get(&bob.id()).unwrap();
         assert_eq!(alice.status, PlayerStatus::Allin);
         assert_eq!(bob.status, PlayerStatus::Allin);
 
@@ -452,7 +467,7 @@ fn test_runner() -> Result<()> {
         }));
         assert!(state.display.contains(&Display::AwardPots {
             pots: vec![AwardPot {
-                winners: vec!["Bob".to_string(), "Alice".to_string()],
+                winners: vec![bob.id(), alice.id()],
                 amount: 20000
             }]
         }))
@@ -463,17 +478,22 @@ fn test_runner() -> Result<()> {
 
 #[test]
 fn test_settle_stage() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let mut charlie = TestClient::player("Charlie");
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &charlie], &transactor);
+    let mut carol = TestClient::player("Carol");
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob, &mut carol],
+        &transactor,
+    );
 
     // Syncing players to the game, i.e. they join the game and game kicks start
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     {
@@ -485,15 +505,15 @@ fn test_settle_stage() -> Result<()> {
         assert_eq!(
             state.player_order,
             vec![
-                "Bob".to_string(),     // BTN
-                "Charlie".to_string(), // SB
-                "Alice".to_string(),   // BB
+                bob.id(),   // BTN
+                carol.id(), // SB
+                alice.id(), // BB
             ]
         );
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Bob".to_string(),
+                id: bob.id(),
                 position: 1,
                 clock: ACTION_TIMEOUT_POSTFLOP
             })
@@ -505,7 +525,7 @@ fn test_settle_stage() -> Result<()> {
     handler.handle_until_no_events(
         &mut ctx,
         &bob_fold,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     {
@@ -513,7 +533,7 @@ fn test_settle_stage() -> Result<()> {
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Charlie".to_string(),
+                id: carol.id(),
                 position: 2,
                 clock: ACTION_TIMEOUT_PREFLOP
             })
@@ -522,11 +542,11 @@ fn test_settle_stage() -> Result<()> {
         assert_eq!(state.min_raise, 20);
     }
 
-    let charlie_fold = charlie.custom_event(GameEvent::Fold);
+    let carol_fold = carol.custom_event(GameEvent::Fold);
     handler.handle_until_no_events(
         &mut ctx,
-        &charlie_fold,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        &carol_fold,
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     // Game then should enter into `Settle` stage
@@ -538,13 +558,13 @@ fn test_settle_stage() -> Result<()> {
         assert_eq!(state.min_raise, 0);
         assert_eq!(state.acting_player, None);
         for player in state.player_map.values() {
-            if player.addr == "Charlie".to_string() || player.addr == "Bob".to_string() {
+            if player.id == carol.id() || player.id == bob.id() {
                 assert!(matches!(player.status, PlayerStatus::Fold));
             } else {
                 assert_eq!(player.status, PlayerStatus::Wait);
             }
         }
-        assert_eq!(state.winners, vec!["Alice".to_string()]);
+        assert_eq!(state.winners, vec![alice.id()]);
     }
 
     Ok(())
@@ -554,10 +574,15 @@ fn test_settle_stage() -> Result<()> {
 #[ignore]
 // For debugging purposes only
 fn test_abnormal_street() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob],
+        &transactor,
+    );
 
     handler.handle_until_no_events(
         &mut ctx,
@@ -568,14 +593,11 @@ fn test_abnormal_street() -> Result<()> {
     {
         let state = handler.get_state();
         assert_eq!(state.street, Street::Preflop);
-        assert_eq!(
-            state.player_order,
-            vec!["Alice".to_string(), "Bob".to_string(),]
-        );
+        assert_eq!(state.player_order, vec![alice.id(), bob.id()]);
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Alice".to_string(),
+                id: alice.id(),
                 position: 0,
                 clock: 30_000
             })
@@ -603,7 +625,7 @@ fn test_abnormal_street() -> Result<()> {
         assert_eq!(
             state.acting_player,
             Some(ActingPlayer {
-                addr: "Alice".to_string(),
+                id: alice.id(),
                 position: 0,
                 clock: 30_000
             })
@@ -629,7 +651,7 @@ fn test_abnormal_street() -> Result<()> {
 
     {
         let state = handler.get_state();
-        assert_eq!(state.player_map.get("Bob").unwrap().chips, 9940);
+        assert_eq!(state.player_map.get(&bob.id()).unwrap().chips, 9940);
         println!("-- State {:?}", state);
         assert_eq!(state.street, Street::Flop);
     }
@@ -639,14 +661,19 @@ fn test_abnormal_street() -> Result<()> {
 
 #[test]
 fn test_play_game() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
     let mut carol = TestClient::player("Carol");
     let mut dave = TestClient::player("Dave");
     let mut eva = TestClient::player("Eva");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob, &carol, &dave, &eva], &transactor);
+    let sync_evt = create_sync_event(
+        &mut ctx,
+        &mut game_acct,
+        vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut eva],
+        &transactor,
+    );
 
     // ------------------------- GAMESTART ------------------------
     handler.handle_until_no_events(
@@ -704,7 +731,7 @@ fn test_play_game() -> Result<()> {
         // UTG decides to leave
         println!("context {:?}", ctx);
         let eva_leave = Event::Leave {
-            player_addr: "Eva".to_string(),
+            player_id: eva.id(),
         };
         handler.handle_until_no_events(
             &mut ctx,
@@ -768,12 +795,12 @@ fn test_play_game() -> Result<()> {
             let state = handler.get_state();
 
             for p in state.player_map.values() {
-                println!("-- Player {} position {}", p.addr, p.position);
+                println!("-- Player {} position {}", p.id, p.position);
             }
 
             assert_eq!(state.street, Street::Preflop,);
             assert_eq!(
-                state.player_map.get(&"Eva".to_string()).unwrap().status,
+                state.player_map.get(&eva.id()).unwrap().status,
                 PlayerStatus::Leave
             );
             // Acting player is the next player, BB, Dave
@@ -781,7 +808,7 @@ fn test_play_game() -> Result<()> {
             assert_eq!(
                 state.acting_player,
                 Some(ActingPlayer {
-                    addr: "Dave".to_string(),
+                    id: dave.id(),
                     position: 3usize,
                     clock: 12_000u64
                 })
@@ -828,7 +855,7 @@ fn test_play_game() -> Result<()> {
         // 2. Frank should be in player_map but not in player_order
         // 3. Frank should not be assgined any cards, i.e., not in hand_index_map
         let mut frank = TestClient::player("Frank");
-        let frank_join = create_sync_event(&mut ctx, &[&frank], &transactor);
+        let frank_join = create_sync_event(&mut ctx, &mut game_acct, vec![&mut frank], &transactor);
 
         handler.handle_until_no_events(
             &mut ctx,
@@ -848,14 +875,11 @@ fn test_play_game() -> Result<()> {
             assert_eq!(state.player_map.len(), 6);
             assert_eq!(state.player_order.len(), 5);
             assert!(matches!(
-                state.player_map.get("Frank").unwrap().status,
+                state.player_map.get(&frank.id()).unwrap().status,
                 PlayerStatus::Init
             ));
-            assert_eq!(state.hand_index_map.get("Frank"), None);
-            assert_eq!(
-                state.acting_player.as_ref().unwrap().addr,
-                "Carol".to_string()
-            );
+            assert_eq!(state.hand_index_map.get(&frank.id()), None);
+            assert_eq!(state.acting_player.as_ref().unwrap().id, carol.id());
         }
 
         // Carol(SB) bets 1BB
@@ -936,10 +960,10 @@ fn test_play_game() -> Result<()> {
             assert_eq!(state.pots.len(), 1);
             assert_eq!(state.pots[0].amount, 160);
             assert_eq!(state.pots[0].owners.len(), 4);
-            assert!(state.pots[0].owners.contains(&"Alice".to_string()));
-            assert!(state.pots[0].owners.contains(&"Bob".to_string()));
-            assert!(state.pots[0].owners.contains(&"Carol".to_string()));
-            assert!(state.pots[0].owners.contains(&"Dave".to_string()));
+            assert!(state.pots[0].owners.contains(&alice.id()));
+            assert!(state.pots[0].owners.contains(&bob.id()));
+            assert!(state.pots[0].owners.contains(&carol.id()));
+            assert!(state.pots[0].owners.contains(&dave.id()));
             assert_eq!(
                 state.board,
                 vec![
@@ -1063,9 +1087,9 @@ fn test_play_game() -> Result<()> {
             // Pot 1
             assert_eq!(state.pots[0].amount, 340);
             assert_eq!(state.pots[0].owners.len(), 3);
-            assert!(state.pots[0].owners.contains(&"Bob".to_string()));
-            assert!(state.pots[0].owners.contains(&"Carol".to_string()));
-            assert!(state.pots[0].owners.contains(&"Dave".to_string()));
+            assert!(state.pots[0].owners.contains(&bob.id()));
+            assert!(state.pots[0].owners.contains(&carol.id()));
+            assert!(state.pots[0].owners.contains(&dave.id()));
             // Board and display
             assert_eq!(
                 state.board,
@@ -1153,132 +1177,5 @@ fn test_play_game() -> Result<()> {
             assert_eq!(state.hand_index_map.len(), 0);
         }
     }
-    Ok(())
-}
-
-#[test]
-fn test_3() -> Result<()> {
-    let data = [
-        1, 0, 0, 0, 0, 0, 0, 0, 168, 97, 0, 0, 0, 0, 0, 0, 80, 195, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 2, 0,
-        0, 0, 104, 53, 2, 0, 0, 0, 100, 52, 2, 0, 0, 0, 104, 55, 2, 0, 0, 0, 104, 54, 2, 0, 0, 0,
-        104, 56, 4, 0, 0, 0, 44, 0, 0, 0, 66, 55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84,
-        106, 89, 105, 52, 69, 120, 54, 107, 104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82,
-        51, 53, 115, 49, 53, 117, 87, 67, 65, 102, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
-        0, 0, 0, 0, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54,
-        121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100,
-        66, 119, 54, 69, 49, 100, 50, 71, 110, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0,
-        0, 0, 0, 44, 0, 0, 0, 69, 78, 82, 49, 49, 118, 80, 78, 119, 50, 120, 80, 88, 107, 67, 74,
-        107, 49, 87, 111, 104, 101, 117, 105, 49, 89, 114, 100, 54, 56, 78, 71, 87, 68, 66, 109,
-        103, 119, 83, 100, 122, 99, 119, 80, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0,
-        0, 0, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72,
-        67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101,
-        89, 109, 78, 87, 104, 80, 2, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 4, 0, 0, 0, 44, 0, 0, 0, 66, 55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84, 106,
-        89, 105, 52, 69, 120, 54, 107, 104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82, 51,
-        53, 115, 49, 53, 117, 87, 67, 65, 102, 40, 142, 128, 0, 0, 0, 0, 0, 44, 0, 0, 0, 66, 114,
-        105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54, 121, 50, 89, 121, 69, 84, 57, 106,
-        87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100, 66, 119, 54, 69, 49, 100, 50, 71,
-        110, 48, 229, 17, 1, 0, 0, 0, 0, 44, 0, 0, 0, 69, 78, 82, 49, 49, 118, 80, 78, 119, 50,
-        120, 80, 88, 107, 67, 74, 107, 49, 87, 111, 104, 101, 117, 105, 49, 89, 114, 100, 54, 56,
-        78, 71, 87, 68, 66, 109, 103, 119, 83, 100, 122, 99, 119, 80, 240, 73, 2, 0, 0, 0, 0, 0,
-        43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67,
-        106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89,
-        109, 78, 87, 104, 80, 48, 229, 17, 1, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 44, 0, 0, 0, 66,
-        55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84, 106, 89, 105, 52, 69, 120, 54, 107,
-        104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82, 51, 53, 115, 49, 53, 117, 87, 67,
-        65, 102, 44, 0, 0, 0, 66, 55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84, 106, 89, 105,
-        52, 69, 120, 54, 107, 104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82, 51, 53, 115,
-        49, 53, 117, 87, 67, 65, 102, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 3, 0, 44, 0,
-        0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54, 121, 50, 89, 121, 69,
-        84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100, 66, 119, 54, 69, 49,
-        100, 50, 71, 110, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105,
-        54, 121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72,
-        100, 66, 119, 54, 69, 49, 100, 50, 71, 110, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
-        3, 0, 44, 0, 0, 0, 69, 78, 82, 49, 49, 118, 80, 78, 119, 50, 120, 80, 88, 107, 67, 74, 107,
-        49, 87, 111, 104, 101, 117, 105, 49, 89, 114, 100, 54, 56, 78, 71, 87, 68, 66, 109, 103,
-        119, 83, 100, 122, 99, 119, 80, 44, 0, 0, 0, 69, 78, 82, 49, 49, 118, 80, 78, 119, 50, 120,
-        80, 88, 107, 67, 74, 107, 49, 87, 111, 104, 101, 117, 105, 49, 89, 114, 100, 54, 56, 78,
-        71, 87, 68, 66, 109, 103, 119, 83, 100, 122, 99, 119, 80, 224, 15, 151, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 4, 0, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76,
-        80, 66, 55, 100, 72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67,
-        54, 105, 65, 87, 101, 89, 109, 78, 87, 104, 80, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118,
-        105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118,
-        117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87, 104, 80, 64, 181, 100, 0, 0, 0,
-        0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 4, 0, 0, 0, 44, 0, 0, 0, 66, 55, 77, 121, 51, 101, 110,
-        72, 83, 87, 121, 87, 84, 106, 89, 105, 52, 69, 120, 54, 107, 104, 55, 74, 69, 89, 69, 115,
-        69, 57, 70, 111, 80, 82, 51, 53, 115, 49, 53, 117, 87, 67, 65, 102, 44, 0, 0, 0, 69, 78,
-        82, 49, 49, 118, 80, 78, 119, 50, 120, 80, 88, 107, 67, 74, 107, 49, 87, 111, 104, 101,
-        117, 105, 49, 89, 114, 100, 54, 56, 78, 71, 87, 68, 66, 109, 103, 119, 83, 100, 122, 99,
-        119, 80, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100,
-        72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87,
-        101, 89, 109, 78, 87, 104, 80, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66,
-        75, 52, 105, 54, 121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69,
-        67, 99, 72, 100, 66, 119, 54, 69, 49, 100, 50, 71, 110, 2, 0, 0, 0, 3, 0, 0, 0, 44, 0, 0,
-        0, 66, 55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84, 106, 89, 105, 52, 69, 120, 54,
-        107, 104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82, 51, 53, 115, 49, 53, 117, 87,
-        67, 65, 102, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54,
-        121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100,
-        66, 119, 54, 69, 49, 100, 50, 71, 110, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109,
-        68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80,
-        54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87, 104, 80, 0, 0, 0, 0, 104, 244, 131, 1,
-        0, 0, 0, 0, 2, 0, 0, 0, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52,
-        105, 54, 121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99,
-        72, 100, 66, 119, 54, 69, 49, 100, 50, 71, 110, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118,
-        105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118,
-        117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87, 104, 80, 0, 0, 0, 0, 16, 174,
-        34, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 2, 0, 0, 0, 44, 0, 0, 0, 66, 114, 105, 53,
-        119, 122, 122, 86, 121, 66, 75, 52, 105, 54, 121, 50, 89, 121, 69, 84, 57, 106, 87, 114,
-        98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100, 66, 119, 54, 69, 49, 100, 50, 71, 110, 8, 87,
-        145, 0, 0, 0, 0, 0, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66,
-        55, 100, 72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105,
-        65, 87, 101, 89, 109, 78, 87, 104, 80, 72, 12, 246, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 9, 5, 0, 0, 0, 2, 0, 0, 0, 104, 53, 2, 0, 0, 0, 100, 52, 2, 0, 0, 0, 104, 55, 2, 0, 0,
-        0, 104, 54, 2, 0, 0, 0, 104, 56, 2, 0, 0, 0, 43, 0, 0, 0, 106, 111, 105, 90, 90, 118, 105,
-        109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119, 71, 88, 86, 110, 82, 66, 118, 117,
-        80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87, 104, 80, 0, 168, 97, 0, 0, 0, 0, 0,
-        0, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54, 121, 50, 89,
-        121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100, 66, 119, 54,
-        69, 49, 100, 50, 71, 110, 1, 80, 195, 0, 0, 0, 0, 0, 0, 248, 36, 1, 0, 0, 0, 0, 0, 8, 0, 0,
-        0, 44, 0, 0, 0, 66, 55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84, 106, 89, 105, 52,
-        69, 120, 54, 107, 104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82, 51, 53, 115, 49,
-        53, 117, 87, 67, 65, 102, 4, 240, 73, 2, 0, 0, 0, 0, 0, 44, 0, 0, 0, 69, 78, 82, 49, 49,
-        118, 80, 78, 119, 50, 120, 80, 88, 107, 67, 74, 107, 49, 87, 111, 104, 101, 117, 105, 49,
-        89, 114, 100, 54, 56, 78, 71, 87, 68, 66, 109, 103, 119, 83, 100, 122, 99, 119, 80, 2, 43,
-        0, 0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106,
-        116, 119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109,
-        78, 87, 104, 80, 4, 24, 101, 45, 0, 0, 0, 0, 0, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122,
-        122, 86, 121, 66, 75, 52, 105, 54, 121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67,
-        50, 88, 51, 69, 67, 99, 72, 100, 66, 119, 54, 69, 49, 100, 50, 71, 110, 2, 44, 0, 0, 0, 66,
-        55, 77, 121, 51, 101, 110, 72, 83, 87, 121, 87, 84, 106, 89, 105, 52, 69, 120, 54, 107,
-        104, 55, 74, 69, 89, 69, 115, 69, 57, 70, 111, 80, 82, 51, 53, 115, 49, 53, 117, 87, 67,
-        65, 102, 4, 56, 68, 126, 0, 0, 0, 0, 0, 44, 0, 0, 0, 69, 78, 82, 49, 49, 118, 80, 78, 119,
-        50, 120, 80, 88, 107, 67, 74, 107, 49, 87, 111, 104, 101, 117, 105, 49, 89, 114, 100, 54,
-        56, 78, 71, 87, 68, 66, 109, 103, 119, 83, 100, 122, 99, 119, 80, 3, 43, 0, 0, 0, 106, 111,
-        105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119, 71, 88, 86,
-        110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87, 104, 80, 2,
-        44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54, 121, 50, 89,
-        121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100, 66, 119, 54,
-        69, 49, 100, 50, 71, 110, 2, 104, 244, 131, 1, 0, 0, 0, 0, 2, 0, 0, 0, 43, 0, 0, 0, 106,
-        111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119, 71,
-        88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87, 104,
-        80, 1, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54, 121, 50,
-        89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100, 66, 119,
-        54, 69, 49, 100, 50, 71, 110, 1, 104, 244, 131, 1, 0, 0, 0, 0, 2, 0, 0, 0, 43, 0, 0, 0,
-        106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116, 119,
-        71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78, 87,
-        104, 80, 1, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122, 86, 121, 66, 75, 52, 105, 54,
-        121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50, 88, 51, 69, 67, 99, 72, 100,
-        66, 119, 54, 69, 49, 100, 50, 71, 110, 1, 104, 244, 131, 1, 0, 0, 0, 0, 2, 0, 0, 0, 43, 0,
-        0, 0, 106, 111, 105, 90, 90, 118, 105, 109, 68, 52, 76, 80, 66, 55, 100, 72, 67, 106, 116,
-        119, 71, 88, 86, 110, 82, 66, 118, 117, 80, 54, 49, 67, 54, 105, 65, 87, 101, 89, 109, 78,
-        87, 104, 80, 0, 72, 12, 246, 0, 0, 0, 0, 0, 44, 0, 0, 0, 66, 114, 105, 53, 119, 122, 122,
-        86, 121, 66, 75, 52, 105, 54, 121, 50, 89, 121, 69, 84, 57, 106, 87, 114, 98, 117, 67, 50,
-        88, 51, 69, 67, 99, 72, 100, 66, 119, 54, 69, 49, 100, 50, 71, 110, 2, 0, 0, 0, 0, 0, 0, 0,
-        0,
-    ];
-
-    let h = Holdem::try_from_slice(&data)?;
-    println!("{:#?}", h);
     Ok(())
 }

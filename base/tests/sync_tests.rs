@@ -12,12 +12,12 @@ use race_test::prelude::*;
 // Then both players keep checking to showdown
 #[test]
 fn test_join_on_preflop() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let mut charlie = TestClient::player("Charlie");
+    let mut carol = TestClient::player("Charlie");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
         &sync_evt,
@@ -29,22 +29,22 @@ fn test_join_on_preflop() -> Result<()> {
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
     }
 
-    let charlie_sync_evt = create_sync_event(&mut ctx, &[&charlie], &transactor);
+    let carol_sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut carol], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
-        &charlie_sync_evt,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        &carol_sync_evt,
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     {
         let state = handler.get_state();
         assert!(state
             .player_map
-            .get("Charlie")
+            .get(&carol.id())
             .is_some_and(|p| p.status == PlayerStatus::Init));
     }
 
@@ -63,7 +63,7 @@ fn test_join_on_preflop() -> Result<()> {
         handler.handle_until_no_events(
             &mut ctx,
             &evt,
-            vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+            vec![&mut alice, &mut bob, &mut carol, &mut transactor],
         )?;
     }
 
@@ -75,12 +75,12 @@ fn test_join_on_preflop() -> Result<()> {
 // Then both players keep checking to showdown
 #[test]
 fn test_on_preflop_then_runner() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
-    let mut charlie = TestClient::player("Charlie");
+    let mut carol = TestClient::player("Carol");
 
-    let sync_evt = create_sync_event(&mut ctx, &[&alice, &bob], &transactor);
+    let sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob], &transactor);
 
     handler.handle_until_no_events(
         &mut ctx,
@@ -93,22 +93,22 @@ fn test_on_preflop_then_runner() -> Result<()> {
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(
             state.player_order,
-            vec!["Bob".to_string(), "Alice".to_string()]
+            vec![bob.id(), alice.id()]
         );
     }
 
-    let charlie_sync_evt = create_sync_event(&mut ctx, &[&charlie], &transactor);
+    let carol_sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut carol], &transactor);
     handler.handle_until_no_events(
         &mut ctx,
-        &charlie_sync_evt,
-        vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+        &carol_sync_evt,
+        vec![&mut alice, &mut bob, &mut carol, &mut transactor],
     )?;
 
     {
         let state = handler.get_state();
         assert!(state
             .player_map
-            .get("Charlie")
+            .get(&carol.id())
             .is_some_and(|p| p.status == PlayerStatus::Init));
     }
 
@@ -122,7 +122,7 @@ fn test_on_preflop_then_runner() -> Result<()> {
         handler.handle_until_no_events(
             &mut ctx,
             &evt,
-            vec![&mut alice, &mut bob, &mut charlie, &mut transactor],
+            vec![&mut alice, &mut bob, &mut carol, &mut transactor],
         )?;
     }
 
