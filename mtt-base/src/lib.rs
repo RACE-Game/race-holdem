@@ -67,7 +67,7 @@ pub enum HoldemBridgeEvent {
     StartGame {
         sb: u64,
         bb: u64,
-        left_players: Vec<u16>,
+        moved_players: Vec<u16>,
     },
     AddPlayers {
         player_lookup: BTreeMap<u16, Player>,
@@ -81,12 +81,6 @@ pub enum HoldemBridgeEvent {
 }
 
 impl BridgeEvent for HoldemBridgeEvent {}
-
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
-pub struct GameResult {
-    pub table_id: usize,
-    pub settles: Vec<Settle>,
-}
 
 #[cfg(test)]
 mod tests {
@@ -114,11 +108,7 @@ mod tests {
                 },
             ],
         };
-        let pos = table.add_player(MttTablePlayer {
-            mtt_position: 4,
-            chips: 100,
-            table_position: 0,
-        });
+        let pos = table.add_player(4, 100);
 
         assert_eq!(pos, 2);
         assert_eq!(table.players.len(), 4);

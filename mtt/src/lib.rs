@@ -424,6 +424,11 @@ impl Mtt {
                 _ => (),
             }
         }
+        self.alives = self
+            .ranks
+            .iter()
+            .filter(|r| r.status == PlayerRankStatus::Alive)
+            .count();
         self.sort_ranks();
         Ok(())
     }
@@ -445,7 +450,7 @@ impl Mtt {
         Ok((sb, bb))
     }
 
-    /// Update tables by balancing the players.
+    /// Update tables by balancing the players at each table.
     fn update_tables(&mut self, effect: &mut Effect, table_id: TableId) -> Result<(), HandleError> {
         // No-op for final table
         if self.tables.len() == 1 {
@@ -474,7 +479,6 @@ impl Mtt {
         let largest_table_id = *table_with_most.0;
         let smallest_table_players_count = table_with_least.1.players.len();
         let largest_table_players_count = table_with_most.1.players.len();
-
         let total_empty_seats = self
             .tables
             .iter()
@@ -486,7 +490,6 @@ impl Mtt {
                 }
             })
             .sum::<usize>();
-
         let target_table_ids: Vec<u8> = {
             let mut table_refs = self
                 .tables
@@ -541,6 +544,7 @@ impl Mtt {
                     break;
                 }
             }
+            println!("Add those events to effect {:?}", evts);
 
             evts.push((table_id, HoldemBridgeEvent::CloseTable));
         } else if table_id == largest_table_id
@@ -548,7 +552,7 @@ impl Mtt {
         {
             // Move players to the table with least players
             let num_to_move = (largest_table_players_count - smallest_table_players_count) / 2;
-
+            println!("To move {} players", num_to_move);
             let players: Vec<MttTablePlayer> = self
                 .tables
                 .get_mut(&largest_table_id)
@@ -556,7 +560,7 @@ impl Mtt {
                 .players
                 .drain(0..num_to_move)
                 .collect();
-            let left_players = players.iter().map(|p| p.mtt_position).collect();
+            let moved_players = players.iter().map(|p| p.mtt_position).collect();
 
             let mut player_lookup = BTreeMap::new();
             for p in players {
@@ -565,7 +569,7 @@ impl Mtt {
                     .get_mut(&largest_table_id)
                     .ok_or(errors::error_invalid_index_usage())?
                     .add_player(p.mtt_position, p.chips);
-
+                println!("Found available position {}", pos);
                 let rank = self.find_player_rank_by_pos(p.mtt_position)?;
                 player_lookup.insert(
                     p.mtt_position,
@@ -583,11 +587,11 @@ impl Mtt {
                 HoldemBridgeEvent::StartGame {
                     sb,
                     bb,
-                    left_players,
+                    moved_players,
                 },
             ));
+            println!("Add those events to effect {:?}", evts);
         }
-
         for (table_id, evt) in evts {
             effect.bridge_event(table_id as _, evt)?;
         }
@@ -670,6 +674,217 @@ mod tests {
                                 chips: 2000,
                                 table_position: 0,
                             }],
+                        },
+                    ),
+                ]),
+                time_elapsed: 50,
+            })
+            .build();
+        let init_account = acc.derive_init_account();
+        let mut effect = Effect::default();
+        Ok(Mtt::init_state(&mut effect, init_account)?)
+    }
+
+    // Like init_test_state but with larger table size and more players
+    fn setup_mtt_state() -> anyhow::Result<Mtt> {
+        let pa = TestClient::player("pa");
+        let pb = TestClient::player("pb");
+        let pc = TestClient::player("pc");
+        let pd = TestClient::player("pd");
+        let pe = TestClient::player("pe");
+        let pf = TestClient::player("pf");
+        let pg = TestClient::player("pg");
+        let ph = TestClient::player("ph");
+        let pi = TestClient::player("pi");
+        let pj = TestClient::player("pj");
+        let pk = TestClient::player("pk");
+        let pl = TestClient::player("pl");
+        let acc = TestGameAccountBuilder::default()
+            .with_max_players(20)
+            .with_data(MttAccountData {
+                start_time: 1000,
+                table_size: 3,
+                blind_info: BlindInfo::default(),
+            })
+            .add_player(&pa, 1000)
+            .add_player(&pb, 1000)
+            .add_player(&pc, 1000)
+            .add_player(&pd, 1000)
+            .add_player(&pe, 1000)
+            .add_player(&pf, 1000)
+            .add_player(&pg, 1000)
+            .add_player(&ph, 1000)
+            .add_player(&pi, 1000)
+            .add_player(&pj, 1000)
+            .add_player(&pk, 1000)
+            .add_player(&pl, 1000)
+            .with_checkpoint(MttCheckpoint {
+                start_time: 1001,
+                ranks: vec![
+                    PlayerRankCheckpoint {
+                        // pa
+                        mtt_position: 0,
+                        chips: 1000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        // pb
+                        mtt_position: 1,
+                        chips: 1000,
+                        table_id: 2,
+                    },
+                    PlayerRankCheckpoint {
+                        // pc
+                        mtt_position: 2,
+                        chips: 1000,
+                        table_id: 3,
+                    },
+                    PlayerRankCheckpoint {
+                        // pd
+                        mtt_position: 3,
+                        chips: 1000,
+                        table_id: 4,
+                    },
+                    PlayerRankCheckpoint {
+                        // pe
+                        mtt_position: 4,
+                        chips: 1000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        // pf
+                        mtt_position: 5,
+                        chips: 1000,
+                        table_id: 2,
+                    },
+                    PlayerRankCheckpoint {
+                        // pg
+                        mtt_position: 6,
+                        chips: 1000,
+                        table_id: 3,
+                    },
+                    PlayerRankCheckpoint {
+                        // ph
+                        mtt_position: 7,
+                        chips: 1000,
+                        table_id: 4,
+                    },
+                    PlayerRankCheckpoint {
+                        // pi
+                        mtt_position: 8,
+                        chips: 1000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        // pj
+                        mtt_position: 9,
+                        chips: 1000,
+                        table_id: 2,
+                    },
+                    PlayerRankCheckpoint {
+                        // pk
+                        mtt_position: 10,
+                        chips: 1000,
+                        table_id: 3,
+                    },
+                    PlayerRankCheckpoint {
+                        // pl
+                        mtt_position: 11,
+                        chips: 1000,
+                        table_id: 4,
+                    },
+                ],
+                tables: BTreeMap::from([
+                    (
+                        1,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![
+                                MttTablePlayer {
+                                    mtt_position: 0,
+                                    chips: 1000,
+                                    table_position: 0,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 4,
+                                    chips: 1000,
+                                    table_position: 1,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 8,
+                                    chips: 1000,
+                                    table_position: 2,
+                                },
+                            ],
+                        },
+                    ),
+                    (
+                        2,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![
+                                MttTablePlayer {
+                                    mtt_position: 1,
+                                    chips: 1000,
+                                    table_position: 0,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 5,
+                                    chips: 1000,
+                                    table_position: 1,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 9,
+                                    chips: 1000,
+                                    table_position: 2,
+                                },
+                            ],
+                        },
+                    ),
+                    (
+                        3,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![
+                                MttTablePlayer {
+                                    mtt_position: 2,
+                                    chips: 1000,
+                                    table_position: 0,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 6,
+                                    chips: 1000,
+                                    table_position: 1,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 10,
+                                    chips: 1000,
+                                    table_position: 2,
+                                },
+                            ],
+                        },
+                    ),
+                    (
+                        4,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![
+                                MttTablePlayer {
+                                    mtt_position: 3,
+                                    chips: 1000,
+                                    table_position: 0,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 7,
+                                    chips: 1000,
+                                    table_position: 1,
+                                },
+                                MttTablePlayer {
+                                    mtt_position: 11,
+                                    chips: 1000,
+                                    table_position: 2,
+                                },
+                            ],
                         },
                     ),
                 ]),
@@ -775,11 +990,321 @@ mod tests {
 
     #[test]
     fn test_move_players() -> anyhow::Result<()> {
+        let mut mtt = setup_mtt_state()?;
+        let evt = Event::GameStart { access_version: 0 };
+        let mut effect = Effect::default();
+        mtt.handle_event(&mut effect, evt)?;
+
+        assert_eq!(
+            mtt.table_assigns,
+            BTreeMap::from([
+                ("pa".to_string(), 1),
+                ("pb".to_string(), 2),
+                ("pc".to_string(), 3),
+                ("pd".to_string(), 4),
+                ("pe".to_string(), 1),
+                ("pf".to_string(), 2),
+                ("pg".to_string(), 3),
+                ("ph".to_string(), 4),
+                ("pi".to_string(), 1),
+                ("pj".to_string(), 2),
+                ("pk".to_string(), 3),
+                ("pl".to_string(), 4),
+            ])
+        );
+
+        assert_eq!(
+            effect.launch_sub_games,
+            vec![
+                LaunchSubGame::try_new(
+                    1,
+                    SUBGAME_BUNDLE_ADDR.into(),
+                    InitTableData {
+                        btn: 0,
+                        table_id: 1,
+                        sb: 10,
+                        bb: 20,
+                        table_size: 3,
+                        player_lookup: BTreeMap::from([
+                            (0, Player::new("pa", 1000, 0, 0)),
+                            (4, Player::new("pe", 1000, 1, 0)),
+                            (8, Player::new("pi", 1000, 2, 0)),
+                        ])
+                    }
+                )?,
+                LaunchSubGame::try_new(
+                    2,
+                    SUBGAME_BUNDLE_ADDR.into(),
+                    InitTableData {
+                        btn: 0,
+                        table_id: 2,
+                        sb: 10,
+                        bb: 20,
+                        table_size: 3,
+                        player_lookup: BTreeMap::from([
+                            (1, Player::new("pb", 1000, 0, 0)),
+                            (5, Player::new("pf", 1000, 1, 0)),
+                            (9, Player::new("pj", 1000, 2, 0)),
+                        ])
+                    }
+                )?,
+                LaunchSubGame::try_new(
+                    3,
+                    SUBGAME_BUNDLE_ADDR.into(),
+                    InitTableData {
+                        btn: 0,
+                        table_id: 3,
+                        sb: 10,
+                        bb: 20,
+                        table_size: 3,
+                        player_lookup: BTreeMap::from([
+                            (2, Player::new("pc", 1000, 0, 0)),
+                            (6, Player::new("pg", 1000, 1, 0)),
+                            (10, Player::new("pk", 1000, 2, 0)),
+                        ])
+                    }
+                )?,
+                LaunchSubGame::try_new(
+                    4,
+                    SUBGAME_BUNDLE_ADDR.into(),
+                    InitTableData {
+                        btn: 0,
+                        table_id: 4,
+                        sb: 10,
+                        bb: 20,
+                        table_size: 3,
+                        player_lookup: BTreeMap::from([
+                            (3, Player::new("pd", 1000, 0, 0)),
+                            (7, Player::new("ph", 1000, 1, 0)),
+                            (11, Player::new("pl", 1000, 2, 0)),
+                        ])
+                    }
+                )?,
+            ]
+        );
+
+        assert_eq!(mtt.start_time, 1001);
+        assert_eq!(mtt.alives, 12);
+        assert_eq!(mtt.stage, MttStage::Playing);
+        assert_eq!(mtt.ranks.len(), 12);
+        assert_eq!(mtt.tables.len(), 4);
+        assert_eq!(mtt.table_size, 3);
+        assert_eq!(mtt.time_elapsed, 50);
+        assert_eq!(mtt.timestamp, effect.timestamp);
+        assert_eq!(mtt.blind_info, BlindInfo::default());
+
+        // T3 settles: 2 players out, 1 player alive
+        // T1 settles: 1 player will be moved to t3 (smallest)
+        let t3_game_result = HoldemBridgeEvent::GameResult {
+            table_id: 3,
+            settles: vec![
+                Settle {
+                    addr: "pc".into(),
+                    op: SettleOp::Add(2000),
+                },
+                Settle {
+                    addr: "pg".into(),
+                    op: SettleOp::Sub(1000),
+                },
+                Settle {
+                    addr: "pk".into(),
+                    op: SettleOp::Sub(1000),
+                },
+            ],
+            // checkpoint contains alive players only
+            checkpoint: MttTableCheckpoint {
+                btn: 0,
+                players: vec![MttTablePlayer {
+                    mtt_position: 2,
+                    chips: 3000,
+                    table_position: 0,
+                }],
+            },
+        };
+
+        let t1_game_result = HoldemBridgeEvent::GameResult {
+            table_id: 1,
+            settles: vec![
+                Settle {
+                    addr: "pa".into(),
+                    op: SettleOp::Add(200),
+                },
+                Settle {
+                    addr: "pe".into(),
+                    op: SettleOp::Sub(100),
+                },
+                Settle {
+                    addr: "pi".into(),
+                    op: SettleOp::Sub(100),
+                },
+            ],
+            checkpoint: MttTableCheckpoint {
+                btn: 0,
+                players: vec![
+                    MttTablePlayer {
+                        mtt_position: 0,
+                        chips: 1200,
+                        table_position: 0,
+                    },
+                    MttTablePlayer {
+                        mtt_position: 4,
+                        chips: 900,
+                        table_position: 1,
+                    },
+                    MttTablePlayer {
+                        mtt_position: 8,
+                        chips: 900,
+                        table_position: 2,
+                    },
+                ],
+            },
+        };
+
+        let evts = [
+            Event::Bridge {
+                dest: 3,
+                raw: t3_game_result.try_to_vec()?,
+            },
+            Event::Bridge {
+                dest: 3,
+                raw: t1_game_result.try_to_vec()?,
+            },
+        ];
+
+        for evt in evts {
+            mtt.handle_event(&mut effect, evt)?;
+        }
+
+        assert_eq!(
+            effect.bridge_events,
+            vec![
+                EmitBridgeEvent::try_new(
+                    3,
+                    HoldemBridgeEvent::AddPlayers {
+                        player_lookup: BTreeMap::from([(0, Player::new("pa", 1200, 0, 0))])
+                    }
+                )?,
+                EmitBridgeEvent::try_new(
+                    1,
+                    HoldemBridgeEvent::StartGame {
+                        sb: 10,
+                        bb: 20,
+                        moved_players: vec![0] // player pa(mtt_pos: 0) left
+                    }
+                )?
+            ]
+        );
+
+        assert_eq!(mtt.tables.len(), 4); // no table gets closed
+        assert_eq!(mtt.alives, 10);
+        assert_eq!(mtt.stage, MttStage::Playing);
+
         Ok(())
     }
 
     #[test]
     fn test_close_table() -> anyhow::Result<()> {
+        let mut mtt = setup_mtt_state()?;
+        let evt = Event::GameStart { access_version: 0 };
+        let mut effect = Effect::default();
+        mtt.handle_event(&mut effect, evt)?;
+
+        assert_eq!(mtt.alives, 12);
+        assert_eq!(mtt.stage, MttStage::Playing);
+        assert_eq!(mtt.tables.len(), 4);
+
+        // T4 settles: 1 out and 2 alive so one emtpy seats available
+        // T3 settles: 2 out and 1 alive, so T3 should be closed and the alive to be moved
+        let t3_game_result = HoldemBridgeEvent::GameResult {
+            table_id: 3,
+            settles: vec![
+                Settle {
+                    addr: "pc".into(),
+                    op: SettleOp::Add(2000),
+                },
+                Settle {
+                    addr: "pg".into(),
+                    op: SettleOp::Sub(1000),
+                },
+                Settle {
+                    addr: "pk".into(),
+                    op: SettleOp::Sub(1000),
+                },
+            ],
+            // checkpoint contains alive players only
+            checkpoint: MttTableCheckpoint {
+                btn: 0,
+                players: vec![MttTablePlayer {
+                    mtt_position: 2,
+                    chips: 3000,
+                    table_position: 0,
+                }],
+            },
+        };
+
+        let t4_game_result = HoldemBridgeEvent::GameResult {
+            table_id: 4,
+            settles: vec![
+                Settle {
+                    addr: "pd".into(),
+                    op: SettleOp::Add(500),
+                },
+                Settle {
+                    addr: "ph".into(),
+                    op: SettleOp::Add(500),
+                },
+                Settle {
+                    addr: "pl".into(),
+                    op: SettleOp::Sub(1000),
+                },
+            ],
+            checkpoint: MttTableCheckpoint {
+                btn: 0,
+                players: vec![
+                    MttTablePlayer {
+                        mtt_position: 3,
+                        chips: 1500,
+                        table_position: 0,
+                    },
+                    MttTablePlayer {
+                        mtt_position: 7,
+                        chips: 1500,
+                        table_position: 1,
+                    },
+                ],
+            },
+        };
+        let evts = [
+            Event::Bridge {
+                dest: 4,
+                raw: t4_game_result.try_to_vec()?,
+            },
+            Event::Bridge {
+                dest: 3,
+                raw: t3_game_result.try_to_vec()?,
+            },
+        ];
+
+        for evt in evts {
+            mtt.handle_event(&mut effect, evt)?;
+        }
+
+        assert_eq!(
+            effect.bridge_events,
+            vec![
+                EmitBridgeEvent::try_new(
+                    4,
+                    HoldemBridgeEvent::AddPlayers {
+                        player_lookup: BTreeMap::from([(2, Player::new("pc", 3000, 2, 0))])
+                    }
+                )?,
+                EmitBridgeEvent::try_new(3, HoldemBridgeEvent::CloseTable)?,
+            ]
+        );
+
+        assert_eq!(mtt.tables.len(), 3); // one table gets closed
+        assert_eq!(mtt.stage, MttStage::Playing);
+        assert_eq!(mtt.alives, 9);
         Ok(())
     }
 }

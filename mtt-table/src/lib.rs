@@ -112,11 +112,11 @@ impl MttTable {
             HoldemBridgeEvent::StartGame {
                 sb,
                 bb,
-                left_players,
+                moved_players,
             } => {
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
-                for mtt_pos in left_players {
+                for mtt_pos in moved_players {
                     let p = self.player_lookup.remove(&mtt_pos).ok_or(errors::internal_player_position_missing())?;
                     self.holdem.player_map.remove(&p.addr);
                 }
