@@ -24,7 +24,7 @@ impl MttTablePlayer {
 }
 
 
-#[derive(BorshSerialize, BorshDeserialize, Default)]
+#[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
 pub struct InitTableData {
     pub btn: usize,
     pub table_id: u8,

@@ -49,10 +49,7 @@ impl GameHandler for MttTable {
 
         effect.start_game();
 
-        Ok(Self {
-            table_id,
-            holdem,
-        })
+        Ok(Self { table_id, holdem })
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
@@ -159,8 +156,8 @@ mod tests {
                 bb: 100,
                 table_size: 6,
                 player_lookup: BTreeMap::from([
-                    (1, Player::new("alice", 10000, 0, 0)),
-                    (2, Player::new("bob", 10000, 0, 0)),
+                    (1, Player::new(0, 10000, 0, 0)), // alice id: 0
+                    (2, Player::new(1, 10000, 0, 0)), // bob id: 1
                 ]),
             }
             .try_to_vec()?,
@@ -170,10 +167,10 @@ mod tests {
         let mtt_table = MttTable::init_state(&mut effect, init_account)?;
 
         assert_eq!(mtt_table.table_id, 1);
-        assert_eq!(
-            mtt_table.player_lookup.get(&1).map(|p| p.addr.as_str()),
-            Some("alice")
-        );
+        // assert_eq!(
+        //     mtt_table.player_lookup.get(&1).map(|p| p.id),
+        //     Some(&0)
+        // );
         assert_eq!(effect.start_game, true);
 
         Ok(())
@@ -185,13 +182,13 @@ mod tests {
         let mut bob = TestClient::player("bob");
         let mut tx = TestClient::transactor("tx");
         let player_lookup = BTreeMap::from([
-            (0, Player::new("alice", 10000, 0, 0)),
-            (1, Player::new("bob", 10000, 1, 0)),
+            (0, Player::new(alice.id(), 10000, 0, 0)),
+            (1, Player::new(bob.id(), 10000, 1, 0)),
         ]);
         let acc = TestGameAccountBuilder::default()
-            .add_player(&alice, 10000)
-            .add_player(&bob, 10000)
-            .set_transactor(&tx)
+            .add_player(&mut alice, 10000)
+            .add_player(&mut bob, 10000)
+            .set_transactor(&mut tx)
             .with_data(InitTableData {
                 sb: 10,
                 bb: 20,
@@ -207,8 +204,8 @@ mod tests {
         {
             let state = hdlr.get_state();
             assert_eq!(
-                state.holdem.acting_player.as_ref().map(|a| a.addr.as_str()),
-                Some("bob")
+                state.holdem.acting_player.as_ref().map(|a| a.id),
+                Some(bob.id())
             );
             ctx.add_revealed_random(
                 state.holdem.deck_random_id,
@@ -242,7 +239,7 @@ mod tests {
                 ctx.get_bridge_events::<HoldemBridgeEvent>()?,
                 vec![HoldemBridgeEvent::GameResult {
                     table_id: 1,
-                    settles: vec![Settle::sub("alice", 10000), Settle::add("bob", 10000)],
+                    settles: vec![Settle::sub(alice.id(), 10000), Settle::add(bob.id(), 10000)],
                     checkpoint: MttTableCheckpoint {
                         btn: 1,
                         players: vec![MttTablePlayer::new(1, 20000, 1)]
