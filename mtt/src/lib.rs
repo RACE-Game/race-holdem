@@ -24,7 +24,7 @@ use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint,
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
 
-const SUBGAME_BUNDLE_ADDR: &str = "";
+const SUBGAME_BUNDLE_ADDR: &str = "raceholdemtargetraceholdemmtttablewasm";
 
 pub type TableId = u8;
 pub type PlayerId = u64;
@@ -255,6 +255,8 @@ impl GameHandler for Mtt {
                 )
             };
 
+        effect.allow_exit(false);
+
         let alives: usize = ranks
             .iter()
             .filter(|rank| rank.status == PlayerRankStatus::Alive)
@@ -316,7 +318,10 @@ impl GameHandler for Mtt {
             },
 
             Event::GameStart { .. } => {
+                self.start_time = effect.timestamp();
+                self.stage = MttStage::Playing;
                 self.create_tables(effect)?;
+                self.update_alives();
             }
 
             Event::Bridge { raw, .. } => {
@@ -337,7 +342,9 @@ impl GameHandler for Mtt {
             }
 
             Event::WaitingTimeout => match self.stage {
-                MttStage::Init => {}
+                MttStage::Init => {
+                    effect.start_game();
+                }
                 MttStage::Playing => {}
                 _ => (),
             },
@@ -448,13 +455,17 @@ impl Mtt {
                 _ => (),
             }
         }
+        self.sort_ranks();
+        self.update_alives();
+        Ok(())
+    }
+
+    fn update_alives(&mut self) {
         self.alives = self
             .ranks
             .iter()
             .filter(|r| r.status == PlayerRankStatus::Alive)
             .count();
-        self.sort_ranks();
-        Ok(())
     }
 
     fn sort_ranks(&mut self) {
