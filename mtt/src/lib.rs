@@ -18,7 +18,10 @@
 mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_api::{prelude::*, types::SettleOp};
+use race_api::{
+    prelude::*,
+    types::{EntryType, SettleOp},
+};
 use race_holdem_base::essential::Player;
 use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
@@ -120,7 +123,6 @@ pub struct MttAccountData {
     table_size: u8,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
-    ticket: u64,
     theme: Option<String>, // optional NFT theme
 }
 
@@ -209,10 +211,17 @@ impl GameHandler for Mtt {
             table_size,
             mut blind_info,
             prize_rules,
-            ticket,
             theme,
         } = init_account.data()?;
         let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
+
+        let ticket = match init_account.entry_type {
+            EntryType::Cash { min_deposit, .. } => min_deposit,
+            EntryType::Ticket { amount, .. } => amount,
+            EntryType::Gating { .. } => {
+                panic!("Entry type not supported");
+            }
+        };
 
         let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize) =
             if let Some(checkpoint) = checkpoint {
@@ -633,7 +642,7 @@ impl Mtt {
 
             if change > 0 {
                 // TODO: handle overflow?
-                effect.settle(Settle::add(id,  change as u64));
+                effect.settle(Settle::add(id, change as u64));
             } else if change < 0 {
                 effect.settle(Settle::sub(id, -change as u64))
             } else {
@@ -664,9 +673,9 @@ mod tests {
                 table_size: 2,
                 blind_info: BlindInfo::default(),
                 prize_rules: vec![50, 30, 20],
-                ticket: 1000,
                 theme: None,
             })
+            .with_deposit_range(1000, 1000)
             .add_player(alice, 1000)
             .add_player(bob, 1000)
             .add_player(carol, 2000)
@@ -753,12 +762,12 @@ mod tests {
 
         let acc = TestGameAccountBuilder::default()
             .with_max_players(20)
+            .with_deposit_range(1000, 1000)
             .with_data(MttAccountData {
                 start_time: 1000,
                 table_size: 3,
                 blind_info: BlindInfo::default(),
                 prize_rules: vec![50, 30, 20],
-                ticket: 1000,
                 theme: None,
             })
             .add_player(pa, 1000)
@@ -955,12 +964,12 @@ mod tests {
     #[test]
     fn test_init_state_with_new_game() -> anyhow::Result<()> {
         let acc = TestGameAccountBuilder::default()
+            .with_deposit_range(1000, 1000)
             .with_data(MttAccountData {
                 start_time: 1000,
                 table_size: 6,
                 blind_info: BlindInfo::default(),
                 prize_rules: vec![50, 30, 20],
-                ticket: 1000,
                 theme: None,
             })
             .build();
@@ -1082,6 +1091,7 @@ mod tests {
         let mut mtt = setup_mtt_state(players)?;
         let evt = Event::GameStart { access_version: 0 };
         let mut effect = Effect::default();
+        effect.timestamp = 1001;
         mtt.handle_event(&mut effect, evt)?;
 
         assert_eq!(
@@ -1178,7 +1188,7 @@ mod tests {
         assert_eq!(mtt.ranks.len(), 12);
         assert_eq!(mtt.tables.len(), 4);
         assert_eq!(mtt.table_size, 3);
-        assert_eq!(mtt.time_elapsed, 50);
+        assert_eq!(mtt.time_elapsed, 1051);
         assert_eq!(mtt.timestamp, effect.timestamp);
         assert_eq!(mtt.blind_info, BlindInfo::default());
 
@@ -1411,12 +1421,12 @@ mod tests {
         let carol = players_iter.next().unwrap();
         let dave = players_iter.next().unwrap();
         let acc = TestGameAccountBuilder::default()
+            .with_deposit_range(1_000_000_000, 1_000_000_000)
             .with_data(MttAccountData {
                 start_time: 1000,
                 table_size: 2,
                 blind_info: BlindInfo::default(),
                 prize_rules: vec![50, 30, 20],
-                ticket: 1_000_000_000,
                 theme: None,
             })
             .add_player(alice, 1_000_000_000)
@@ -1496,7 +1506,6 @@ mod tests {
         let players = [&mut alice, &mut bob, &mut carol, &mut dave];
         let mut mtt = init_state_with_huge_amt(players)?;
 
-
         let evt = Event::GameStart { access_version: 0 };
         let mut effect = Effect::default();
         mtt.handle_event(&mut effect, evt)?;
@@ -1509,7 +1518,10 @@ mod tests {
         // T2 settles: 1 player out and first three split the prize
         let t1_game_result = HoldemBridgeEvent::GameResult {
             table_id: 1,
-            settles: vec![Settle::add(alice.id(), 2_000_000_000), Settle::sub(carol.id(), 2_000_000_000)],
+            settles: vec![
+                Settle::add(alice.id(), 2_000_000_000),
+                Settle::sub(carol.id(), 2_000_000_000),
+            ],
             checkpoint: MttTableCheckpoint {
                 btn: 0,
                 players: vec![MttTablePlayer {
@@ -1522,7 +1534,10 @@ mod tests {
 
         let t2_game_result = HoldemBridgeEvent::GameResult {
             table_id: 2,
-            settles: vec![Settle::add(alice.id(), 1_000_000_000), Settle::sub(bob.id(), 1_000_000_000)],
+            settles: vec![
+                Settle::add(alice.id(), 1_000_000_000),
+                Settle::sub(bob.id(), 1_000_000_000),
+            ],
             checkpoint: MttTableCheckpoint {
                 btn: 0,
                 players: vec![MttTablePlayer {

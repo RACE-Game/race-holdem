@@ -181,14 +181,17 @@ mod tests {
         let mut alice = TestClient::player("alice");
         let mut bob = TestClient::player("bob");
         let mut tx = TestClient::transactor("tx");
+        let acc_builder = TestGameAccountBuilder::default()
+            .add_player(&mut alice, 10000)
+            .add_player(&mut bob, 10000)
+            .set_transactor(&mut tx);
+
         let player_lookup = BTreeMap::from([
             (0, Player::new(alice.id(), 10000, 0, 0)),
             (1, Player::new(bob.id(), 10000, 1, 0)),
         ]);
-        let acc = TestGameAccountBuilder::default()
-            .add_player(&mut alice, 10000)
-            .add_player(&mut bob, 10000)
-            .set_transactor(&mut tx)
+
+        let acc = acc_builder
             .with_data(InitTableData {
                 sb: 10,
                 bb: 20,
