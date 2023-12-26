@@ -7,5 +7,5 @@ macro_rules! custom_err {
     }
 }
 
-custom_err!(internal_player_position_missing);
+custom_err!(internal_player_id_missing);
 custom_err!(internal_invalid_bridge_event);

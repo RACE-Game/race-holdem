@@ -4,22 +4,25 @@ use race_api::prelude::*;
 use race_holdem_base::essential::Player;
 use std::collections::BTreeMap;
 
+type PlayerId = u64;
+
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
-    pub mtt_position: u16,
+    pub id: u64,
     pub chips: u64,
     pub table_position: usize,
 }
 
 impl MttTablePlayer {
-    pub fn new(mtt_position: u16, chips: u64, table_position: usize) -> Self {
+    pub fn new(id: u64, chips: u64, table_position: usize) -> Self {
         Self {
-            mtt_position,
+            id,
             chips,
             table_position,
         }
     }
 }
+
 
 #[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct InitTableData {
@@ -28,7 +31,7 @@ pub struct InitTableData {
     pub sb: u64,
     pub bb: u64,
     pub table_size: u8,
-    pub player_lookup: BTreeMap<u16, Player>,
+    pub player_lookup: BTreeMap<PlayerId, Player>,
 }
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
@@ -38,7 +41,7 @@ pub struct MttTableCheckpoint {
 }
 
 impl MttTableCheckpoint {
-    pub fn add_player(&mut self, mtt_position: u16, chips: u64) -> usize {
+    pub fn add_player(&mut self, id: u64, chips: u64) -> usize {
         let mut table_position = 0;
         for i in 0.. {
             if self
@@ -52,7 +55,7 @@ impl MttTableCheckpoint {
             }
         }
         self.players.push(MttTablePlayer {
-            mtt_position,
+            id,
             chips,
             table_position,
         });
@@ -67,10 +70,10 @@ pub enum HoldemBridgeEvent {
     StartGame {
         sb: u64,
         bb: u64,
-        moved_players: Vec<u16>,
+        moved_players: Vec<u64>,
     },
-    AddPlayers {
-        player_lookup: BTreeMap<u16, Player>,
+    Relocate {
+        players: Vec<MttTablePlayer>,
     },
     CloseTable,
     GameResult {
@@ -92,17 +95,17 @@ mod tests {
             btn: 0,
             players: vec![
                 MttTablePlayer {
-                    mtt_position: 0,
+                    id: 0,
                     chips: 100,
                     table_position: 0,
                 },
                 MttTablePlayer {
-                    mtt_position: 1,
+                    id: 1,
                     chips: 100,
                     table_position: 1,
                 },
                 MttTablePlayer {
-                    mtt_position: 2,
+                    id: 2,
                     chips: 100,
                     table_position: 3,
                 },
@@ -113,7 +116,7 @@ mod tests {
         assert_eq!(pos, 2);
         assert_eq!(table.players.len(), 4);
         assert_eq!(table.players[3].table_position, 2);
-        assert_eq!(table.players[3].mtt_position, 4);
+        assert_eq!(table.players[3].id, 4);
         Ok(())
     }
 }

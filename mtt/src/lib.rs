@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 const SUBGAME_BUNDLE_ADDR: &str = "";
 
 pub type TableId = u8;
+pub type PlayerId = u64;
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug)]
 pub enum MttStage {
@@ -64,7 +65,7 @@ impl PlayerRank {
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct PlayerRankCheckpoint {
-    mtt_position: u16,
+    id: u64,
     chips: u64,
     table_id: u8,
 }
@@ -131,12 +132,12 @@ pub struct MttCheckpoint {
 #[allow(dead_code)]
 fn find_checkpoint_rank_by_pos(
     ranks: &[PlayerRankCheckpoint],
-    mtt_position: u16,
+    id: u64,
 ) -> Result<&PlayerRankCheckpoint, HandleError> {
     ranks
         .iter()
-        .find(|rank| rank.mtt_position.eq(&mtt_position))
-        .ok_or(errors::error_player_mtt_position_not_found())
+        .find(|rank| rank.id.eq(&id))
+        .ok_or(errors::error_player_id_not_found())
 }
 
 impl TryFrom<Mtt> for MttCheckpoint {
@@ -155,12 +156,13 @@ impl TryFrom<Mtt> for MttCheckpoint {
         let mut ranks_checkpoint = Vec::new();
 
         for rank in ranks {
+            let PlayerRank {id, chips, ..} = rank;
             let table_id = *table_assigns
-                .get(&rank.id)
+                .get(&id)
                 .ok_or(errors::error_player_not_found())?;
             ranks_checkpoint.push(PlayerRankCheckpoint {
-                mtt_position: rank.position,
-                chips: rank.chips,
+                id,
+                chips,
                 table_id,
             });
         }
@@ -180,7 +182,7 @@ pub struct Mtt {
     start_time: u64,
     alives: usize, // The number of alive players
     stage: MttStage,
-    table_assigns: BTreeMap<u64, TableId>, // The mapping from player address to its table id
+    table_assigns: BTreeMap<PlayerId, TableId>, // The mapping from player id to their table id
     ranks: Vec<PlayerRank>,
     tables: BTreeMap<TableId, MttTableCheckpoint>,
     table_size: u8,
@@ -202,12 +204,12 @@ impl GameHandler for Mtt {
 
         let (start_time, tables, time_elapsed, stage, table_assigns, ranks) =
             if let Some(checkpoint) = checkpoint {
-                let mut table_assigns = BTreeMap::<u64, TableId>::new();
+                let mut table_assigns = BTreeMap::<PlayerId, TableId>::new();
                 let mut ranks = Vec::<PlayerRank>::new();
 
                 for p in init_account.players.into_iter() {
                     let GamePlayer { id, position, .. } = p;
-                    let r = find_checkpoint_rank_by_pos(&checkpoint.ranks, position)?;
+                    let r = find_checkpoint_rank_by_pos(&checkpoint.ranks, id)?;
                     table_assigns.insert(id, r.table_id);
                     ranks.push(PlayerRank {
                         id,
@@ -331,11 +333,12 @@ impl GameHandler for Mtt {
 }
 
 impl Mtt {
-    fn find_player_rank_by_pos(&self, position: u16) -> Result<&PlayerRank, HandleError> {
+    #[allow(dead_code)]
+    fn find_player_rank_by_id(&self, id: u64) -> Result<&PlayerRank, HandleError> {
         self.ranks
             .iter()
-            .find(|rank| rank.position.eq(&position))
-            .ok_or(errors::error_player_mtt_position_not_found())
+            .find(|rank| rank.id.eq(&id))
+            .ok_or(errors::error_player_id_not_found())
     }
 
     fn launch_table(
@@ -347,10 +350,8 @@ impl Mtt {
         let (sb, bb) = self.calc_blinds()?;
         let mut player_lookup = BTreeMap::new();
         for p in table.players.iter() {
-            let pos = p.mtt_position;
-            let rank = self.find_player_rank_by_pos(pos)?;
-            let player = Player::new(rank.id, rank.chips, p.table_position as _, 0);
-            player_lookup.insert(pos, player);
+            let player = Player::new(p.id, p.chips, p.table_position as _, 0);
+            player_lookup.insert(p.id, player);
         }
         let init_table_data = InitTableData {
             btn: table.btn,
@@ -382,9 +383,9 @@ impl Mtt {
                 let table_id = i + 1;
                 while let Some(r) = self.ranks.get(j as usize) {
                     players.push(MttTablePlayer::new(
-                        r.position,
+                        r.id,
                         r.chips,
-                        (j / num_of_tables) as usize,
+                        (j / num_of_tables) as usize, // player's table position
                     ));
                     self.table_assigns.insert(r.id, table_id);
                     j += num_of_tables;
@@ -517,28 +518,19 @@ impl Mtt {
                     .ok_or(errors::error_invalid_index_usage())?;
 
                 if let Some(player) = table_to_close.players.pop() {
-                    let rank = self.find_player_rank_by_pos(player.mtt_position)?;
-                    let id = rank.id;
-                    let chips = rank.chips;
                     let table_ref = self
                         .tables
                         .get_mut(&target_table_id)
                         .ok_or(errors::error_table_not_fonud())?;
-                    let pos = table_ref.add_player(player.mtt_position, player.chips);
+                    let _pos = table_ref.add_player(player.id, player.chips);
                     evts.push((
                         target_table_ids[i],
-                        HoldemBridgeEvent::AddPlayers {
-                            player_lookup: BTreeMap::from([(
-                                player.mtt_position,
-                                Player::new(id, chips, pos as _, 0),
-                            )]),
-                        },
+                        HoldemBridgeEvent::Relocate { players: vec![player] },
                     ));
                 } else {
                     break;
                 }
             }
-            println!("Add those events to effect {:?}", evts);
 
             evts.push((table_id, HoldemBridgeEvent::CloseTable));
         } else if table_id == largest_table_id
@@ -546,7 +538,6 @@ impl Mtt {
         {
             // Move players to the table with least players
             let num_to_move = (largest_table_players_count - smallest_table_players_count) / 2;
-            println!("To move {} players", num_to_move);
             let players: Vec<MttTablePlayer> = self
                 .tables
                 .get_mut(&largest_table_id)
@@ -554,25 +545,11 @@ impl Mtt {
                 .players
                 .drain(0..num_to_move)
                 .collect();
-            let moved_players = players.iter().map(|p| p.mtt_position).collect();
+            let moved_players = players.iter().map(|p| p.id).collect();
 
-            let mut player_lookup = BTreeMap::new();
-            for p in players {
-                let pos = self
-                    .tables
-                    .get_mut(&largest_table_id)
-                    .ok_or(errors::error_invalid_index_usage())?
-                    .add_player(p.mtt_position, p.chips);
-                println!("Found available position {}", pos);
-                let rank = self.find_player_rank_by_pos(p.mtt_position)?;
-                player_lookup.insert(
-                    p.mtt_position,
-                    Player::new(rank.id, rank.chips, pos as _, 0),
-                );
-            }
             evts.push((
                 smallest_table_id,
-                HoldemBridgeEvent::AddPlayers { player_lookup },
+                HoldemBridgeEvent::Relocate { players },
             ));
 
             let (sb, bb) = self.calc_blinds()?;
@@ -584,7 +561,6 @@ impl Mtt {
                     moved_players,
                 },
             ));
-            println!("Add those events to effect {:?}", evts);
         }
         for (table_id, evt) in evts {
             effect.bridge_event(table_id as _, evt)?;
@@ -1194,7 +1170,7 @@ mod tests {
                     HoldemBridgeEvent::StartGame {
                         sb: 10,
                         bb: 20,
-                        moved_players: vec![0] // player pa(mtt_pos: 0) left
+                        moved_players: vec![0] // player pa(id) left
                     }
                 )?
             ]

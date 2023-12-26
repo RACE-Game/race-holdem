@@ -1,20 +1,22 @@
 mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_api::prelude::*;
 use race_api::event::BridgeEvent;
+use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, Player};
 use race_holdem_base::game::Holdem;
+use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
-use race_holdem_mtt_base::{MttTablePlayer, InitTableData, MttTableCheckpoint, HoldemBridgeEvent};
+
+pub type PlayerId = u64;
 
 #[game_handler]
 #[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct MttTable {
     pub table_id: u8,
     pub holdem: Holdem,
-    pub player_lookup: BTreeMap<u16, Player>, // The mapping from players' game position to player struct
+    // pub player_lookup: BTreeMap<PlayerId, Player>, // The mapping from player id to player struct
 }
 
 impl GameHandler for MttTable {
@@ -32,7 +34,7 @@ impl GameHandler for MttTable {
         let mut player_map = BTreeMap::new();
 
         for (_, player) in player_lookup.clone() {
-            player_map.insert(player.addr(), player);
+            player_map.insert(player.id, player);
         }
 
         let holdem = Holdem {
@@ -49,7 +51,6 @@ impl GameHandler for MttTable {
 
         Ok(Self {
             table_id,
-            player_lookup,
             holdem,
         })
     }
@@ -87,12 +88,9 @@ impl GameHandler for MttTable {
 impl MttTable {
     fn derive_checkpoint(&self) -> HandleResult<MttTableCheckpoint> {
         let mut players = vec![];
-        for (addr, player) in self.holdem.player_map.iter() {
-            let mtt_position = self
-                .find_game_position(&addr)
-                .ok_or(errors::internal_player_position_missing())?;
+        for (id, player) in self.holdem.player_map.iter() {
             players.push(MttTablePlayer {
-                mtt_position,
+                id: *id,
                 chips: player.chips,
                 table_position: player.position,
             })
@@ -116,38 +114,29 @@ impl MttTable {
             } => {
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
-                for mtt_pos in moved_players {
-                    let p = self.player_lookup.remove(&mtt_pos).ok_or(errors::internal_player_position_missing())?;
-                    self.holdem.player_map.remove(&p.addr);
+                for id in moved_players {
+                    self.holdem.player_map.remove(&id);
                 }
                 effect.start_game();
             }
-            HoldemBridgeEvent::AddPlayers { mut player_lookup } => {
-                for (_, player) in player_lookup.iter() {
-                    self.holdem.player_map.insert(player.addr.clone(), player.clone());
+            HoldemBridgeEvent::Relocate { players } => {
+                for mtt_player in players.into_iter() {
+                    let MttTablePlayer {
+                        id,
+                        chips,
+                        table_position,
+                    } = mtt_player;
+                    self.holdem
+                        .player_map
+                        .insert(id, Player::new(id, chips, table_position as _, 0));
                 }
-                self.player_lookup.append(&mut player_lookup);
             }
             HoldemBridgeEvent::CloseTable => {
                 self.holdem.player_map.clear();
-            },
+            }
             _ => return Err(errors::internal_invalid_bridge_event()),
         };
         Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn find_player_addr(&self, game_position: u16) -> Option<String> {
-        self.player_lookup
-            .get(&game_position)
-            .map(|p| p.addr.clone())
-    }
-
-    fn find_game_position(&self, addr: &str) -> Option<u16> {
-        self.player_lookup
-            .iter()
-            .find(|(_, player)| player.addr.eq(&addr))
-            .map(|(pos, _)| *pos)
     }
 }
 
@@ -258,7 +247,6 @@ mod tests {
                         btn: 1,
                         players: vec![MttTablePlayer::new(1, 20000, 1)]
                     }
-
                 }]
             );
         }
