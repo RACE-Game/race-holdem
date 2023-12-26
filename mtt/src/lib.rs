@@ -522,8 +522,7 @@ impl Mtt {
                         .tables
                         .get_mut(&target_table_id)
                         .ok_or(errors::error_table_not_fonud())?;
-                    let updated_pos = table_ref.add_player(player.id, player.chips);
-                    player.table_position = updated_pos;
+                    table_ref.add_player(&mut player);
                     evts.push((
                         target_table_ids[i],
                         HoldemBridgeEvent::Relocate { players: vec![player] },
@@ -539,13 +538,21 @@ impl Mtt {
         {
             // Move players to the table with least players
             let num_to_move = (largest_table_players_count - smallest_table_players_count) / 2;
-            let players: Vec<MttTablePlayer> = self
+            let mut players: Vec<MttTablePlayer> = self
                 .tables
                 .get_mut(&largest_table_id)
                 .ok_or(errors::error_invalid_index_usage())?
                 .players
                 .drain(0..num_to_move)
                 .collect();
+
+            let table_ref = self
+                .tables
+                .get_mut(&smallest_table_id)
+                .ok_or(errors::error_table_not_fonud())?;
+
+            players.iter_mut().for_each(|p| table_ref.add_player(p));
+
             let moved_players = players.iter().map(|p| p.id).collect();
 
             evts.push((
@@ -1182,7 +1189,7 @@ mod tests {
                 EmitBridgeEvent::try_new(
                     3,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer { id: pa.id(), chips: 1200, table_position: 0 }],
+                        players: vec![MttTablePlayer { id: pa.id(), chips: 1200, table_position: 1 }],
                     }
                 )?,
                 EmitBridgeEvent::try_new(

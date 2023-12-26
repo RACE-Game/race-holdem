@@ -41,7 +41,7 @@ pub struct MttTableCheckpoint {
 }
 
 impl MttTableCheckpoint {
-    pub fn add_player(&mut self, id: u64, chips: u64) -> usize {
+    pub fn add_player(&mut self, player: &mut MttTablePlayer) {
         let mut table_position = 0;
         for i in 0.. {
             if self
@@ -55,11 +55,12 @@ impl MttTableCheckpoint {
             }
         }
         self.players.push(MttTablePlayer {
-            id,
-            chips,
+            id: player.id,
+            chips: player.chips,
             table_position,
         });
-        table_position
+        // Update relocated player's table position as well
+        player.table_position = table_position;
     }
 }
 
