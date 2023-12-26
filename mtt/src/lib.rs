@@ -517,12 +517,13 @@ impl Mtt {
                     .get(i)
                     .ok_or(errors::error_invalid_index_usage())?;
 
-                if let Some(player) = table_to_close.players.pop() {
+                if let Some(mut player) = table_to_close.players.pop() {
                     let table_ref = self
                         .tables
                         .get_mut(&target_table_id)
                         .ok_or(errors::error_table_not_fonud())?;
-                    let _pos = table_ref.add_player(player.id, player.chips);
+                    let updated_pos = table_ref.add_player(player.id, player.chips);
+                    player.table_position = updated_pos;
                     evts.push((
                         target_table_ids[i],
                         HoldemBridgeEvent::Relocate { players: vec![player] },
@@ -1312,7 +1313,7 @@ mod tests {
                 EmitBridgeEvent::try_new(
                     4,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer { id: pc.id(), chips: 3000, table_position: 0 }]
+                        players: vec![MttTablePlayer { id: pc.id(), chips: 3000, table_position: 2 }]
                     }
                 )?,
                 EmitBridgeEvent::try_new(3, HoldemBridgeEvent::CloseTable)?,
