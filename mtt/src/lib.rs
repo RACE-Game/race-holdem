@@ -45,21 +45,16 @@ pub enum PlayerRankStatus {
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct PlayerRank {
-    addr: String,
+    id: u64,
     chips: u64,
     status: PlayerRankStatus,
     position: u16,
 }
 
 impl PlayerRank {
-    pub fn new<S: Into<String>>(
-        addr: S,
-        chips: u64,
-        status: PlayerRankStatus,
-        position: u16,
-    ) -> Self {
+    pub fn new(id: u64, chips: u64, status: PlayerRankStatus, position: u16) -> Self {
         Self {
-            addr: addr.into(),
+            id,
             chips,
             status,
             position,
@@ -161,7 +156,7 @@ impl TryFrom<Mtt> for MttCheckpoint {
 
         for rank in ranks {
             let table_id = *table_assigns
-                .get(&rank.addr)
+                .get(&rank.id)
                 .ok_or(errors::error_player_not_found())?;
             ranks_checkpoint.push(PlayerRankCheckpoint {
                 mtt_position: rank.position,
@@ -185,7 +180,7 @@ pub struct Mtt {
     start_time: u64,
     alives: usize, // The number of alive players
     stage: MttStage,
-    table_assigns: BTreeMap<String, TableId>, // The mapping from player address to its table id
+    table_assigns: BTreeMap<u64, TableId>, // The mapping from player address to its table id
     ranks: Vec<PlayerRank>,
     tables: BTreeMap<TableId, MttTableCheckpoint>,
     table_size: u8,
@@ -205,18 +200,17 @@ impl GameHandler for Mtt {
         } = init_account.data()?;
         let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
 
-        // let mut table_assigns = BTreeMap::<String, TableId>::new();
         let (start_time, tables, time_elapsed, stage, table_assigns, ranks) =
             if let Some(checkpoint) = checkpoint {
-                let mut table_assigns = BTreeMap::<String, TableId>::new();
+                let mut table_assigns = BTreeMap::<u64, TableId>::new();
                 let mut ranks = Vec::<PlayerRank>::new();
 
                 for p in init_account.players.into_iter() {
-                    let GamePlayer { addr, position, .. } = p;
-                    let r = find_checkpoint_rank_by_pos(&checkpoint.ranks, p.position)?;
-                    table_assigns.insert(addr.clone(), r.table_id);
+                    let GamePlayer { id, position, .. } = p;
+                    let r = find_checkpoint_rank_by_pos(&checkpoint.ranks, position)?;
+                    table_assigns.insert(id, r.table_id);
                     ranks.push(PlayerRank {
-                        addr,
+                        id,
                         chips: r.chips,
                         status: if r.chips > 0 {
                             PlayerRankStatus::Alive
@@ -240,7 +234,7 @@ impl GameHandler for Mtt {
                     BTreeMap::<TableId, MttTableCheckpoint>::new(),
                     0,
                     MttStage::Init,
-                    BTreeMap::<String, TableId>::new(),
+                    BTreeMap::<u64, TableId>::new(),
                     Vec::<PlayerRank>::new(),
                 )
             };
@@ -285,7 +279,7 @@ impl GameHandler for Mtt {
                 MttStage::Init => {
                     for p in new_players {
                         self.ranks.push(PlayerRank {
-                            addr: p.addr,
+                            id: p.id,
                             chips: p.balance,
                             status: PlayerRankStatus::Alive,
                             position: p.position,
@@ -294,7 +288,7 @@ impl GameHandler for Mtt {
                 }
                 _ => {
                     for p in new_players {
-                        effect.settle(Settle::eject(p.addr))
+                        effect.settle(Settle::eject(p.id))
                     }
                     effect.checkpoint();
                 }
@@ -355,7 +349,7 @@ impl Mtt {
         for p in table.players.iter() {
             let pos = p.mtt_position;
             let rank = self.find_player_rank_by_pos(pos)?;
-            let player = Player::new(rank.addr.clone(), rank.chips, p.table_position as _, 0);
+            let player = Player::new(rank.id, rank.chips, p.table_position as _, 0);
             player_lookup.insert(pos, player);
         }
         let init_table_data = InitTableData {
@@ -392,7 +386,7 @@ impl Mtt {
                         r.chips,
                         (j / num_of_tables) as usize,
                     ));
-                    self.table_assigns.insert(r.addr.to_owned(), table_id);
+                    self.table_assigns.insert(r.id, table_id);
                     j += num_of_tables;
                 }
                 let table = MttTableCheckpoint { btn: 0, players };
@@ -409,7 +403,7 @@ impl Mtt {
             let rank = self
                 .ranks
                 .iter_mut()
-                .find(|r| r.addr.eq(&s.addr))
+                .find(|r| r.id.eq(&s.id))
                 .ok_or(errors::error_player_not_found())?;
             match s.op {
                 SettleOp::Add(amount) => {
@@ -524,7 +518,7 @@ impl Mtt {
 
                 if let Some(player) = table_to_close.players.pop() {
                     let rank = self.find_player_rank_by_pos(player.mtt_position)?;
-                    let addr = rank.addr.clone();
+                    let id = rank.id;
                     let chips = rank.chips;
                     let table_ref = self
                         .tables
@@ -536,7 +530,7 @@ impl Mtt {
                         HoldemBridgeEvent::AddPlayers {
                             player_lookup: BTreeMap::from([(
                                 player.mtt_position,
-                                Player::new(addr, chips, pos as _, 0),
+                                Player::new(id, chips, pos as _, 0),
                             )]),
                         },
                     ));
@@ -573,7 +567,7 @@ impl Mtt {
                 let rank = self.find_player_rank_by_pos(p.mtt_position)?;
                 player_lookup.insert(
                     p.mtt_position,
-                    Player::new(rank.addr.clone(), rank.chips, pos as _, 0),
+                    Player::new(rank.id, rank.chips, pos as _, 0),
                 );
             }
             evts.push((
@@ -606,22 +600,18 @@ mod tests {
     use race_test::prelude::*;
 
     use crate::{MttAccountData, MttCheckpoint};
-
-    fn init_test_state() -> anyhow::Result<Mtt> {
-        let mut alice = TestClient::player("alice");
-        let mut bob = TestClient::player("bob");
-        let mut carol = TestClient::player("carol");
-        let mut dave = TestClient::player("dave");
+    fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
+        let mut players_iter = players.into_iter();
         let acc = TestGameAccountBuilder::default()
             .with_data(MttAccountData {
                 start_time: 1000,
                 table_size: 2,
                 blind_info: BlindInfo::default(),
             })
-            .add_player(&alice, 1000)
-            .add_player(&bob, 1000)
-            .add_player(&carol, 1000)
-            .add_player(&dave, 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
             .with_checkpoint(MttCheckpoint {
                 start_time: 1001,
                 ranks: vec![
@@ -686,19 +676,8 @@ mod tests {
     }
 
     // Like init_test_state but with larger table size and more players
-    fn setup_mtt_state() -> anyhow::Result<Mtt> {
-        let mut pa = TestClient::player("pa");
-        let mut pb = TestClient::player("pb");
-        let mut pc = TestClient::player("pc");
-        let mut pd = TestClient::player("pd");
-        let mut pe = TestClient::player("pe");
-        let mut pf = TestClient::player("pf");
-        let mut pg = TestClient::player("pg");
-        let mut ph = TestClient::player("ph");
-        let mut pi = TestClient::player("pi");
-        let mut pj = TestClient::player("pj");
-        let mut pk = TestClient::player("pk");
-        let mut pl = TestClient::player("pl");
+    fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
+        let mut players_iter = players.into_iter();
         let acc = TestGameAccountBuilder::default()
             .with_max_players(20)
             .with_data(MttAccountData {
@@ -706,18 +685,18 @@ mod tests {
                 table_size: 3,
                 blind_info: BlindInfo::default(),
             })
-            .add_player(&pa, 1000)
-            .add_player(&pb, 1000)
-            .add_player(&pc, 1000)
-            .add_player(&pd, 1000)
-            .add_player(&pe, 1000)
-            .add_player(&pf, 1000)
-            .add_player(&pg, 1000)
-            .add_player(&ph, 1000)
-            .add_player(&pi, 1000)
-            .add_player(&pj, 1000)
-            .add_player(&pk, 1000)
-            .add_player(&pl, 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
+            .add_player(players_iter.next().unwrap(), 1000)
             .with_checkpoint(MttCheckpoint {
                 start_time: 1001,
                 ranks: vec![
@@ -923,7 +902,12 @@ mod tests {
 
     #[test]
     fn test_init_state_with_checkpoint() -> anyhow::Result<()> {
-        let mtt = init_test_state()?;
+        let mut alice = TestClient::player("alice");
+        let mut bob = TestClient::player("bob");
+        let mut carol = TestClient::player("carol");
+        let mut dave = TestClient::player("dave");
+        let players = [&mut alice, &mut bob, &mut carol, &mut dave];
+        let mtt = init_test_state(players)?;
         assert_eq!(mtt.start_time, 1001);
         assert_eq!(mtt.alives, 3);
         assert_eq!(mtt.stage, MttStage::Playing);
@@ -939,17 +923,22 @@ mod tests {
 
     #[test]
     fn test_create_tables() -> anyhow::Result<()> {
-        let mut mtt = init_test_state()?;
+        let mut alice = TestClient::player("alice");
+        let mut bob = TestClient::player("bob");
+        let mut carol = TestClient::player("carol");
+        let mut dave = TestClient::player("dave");
+        let players = [&mut alice, &mut bob, &mut carol, &mut dave];
+        let mut mtt = init_test_state(players)?;
         let evt = Event::GameStart { access_version: 0 };
         let mut effect = Effect::default();
         mtt.handle_event(&mut effect, evt)?;
         assert_eq!(
             mtt.table_assigns,
             BTreeMap::from([
-                ("alice".to_string(), 1),
-                ("bob".to_string(), 2),
-                ("carol".to_string(), 1),
-                ("dave".to_string(), 2),
+                (alice.id(), 1),
+                (bob.id(), 2),
+                (carol.id(), 1),
+                (dave.id(), 2),
             ])
         );
         assert_eq!(
@@ -965,8 +954,8 @@ mod tests {
                         bb: 20,
                         table_size: 2,
                         player_lookup: BTreeMap::from([
-                            (0, Player::new("alice", 1000, 0, 0)),
-                            (2, Player::new("carol", 2000, 1, 0))
+                            (0, Player::new(alice.id(), 1000, 0, 0)),
+                            (2, Player::new(carol.id(), 2000, 1, 0))
                         ])
                     }
                 )?,
@@ -979,7 +968,7 @@ mod tests {
                         sb: 10,
                         bb: 20,
                         table_size: 2,
-                        player_lookup: BTreeMap::from([(1, Player::new("bob", 1000, 0, 0)),])
+                        player_lookup: BTreeMap::from([(1, Player::new(bob.id(), 1000, 0, 0)),])
                     }
                 )?,
             ]
@@ -990,7 +979,23 @@ mod tests {
 
     #[test]
     fn test_move_players() -> anyhow::Result<()> {
-        let mut mtt = setup_mtt_state()?;
+        let mut pa = TestClient::player("pa");
+        let mut pb = TestClient::player("pb");
+        let mut pc = TestClient::player("pc");
+        let mut pd = TestClient::player("pd");
+        let mut pe = TestClient::player("pe");
+        let mut pf = TestClient::player("pf");
+        let mut pg = TestClient::player("pg");
+        let mut ph = TestClient::player("ph");
+        let mut pi = TestClient::player("pi");
+        let mut pj = TestClient::player("pj");
+        let mut pk = TestClient::player("pk");
+        let mut pl = TestClient::player("pl");
+        let players = [
+            &mut pa, &mut pb, &mut pc, &mut pd, &mut pe, &mut pf, &mut pg, &mut ph, &mut pi,
+            &mut pj, &mut pk, &mut pl,
+        ];
+        let mut mtt = setup_mtt_state(players)?;
         let evt = Event::GameStart { access_version: 0 };
         let mut effect = Effect::default();
         mtt.handle_event(&mut effect, evt)?;
@@ -998,18 +1003,18 @@ mod tests {
         assert_eq!(
             mtt.table_assigns,
             BTreeMap::from([
-                ("pa".to_string(), 1),
-                ("pb".to_string(), 2),
-                ("pc".to_string(), 3),
-                ("pd".to_string(), 4),
-                ("pe".to_string(), 1),
-                ("pf".to_string(), 2),
-                ("pg".to_string(), 3),
-                ("ph".to_string(), 4),
-                ("pi".to_string(), 1),
-                ("pj".to_string(), 2),
-                ("pk".to_string(), 3),
-                ("pl".to_string(), 4),
+                (pa.id(), 1),
+                (pb.id(), 2),
+                (pc.id(), 3),
+                (pd.id(), 4),
+                (pe.id(), 1),
+                (pf.id(), 2),
+                (pg.id(), 3),
+                (ph.id(), 4),
+                (pi.id(), 1),
+                (pj.id(), 2),
+                (pk.id(), 3),
+                (pl.id(), 4),
             ])
         );
 
@@ -1026,9 +1031,9 @@ mod tests {
                         bb: 20,
                         table_size: 3,
                         player_lookup: BTreeMap::from([
-                            (0, Player::new("pa", 1000, 0, 0)),
-                            (4, Player::new("pe", 1000, 1, 0)),
-                            (8, Player::new("pi", 1000, 2, 0)),
+                            (0, Player::new(pa.id(), 1000, 0, 0)),
+                            (4, Player::new(pe.id(), 1000, 1, 0)),
+                            (8, Player::new(pi.id(), 1000, 2, 0)),
                         ])
                     }
                 )?,
@@ -1042,9 +1047,9 @@ mod tests {
                         bb: 20,
                         table_size: 3,
                         player_lookup: BTreeMap::from([
-                            (1, Player::new("pb", 1000, 0, 0)),
-                            (5, Player::new("pf", 1000, 1, 0)),
-                            (9, Player::new("pj", 1000, 2, 0)),
+                            (1, Player::new(pb.id(), 1000, 0, 0)),
+                            (5, Player::new(pf.id(), 1000, 1, 0)),
+                            (9, Player::new(pj.id(), 1000, 2, 0)),
                         ])
                     }
                 )?,
@@ -1058,9 +1063,9 @@ mod tests {
                         bb: 20,
                         table_size: 3,
                         player_lookup: BTreeMap::from([
-                            (2, Player::new("pc", 1000, 0, 0)),
-                            (6, Player::new("pg", 1000, 1, 0)),
-                            (10, Player::new("pk", 1000, 2, 0)),
+                            (2, Player::new(pc.id(), 1000, 0, 0)),
+                            (6, Player::new(pg.id(), 1000, 1, 0)),
+                            (10, Player::new(pk.id(), 1000, 2, 0)),
                         ])
                     }
                 )?,
@@ -1074,9 +1079,9 @@ mod tests {
                         bb: 20,
                         table_size: 3,
                         player_lookup: BTreeMap::from([
-                            (3, Player::new("pd", 1000, 0, 0)),
-                            (7, Player::new("ph", 1000, 1, 0)),
-                            (11, Player::new("pl", 1000, 2, 0)),
+                            (3, Player::new(pd.id(), 1000, 0, 0)),
+                            (7, Player::new(ph.id(), 1000, 1, 0)),
+                            (11, Player::new(pl.id(), 1000, 2, 0)),
                         ])
                     }
                 )?,
@@ -1099,15 +1104,15 @@ mod tests {
             table_id: 3,
             settles: vec![
                 Settle {
-                    addr: "pc".into(),
+                    id: pc.id(),
                     op: SettleOp::Add(2000),
                 },
                 Settle {
-                    addr: "pg".into(),
+                    id: pg.id(),
                     op: SettleOp::Sub(1000),
                 },
                 Settle {
-                    addr: "pk".into(),
+                    id: pk.id(),
                     op: SettleOp::Sub(1000),
                 },
             ],
@@ -1126,15 +1131,15 @@ mod tests {
             table_id: 1,
             settles: vec![
                 Settle {
-                    addr: "pa".into(),
+                    id: pa.id(),
                     op: SettleOp::Add(200),
                 },
                 Settle {
-                    addr: "pe".into(),
+                    id: pe.id(),
                     op: SettleOp::Sub(100),
                 },
                 Settle {
-                    addr: "pi".into(),
+                    id: pi.id(),
                     op: SettleOp::Sub(100),
                 },
             ],
@@ -1181,7 +1186,7 @@ mod tests {
                 EmitBridgeEvent::try_new(
                     3,
                     HoldemBridgeEvent::AddPlayers {
-                        player_lookup: BTreeMap::from([(0, Player::new("pa", 1200, 0, 0))])
+                        player_lookup: BTreeMap::from([(0, Player::new(pa.id(), 1200, 0, 0))])
                     }
                 )?,
                 EmitBridgeEvent::try_new(
@@ -1204,7 +1209,24 @@ mod tests {
 
     #[test]
     fn test_close_table() -> anyhow::Result<()> {
-        let mut mtt = setup_mtt_state()?;
+                let mut pa = TestClient::player("pa");
+        let mut pb = TestClient::player("pb");
+        let mut pc = TestClient::player("pc");
+        let mut pd = TestClient::player("pd");
+        let mut pe = TestClient::player("pe");
+        let mut pf = TestClient::player("pf");
+        let mut pg = TestClient::player("pg");
+        let mut ph = TestClient::player("ph");
+        let mut pi = TestClient::player("pi");
+        let mut pj = TestClient::player("pj");
+        let mut pk = TestClient::player("pk");
+        let mut pl = TestClient::player("pl");
+        let players = [
+            &mut pa, &mut pb, &mut pc, &mut pd, &mut pe, &mut pf, &mut pg, &mut ph, &mut pi,
+            &mut pj, &mut pk, &mut pl,
+        ];
+
+        let mut mtt = setup_mtt_state(players)?;
         let evt = Event::GameStart { access_version: 0 };
         let mut effect = Effect::default();
         mtt.handle_event(&mut effect, evt)?;
@@ -1219,15 +1241,15 @@ mod tests {
             table_id: 3,
             settles: vec![
                 Settle {
-                    addr: "pc".into(),
+                    id: pc.id(),
                     op: SettleOp::Add(2000),
                 },
                 Settle {
-                    addr: "pg".into(),
+                    id: pg.id(),
                     op: SettleOp::Sub(1000),
                 },
                 Settle {
-                    addr: "pk".into(),
+                    id: pk.id(),
                     op: SettleOp::Sub(1000),
                 },
             ],
@@ -1246,15 +1268,15 @@ mod tests {
             table_id: 4,
             settles: vec![
                 Settle {
-                    addr: "pd".into(),
+                    id: pd.id(),
                     op: SettleOp::Add(500),
                 },
                 Settle {
-                    addr: "ph".into(),
+                    id: ph.id(),
                     op: SettleOp::Add(500),
                 },
                 Settle {
-                    addr: "pl".into(),
+                    id: pl.id(),
                     op: SettleOp::Sub(1000),
                 },
             ],
@@ -1295,7 +1317,7 @@ mod tests {
                 EmitBridgeEvent::try_new(
                     4,
                     HoldemBridgeEvent::AddPlayers {
-                        player_lookup: BTreeMap::from([(2, Player::new("pc", 3000, 2, 0))])
+                        player_lookup: BTreeMap::from([(2, Player::new(pc.id(), 3000, 2, 0))])
                     }
                 )?,
                 EmitBridgeEvent::try_new(3, HoldemBridgeEvent::CloseTable)?,
