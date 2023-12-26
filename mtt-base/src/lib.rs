@@ -112,9 +112,8 @@ mod tests {
                 },
             ],
         };
-        let pos = table.add_player(4, 100);
+        table.add_player(&mut MttTablePlayer { id: 4, chips: 100, table_position: 0 });
 
-        assert_eq!(pos, 2);
         assert_eq!(table.players.len(), 4);
         assert_eq!(table.players[3].table_position, 2);
         assert_eq!(table.players[3].id, 4);

@@ -119,6 +119,9 @@ pub struct MttAccountData {
     start_time: u64,
     table_size: u8,
     blind_info: BlindInfo,
+    prize_rules: Vec<u8>,
+    ticket: u64,
+    theme: Option<String>, // optional NFT theme
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -127,9 +130,9 @@ pub struct MttCheckpoint {
     ranks: Vec<PlayerRankCheckpoint>,
     tables: BTreeMap<TableId, MttTableCheckpoint>,
     time_elapsed: u64,
+    total_prize: u64,
 }
 
-#[allow(dead_code)]
 fn find_checkpoint_rank_by_pos(
     ranks: &[PlayerRankCheckpoint],
     id: u64,
@@ -150,13 +153,14 @@ impl TryFrom<Mtt> for MttCheckpoint {
             tables,
             ranks,
             table_assigns,
+            total_prize,
             ..
         } = value;
 
         let mut ranks_checkpoint = Vec::new();
 
         for rank in ranks {
-            let PlayerRank {id, chips, ..} = rank;
+            let PlayerRank { id, chips, .. } = rank;
             let table_id = *table_assigns
                 .get(&id)
                 .ok_or(errors::error_player_not_found())?;
@@ -172,6 +176,7 @@ impl TryFrom<Mtt> for MttCheckpoint {
             ranks: ranks_checkpoint,
             tables,
             time_elapsed,
+            total_prize,
         })
     }
 }
@@ -182,13 +187,17 @@ pub struct Mtt {
     start_time: u64,
     alives: usize, // The number of alive players
     stage: MttStage,
-    table_assigns: BTreeMap<PlayerId, TableId>, // The mapping from player id to their table id
+    table_assigns: BTreeMap<PlayerId, TableId>,
     ranks: Vec<PlayerRank>,
     tables: BTreeMap<TableId, MttTableCheckpoint>,
     table_size: u8,
     time_elapsed: u64,
     timestamp: u64,
     blind_info: BlindInfo,
+    prize_rules: Vec<u8>,
+    total_prize: u64,
+    ticket: u64,
+    theme: Option<String>,
 }
 
 impl GameHandler for Mtt {
@@ -199,10 +208,13 @@ impl GameHandler for Mtt {
             start_time,
             table_size,
             mut blind_info,
+            prize_rules,
+            ticket,
+            theme,
         } = init_account.data()?;
         let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
 
-        let (start_time, tables, time_elapsed, stage, table_assigns, ranks) =
+        let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize) =
             if let Some(checkpoint) = checkpoint {
                 let mut table_assigns = BTreeMap::<PlayerId, TableId>::new();
                 let mut ranks = Vec::<PlayerRank>::new();
@@ -229,15 +241,17 @@ impl GameHandler for Mtt {
                     MttStage::Playing,
                     table_assigns,
                     ranks,
+                    checkpoint.total_prize,
                 )
             } else {
                 (
                     start_time,
                     BTreeMap::<TableId, MttTableCheckpoint>::new(),
-                    0,
+                    0, // no time elapsed at the init
                     MttStage::Init,
                     BTreeMap::<u64, TableId>::new(),
                     Vec::<PlayerRank>::new(),
+                    0, // no prize at the init
                 )
             };
 
@@ -259,6 +273,10 @@ impl GameHandler for Mtt {
             time_elapsed,
             timestamp: effect.timestamp,
             blind_info,
+            prize_rules,
+            total_prize,
+            ticket,
+            theme,
         })
     }
 
@@ -286,6 +304,7 @@ impl GameHandler for Mtt {
                             status: PlayerRankStatus::Alive,
                             position: p.position,
                         });
+                        self.total_prize += self.ticket;
                     }
                 }
                 _ => {
@@ -311,6 +330,7 @@ impl GameHandler for Mtt {
                         self.tables.insert(table_id, checkpoint);
                         self.apply_settles(settles)?;
                         self.update_tables(effect, table_id)?;
+                        self.apply_prizes(effect)?;
                     }
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
@@ -339,6 +359,15 @@ impl Mtt {
             .iter()
             .find(|rank| rank.id.eq(&id))
             .ok_or(errors::error_player_id_not_found())
+    }
+
+    // When there is only one player alive, the game is over and the one is winner
+    fn has_winner(&self) -> bool {
+        self.ranks
+            .iter()
+            .filter(|r| r.status == PlayerRankStatus::Alive)
+            .count()
+            == 1
     }
 
     fn launch_table(
@@ -525,7 +554,9 @@ impl Mtt {
                     table_ref.add_player(&mut player);
                     evts.push((
                         target_table_ids[i],
-                        HoldemBridgeEvent::Relocate { players: vec![player] },
+                        HoldemBridgeEvent::Relocate {
+                            players: vec![player],
+                        },
                     ));
                 } else {
                     break;
@@ -555,10 +586,7 @@ impl Mtt {
 
             let moved_players = players.iter().map(|p| p.id).collect();
 
-            evts.push((
-                smallest_table_id,
-                HoldemBridgeEvent::Relocate { players },
-            ));
+            evts.push((smallest_table_id, HoldemBridgeEvent::Relocate { players }));
 
             let (sb, bb) = self.calc_blinds()?;
             evts.push((
@@ -574,6 +602,35 @@ impl Mtt {
             effect.bridge_event(table_id as _, evt)?;
         }
 
+        Ok(())
+    }
+
+    fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        if !self.has_winner() {
+            return Ok(());
+        }
+
+        let total_shares: u8 = self.prize_rules.iter().take(self.ranks.len()).sum();
+        let prize_share: u64 = self.total_prize / total_shares as u64;
+
+        // Get eligible ids for prizes
+        for (i, rank) in self.ranks.iter().enumerate() {
+            let id = rank.id;
+            let rule = self.prize_rules.get(i).unwrap_or(&0);
+            let prize: u64 = prize_share * *rule as u64;
+            let change: i128 = prize as i128 - self.ticket as i128;
+
+            if change > 0 {
+                // TODO: handle overflow?
+                effect.settle(Settle::add(id,  change as u64));
+            } else if change < 0 {
+                effect.settle(Settle::sub(id, -change as u64))
+            } else {
+            }
+        }
+
+        effect.checkpoint();
+        effect.allow_exit(true);
         Ok(())
     }
 }
@@ -595,6 +652,9 @@ mod tests {
                 start_time: 1000,
                 table_size: 2,
                 blind_info: BlindInfo::default(),
+                prize_rules: vec![50, 30, 20],
+                ticket: 1000,
+                theme: None,
             })
             .add_player(alice, 1000)
             .add_player(bob, 1000)
@@ -656,6 +716,7 @@ mod tests {
                     ),
                 ]),
                 time_elapsed: 50,
+                total_prize: 4000,
             })
             .build();
         let init_account = acc.derive_init_account();
@@ -685,6 +746,9 @@ mod tests {
                 start_time: 1000,
                 table_size: 3,
                 blind_info: BlindInfo::default(),
+                prize_rules: vec![50, 30, 20],
+                ticket: 1000,
+                theme: None,
             })
             .add_player(pa, 1000)
             .add_player(pb, 1000)
@@ -869,6 +933,7 @@ mod tests {
                     ),
                 ]),
                 time_elapsed: 50,
+                total_prize: 12_000,
             })
             .build();
         let init_account = acc.derive_init_account();
@@ -883,6 +948,9 @@ mod tests {
                 start_time: 1000,
                 table_size: 6,
                 blind_info: BlindInfo::default(),
+                prize_rules: vec![50, 30, 20],
+                ticket: 1000,
+                theme: None,
             })
             .build();
         let init_account = acc.derive_init_account();
@@ -970,8 +1038,10 @@ mod tests {
                         sb: 10,
                         bb: 20,
                         table_size: 2,
-                        player_lookup: BTreeMap::from(
-                            [(bob.id(), Player::new(bob.id(), 1000, 0, 0)),])
+                        player_lookup: BTreeMap::from([(
+                            bob.id(),
+                            Player::new(bob.id(), 1000, 0, 0)
+                        ),])
                     }
                 )?,
             ]
@@ -1189,7 +1259,11 @@ mod tests {
                 EmitBridgeEvent::try_new(
                     3,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer { id: pa.id(), chips: 1200, table_position: 1 }],
+                        players: vec![MttTablePlayer {
+                            id: pa.id(),
+                            chips: 1200,
+                            table_position: 1
+                        }],
                     }
                 )?,
                 EmitBridgeEvent::try_new(
@@ -1212,7 +1286,7 @@ mod tests {
 
     #[test]
     fn test_close_table() -> anyhow::Result<()> {
-                let mut pa = TestClient::player("pa");
+        let mut pa = TestClient::player("pa");
         let mut pb = TestClient::player("pb");
         let mut pc = TestClient::player("pc");
         let mut pd = TestClient::player("pd");
@@ -1243,18 +1317,9 @@ mod tests {
         let t3_game_result = HoldemBridgeEvent::GameResult {
             table_id: 3,
             settles: vec![
-                Settle {
-                    id: pc.id(),
-                    op: SettleOp::Add(2000),
-                },
-                Settle {
-                    id: pg.id(),
-                    op: SettleOp::Sub(1000),
-                },
-                Settle {
-                    id: pk.id(),
-                    op: SettleOp::Sub(1000),
-                },
+                Settle::add(pc.id(), 2000),
+                Settle::sub(pg.id(), 1000),
+                Settle::sub(pk.id(), 1000),
             ],
             // checkpoint contains alive players only
             checkpoint: MttTableCheckpoint {
@@ -1270,18 +1335,9 @@ mod tests {
         let t4_game_result = HoldemBridgeEvent::GameResult {
             table_id: 4,
             settles: vec![
-                Settle {
-                    id: pd.id(),
-                    op: SettleOp::Add(500),
-                },
-                Settle {
-                    id: ph.id(),
-                    op: SettleOp::Add(500),
-                },
-                Settle {
-                    id: pl.id(),
-                    op: SettleOp::Sub(1000),
-                },
+                Settle::add(pd.id(), 500),
+                Settle::add(ph.id(), 500),
+                Settle::sub(pl.id(), 1000),
             ],
             checkpoint: MttTableCheckpoint {
                 btn: 0,
@@ -1320,7 +1376,11 @@ mod tests {
                 EmitBridgeEvent::try_new(
                     4,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer { id: pc.id(), chips: 3000, table_position: 2 }]
+                        players: vec![MttTablePlayer {
+                            id: pc.id(),
+                            chips: 3000,
+                            table_position: 2
+                        }]
                     }
                 )?,
                 EmitBridgeEvent::try_new(3, HoldemBridgeEvent::CloseTable)?,
@@ -1330,6 +1390,165 @@ mod tests {
         assert_eq!(mtt.tables.len(), 3); // one table gets closed
         assert_eq!(mtt.stage, MttStage::Playing);
         assert_eq!(mtt.alives, 9);
+        Ok(())
+    }
+
+    fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
+        let mut players_iter = players.into_iter();
+        let alice = players_iter.next().unwrap();
+        let bob = players_iter.next().unwrap();
+        let carol = players_iter.next().unwrap();
+        let dave = players_iter.next().unwrap();
+        let acc = TestGameAccountBuilder::default()
+            .with_data(MttAccountData {
+                start_time: 1000,
+                table_size: 2,
+                blind_info: BlindInfo::default(),
+                prize_rules: vec![50, 30, 20],
+                ticket: 1_000_000_000,
+                theme: None,
+            })
+            .add_player(alice, 1_000_000_000)
+            .add_player(bob, 1_000_000_000)
+            .add_player(carol, 2_000_000_000)
+            .add_player(dave, 0)
+            .with_checkpoint(MttCheckpoint {
+                start_time: 1001,
+                ranks: vec![
+                    PlayerRankCheckpoint {
+                        id: alice.id(),
+                        chips: 1_000_000_000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        id: bob.id(),
+                        chips: 1_000_000_000,
+                        table_id: 2,
+                    },
+                    PlayerRankCheckpoint {
+                        id: carol.id(),
+                        chips: 2_000_000_000,
+                        table_id: 1,
+                    },
+                    PlayerRankCheckpoint {
+                        id: dave.id(),
+                        chips: 0,
+                        table_id: 2,
+                    },
+                ],
+                tables: BTreeMap::from([
+                    (
+                        1,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![
+                                MttTablePlayer {
+                                    id: alice.id(),
+                                    chips: 1_000_000_000,
+                                    table_position: 0,
+                                },
+                                MttTablePlayer {
+                                    id: carol.id(),
+                                    chips: 2_000_000_000,
+                                    table_position: 1,
+                                },
+                            ],
+                        },
+                    ),
+                    (
+                        2,
+                        MttTableCheckpoint {
+                            btn: 0,
+                            players: vec![MttTablePlayer {
+                                id: bob.id(),
+                                chips: 1_000_000_000,
+                                table_position: 0,
+                            }],
+                        },
+                    ),
+                ]),
+                time_elapsed: 50,
+                total_prize: 4_000_000_000,
+            })
+            .build();
+        let init_account = acc.derive_init_account();
+        let mut effect = Effect::default();
+        Ok(Mtt::init_state(&mut effect, init_account)?)
+    }
+
+    #[test]
+    fn test_final_settle() -> anyhow::Result<()> {
+        let mut alice = TestClient::player("alice");
+        let mut bob = TestClient::player("bob");
+        let mut carol = TestClient::player("carol");
+        let mut dave = TestClient::player("dave");
+        let players = [&mut alice, &mut bob, &mut carol, &mut dave];
+        let mut mtt = init_state_with_huge_amt(players)?;
+
+
+        let evt = Event::GameStart { access_version: 0 };
+        let mut effect = Effect::default();
+        mtt.handle_event(&mut effect, evt)?;
+
+        assert_eq!(mtt.tables.len(), 2);
+        assert_eq!(mtt.ticket, 1_000_000_000);
+        assert_eq!(mtt.total_prize, 4_000_000_000);
+
+        // T1 settles: 1 player out and T1 gets closed
+        // T2 settles: 1 player out and first three split the prize
+        let t1_game_result = HoldemBridgeEvent::GameResult {
+            table_id: 1,
+            settles: vec![Settle::add(alice.id(), 2_000_000_000), Settle::sub(carol.id(), 2_000_000_000)],
+            checkpoint: MttTableCheckpoint {
+                btn: 0,
+                players: vec![MttTablePlayer {
+                    id: alice.id(),
+                    chips: 3_000_000_000,
+                    table_position: 1,
+                }],
+            },
+        };
+
+        let t2_game_result = HoldemBridgeEvent::GameResult {
+            table_id: 2,
+            settles: vec![Settle::add(alice.id(), 1_000_000_000), Settle::sub(bob.id(), 1_000_000_000)],
+            checkpoint: MttTableCheckpoint {
+                btn: 0,
+                players: vec![MttTablePlayer {
+                    id: alice.id(),
+                    chips: 4_000_000_000,
+                    table_position: 1,
+                }],
+            },
+        };
+
+        let evts = [
+            Event::Bridge {
+                dest: 2,
+                raw: t1_game_result.try_to_vec()?,
+            },
+            Event::Bridge {
+                dest: 2,
+                raw: t2_game_result.try_to_vec()?,
+            },
+        ];
+
+        for evt in evts {
+            mtt.handle_event(&mut effect, evt)?;
+        }
+        assert!(mtt.has_winner());
+        assert_eq!(mtt.alives, 1);
+        assert_eq!(mtt.tables.len(), 1); // one last table
+        assert_eq!(
+            effect.settles,
+            vec![
+                Settle::add(alice.id(), (4_000_000_000 * 50 / 100) - 1_000_000_000),
+                Settle::add(bob.id(), (4_000_000_000 * 30 / 100) - 1_000_000_000),
+                Settle::sub(carol.id(), 1_000_000_000 - (4_000_000_000 * 20 / 100)),
+                Settle::sub(dave.id(), 1_000_000_000),
+            ]
+        );
+
         Ok(())
     }
 }
