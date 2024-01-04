@@ -19,10 +19,10 @@ fn test_remainder() -> Result<()> {
 
     {
         match &mut sync_evt {
-            Event::Sync { new_players, .. } => {
-                new_players[0].balance = 777;
-                new_players[1].balance = 777;
-                new_players[2].balance = 777;
+            Event::Join { players, .. } => {
+                players[0].balance = 777;
+                players[1].balance = 777;
+                players[2].balance = 777;
             }
             _ => (),
         }

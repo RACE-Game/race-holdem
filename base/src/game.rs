@@ -1403,11 +1403,11 @@ impl GameHandler for Holdem {
                 Ok(())
             }
 
-            Event::Sync { new_players, .. } => {
+            Event::Join { players } => {
                 self.display.clear();
                 match self.stage {
                     HoldemStage::Init => {
-                        for p in new_players.into_iter() {
+                        for p in players.into_iter() {
                             let GamePlayer {
                                 id,
                                 position,
@@ -1424,7 +1424,7 @@ impl GameHandler for Holdem {
                     }
 
                     _ => {
-                        for p in new_players.into_iter() {
+                        for p in players.into_iter() {
                             let GamePlayer {
                                 id,
                                 position,

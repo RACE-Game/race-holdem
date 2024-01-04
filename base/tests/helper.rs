@@ -233,5 +233,5 @@ pub fn create_sync_event(
         .into_iter()
         .for_each(|p| new_players.push(p.join(&mut ctx, &mut game_account, 10_000).unwrap()));
 
-    Event::Sync { new_players }
+    Event::Join { players }
 }

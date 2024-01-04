@@ -85,10 +85,10 @@ fn test_2() -> Result<()> {
 
     {
         match &mut sync_evt {
-            Event::Sync { new_players, .. } => {
-                new_players[0].balance = 83380001;
-                new_players[1].balance = 212870000;
-                new_players[2].balance = 375929168;
+            Event::Join { players } => {
+                players[0].balance = 83380001;
+                players[1].balance = 212870000;
+                players[2].balance = 375929168;
             }
             _ => (),
         }

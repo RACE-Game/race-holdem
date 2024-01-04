@@ -34,7 +34,7 @@ pub struct InitTableData {
     pub player_lookup: BTreeMap<PlayerId, Player>,
 }
 
-#[derive(Debug, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
+#[derive(Default, Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableCheckpoint {
     pub btn: usize,
     pub players: Vec<MttTablePlayer>,

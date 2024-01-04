@@ -306,9 +306,9 @@ impl GameHandler for Mtt {
                 }
             }
 
-            Event::Sync { new_players } => match self.stage {
+            Event::Join { players } => match self.stage {
                 MttStage::Init => {
-                    for p in new_players {
+                    for p in players {
                         self.ranks.push(PlayerRank {
                             id: p.id,
                             chips: p.balance,
@@ -319,7 +319,7 @@ impl GameHandler for Mtt {
                     }
                 }
                 _ => {
-                    for p in new_players {
+                    for p in players {
                         effect.settle(Settle::eject(p.id))
                     }
                     effect.checkpoint();
@@ -411,10 +411,13 @@ impl Mtt {
             table_size: self.table_size,
             player_lookup,
         };
+        let checkpoint = MttTableCheckpoint::default();
         effect.launch_sub_game(
             table_id as _,
             SUBGAME_BUNDLE_ADDR.to_string(),
+            vec![],
             init_table_data,
+            checkpoint,
         )?;
         Ok(())
     }
