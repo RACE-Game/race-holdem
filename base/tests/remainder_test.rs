@@ -9,20 +9,20 @@ use race_test::prelude::*;
 
 #[test]
 fn test_remainder() -> Result<()> {
-    let (_game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
+    let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
 
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob"); // BTN
     let mut carol = TestClient::player("Carol");
 
-    let mut sync_evt = create_sync_event(&ctx, &[&alice, &bob, &carol], &transactor);
+    let mut sync_evt = create_sync_event(&mut ctx, &mut game_acct, vec![&mut alice, &mut bob, &mut carol], &transactor);
 
     {
         match &mut sync_evt {
-            Event::Sync { new_players, .. } => {
-                new_players[0].balance = 777;
-                new_players[1].balance = 777;
-                new_players[2].balance = 777;
+            Event::Join { players, .. } => {
+                players[0].balance = 777;
+                players[1].balance = 777;
+                players[2].balance = 777;
             }
             _ => (),
         }
@@ -74,8 +74,8 @@ fn test_remainder() -> Result<()> {
 
     {
         let state = handler.get_state();
-        assert_eq!(state.prize_map.get("Alice"), Some(&831u64));
-        assert_eq!(state.prize_map.get("Bob"), Some(&830u64));
+        assert_eq!(state.prize_map.get(&alice.id()), Some(&831u64));
+        assert_eq!(state.prize_map.get(&bob.id()), Some(&830u64));
         assert_eq!(state.stage, HoldemStage::Runner);
         assert_eq!(state.street, Street::Showdown);
     }
