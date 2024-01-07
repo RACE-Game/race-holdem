@@ -42,6 +42,7 @@ fn test_borsh_holdem_account() {
         bb: 20,
         ante: 0,
         rake: 3,
+        rake_cap: 1,
         theme: None,
     };
     let acct_ser = acct.try_to_vec().unwrap();

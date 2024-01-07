@@ -116,11 +116,11 @@ fn test_allin_case2() -> Result<()> {
     {
         match &mut sync_evt {
             Event::Join { players } => {
-                new_players[0].balance = 1000;
-                new_players[1].balance = 1000;
-                new_players[2].balance = 1000;
-                new_players[3].balance = 1000;
-                new_players[4].balance = 1000;
+                players[0].balance = 1000;
+                players[1].balance = 1000;
+                players[2].balance = 1000;
+                players[3].balance = 1000;
+                players[4].balance = 1000;
             }
             _ => (),
         }

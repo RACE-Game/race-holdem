@@ -118,6 +118,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         min_raise: 20,
         btn: 0,
         rake: 3,
+        rake_cap: 1,
         stage: HoldemStage::Init,
         street: Street::Init,
         street_bet: 20,
@@ -203,7 +204,13 @@ pub fn setup_context() -> GameContext {
 // ====================================================
 // Helpers for testing Holdem with the race protocol
 // ====================================================
-type Game = (InitAccount, GameAccount, GameContext, TestHandler<Holdem>, TestClient);
+type Game = (
+    InitAccount,
+    GameAccount,
+    GameContext,
+    TestHandler<Holdem>,
+    TestClient,
+);
 
 pub fn setup_holdem_game() -> Game {
     let holdem_account = HoldemAccount::default();
@@ -224,14 +231,18 @@ pub fn setup_holdem_game() -> Game {
 pub fn create_sync_event(
     mut ctx: &mut GameContext,
     mut game_account: &mut GameAccount,
-    players: Vec<&mut TestClient>,
+    new_players: Vec<&mut TestClient>,
     transactor: &TestClient,
 ) -> Event {
-    ctx.add_node(transactor.addr(), ctx.get_access_version());
-    let mut new_players = Vec::new();
-    players
+    ctx.add_node(
+        transactor.addr(),
+        ctx.get_access_version(),
+        ClientMode::Transactor,
+    );
+    let mut players = Vec::new();
+    new_players
         .into_iter()
-        .for_each(|p| new_players.push(p.join(&mut ctx, &mut game_account, 10_000).unwrap()));
+        .for_each(|p| players.push(p.join(&mut ctx, &mut game_account, 10_000).unwrap()));
 
     Event::Join { players }
 }

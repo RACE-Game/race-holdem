@@ -21,6 +21,7 @@ pub struct Holdem {
     pub min_raise: u64,
     pub btn: usize,
     pub rake: u16,
+    pub rake_cap: u8,
     pub stage: HoldemStage,
     pub street: Street,
     pub street_bet: u64,
@@ -557,8 +558,7 @@ impl Holdem {
         }
         let mut total_rake = 0;
 
-        // For now, we use 5BB as rake cap
-        let rake_cap = self.bb * 5;
+        let rake_cap: u64 = self.bb * self.rake_cap as u64;
 
         for (_, prize) in self.prize_map.iter_mut() {
             if *prize > 0 {
@@ -1268,7 +1268,7 @@ impl GameHandler for Holdem {
     type Checkpoint = HoldemCheckpoint;
 
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
-        let HoldemAccount { sb, bb, rake, .. } = init_account.data()?;
+        let HoldemAccount { sb, bb, rake, rake_cap, .. } = init_account.data()?;
         let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
         let (player_timeouts, btn) = if let Some(checkpoint) = checkpoint {
             (checkpoint.player_timeouts, checkpoint.btn)
@@ -1295,6 +1295,7 @@ impl GameHandler for Holdem {
             min_raise: bb,
             btn,
             rake,
+            rake_cap,
             stage: HoldemStage::Init,
             street: Street::Init,
             street_bet: 0,

@@ -185,6 +185,7 @@ pub struct HoldemAccount {
     pub bb: u64,
     pub ante: u64,
     pub rake: u16, // an integer representing the rake (per thousand)
+    pub rake_cap: u8, // the maximum rake in BB
     pub theme: Option<String>, // an optional theme identifier
 }
 
@@ -194,7 +195,8 @@ impl Default for HoldemAccount {
             sb: 10,
             bb: 20,
             ante: 0,
-            rake: 3u16,
+            rake: 3,
+            rake_cap: 1,
             theme: None
         }
     }
