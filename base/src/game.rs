@@ -205,18 +205,14 @@ impl Holdem {
 
         if next_positions.is_empty() {
             let Some(next_btn) = player_positions.first() else {
-                return Err(HandleError::Custom(
-                    "Failed to find a player for the next button".to_string(),
-                ));
+                return Err(errors::next_button_player_not_found());
             };
             Ok(*next_btn)
         } else {
             if let Some(next_btn) = next_positions.first() {
                 Ok(*next_btn)
             } else {
-                return Err(HandleError::Custom(
-                    "Failed to find a proper position for the next button".to_string(),
-                ));
+                return Err(errors::next_button_position_not_found());
             }
         }
     }
@@ -256,9 +252,7 @@ impl Holdem {
             }
             Ok(())
         } else {
-            return Err(HandleError::Custom(
-                "Next player not found in game".to_string(),
-            ));
+            return Err(errors::next_action_player_missing());
         }
     }
 
@@ -346,7 +340,7 @@ impl Holdem {
 
         match action_addr {
             Some(addr) => self.ask_for_action(addr.to_owned(), effect)?,
-            None => return Err(errors::internal_cannot_find_action_player()),
+            None => self.next_state(effect)?, // players all go all in
         }
 
         self.min_raise = self.bb;
@@ -368,7 +362,7 @@ impl Holdem {
             .filter(|p| {
                 matches!(
                     p.status,
-                    PlayerStatus::Wait | PlayerStatus::Allin | PlayerStatus::Acted
+                    PlayerStatus::Wait | PlayerStatus::Allin | PlayerStatus::Acted | PlayerStatus::Acting
                 )
             })
             .map(|p| p.id)
@@ -640,28 +634,18 @@ impl Holdem {
             for winner_set in winner_sets.iter() {
                 let real_winners: Vec<u64> = winner_set
                     .iter()
-                    .filter(|&w| pot.owners.contains(w))
-                    .map(|w| w.clone())
+                    .filter(|w| pot.owners.contains(*w))
+                    .map(|w| *w)
                     .collect();
                 // A pot should have at least one winner
                 if real_winners.len() >= 1 {
-                    for w in real_winners.iter() {
-                        let Some(_player) = self.player_map.get_mut(w) else {
-                            return Err(HandleError::Custom(
-                                "Winner not found in player map".to_string()
-                            ));
-                        };
-                    }
                     pot.winners = real_winners;
                     break;
                 } else {
-                    continue;
+                    return Err(errors::pot_winner_missing());
                 }
             }
 
-            if pot.winners.is_empty() {
-                return Err(HandleError::Custom("Winner not found".to_string()));
-            }
         }
 
         let award_pots = self
@@ -801,15 +785,11 @@ impl Holdem {
 
         for (id, idxs) in self.hand_index_map.iter() {
             if idxs.len() != 2 {
-                return Err(HandleError::Custom(
-                    "Invalid hole-card idx vec: length not equal to 2".to_string(),
-                ));
+                return Err(errors::invalid_hole_cards_number());
             }
 
             let Some(player) = self.player_map.get(id) else {
-                return Err(HandleError::Custom(
-                    "Player not found in game [settle]".to_string()
-                ));
+                return Err(errors::internal_player_not_found());
             };
 
             if player.status != PlayerStatus::Fold
@@ -817,25 +797,16 @@ impl Holdem {
                 && player.status != PlayerStatus::Leave
             {
                 let Some(first_card_idx) = idxs.first() else {
-                    return Err(HandleError::Custom(
-                        "Failed to extract index for 1st hole card".to_string()
-                    ));
+                    return Err(errors::first_hole_card_index_missing());
                 };
                 let Some(first_card) = decryption.get(first_card_idx) else {
-                    return Err(HandleError::Custom(
-                        format!("Failed to get revealed info, index: {}, avaliable indexes: {:?}",
-                        first_card_idx, decryption.keys().collect::<Vec<&usize>>())
-                    ));
+                    return Err(errors::first_hole_card_error());
                 };
                 let Some(second_card_idx) = idxs.last() else {
-                    return Err(HandleError::Custom(
-                        "Failed to extract index for 2nd hole card".to_string()
-                    ));
+                    return Err(errors::second_hole_card_index_missing());
                 };
                 let Some(second_card) = decryption.get(second_card_idx) else {
-                    return Err(HandleError::Custom(
-                        "Failed to get 2nd hole card from the revealed info".to_string()
-                    ));
+                    return Err(errors::second_hole_card_error());
                 };
                 let hole_cards = [first_card.as_str(), second_card.as_str()];
                 let cards = create_cards(board.as_slice(), &hole_cards);
@@ -865,9 +836,7 @@ impl Holdem {
         let mut draws = Vec::<u64>::new();
         // Each hand is either equal to or weaker than winner (1st)
         let Some((winner, highest_hand)) = player_hands.first() else {
-            return Err(HandleError::Custom(
-                "Failed to spot the strongest hand".to_string()
-            ));
+            return Err(errors::strongest_hand_not_found());
         };
 
         for (player, hand) in player_hands.iter().skip(1) {
@@ -966,9 +935,7 @@ impl Holdem {
             self.stage = HoldemStage::Settle;
             self.signal_game_end()?;
             let Some(winner) = ingame_players.first() else {
-                return Err(HandleError::Custom(
-                    "Failed to get the only player".to_string()
-                ));
+                return Err(errors::single_player_missing());
             };
             println!("[Next State]: Single winner: {}", winner);
             self.single_player_win(effect, winner.clone())?;
@@ -979,9 +946,7 @@ impl Holdem {
             self.stage = HoldemStage::Settle;
             self.signal_game_end()?;
             let Some(winner) = players_to_stay.first() else {
-                return Err(HandleError::Custom(
-                    "Failed to get the single winner left".to_string()
-                ));
+                return Err(errors::single_winner_missing());
             };
             println!(
                 "[Next State]: All others folded and single winner is {}",
@@ -999,9 +964,7 @@ impl Holdem {
         // Ask next player to act
         else if next_player.is_some() {
             let Some(next_action_player) = next_player else {
-                return Err(HandleError::Custom(
-                    "Failed to get the next-to-act player".to_string()
-                ));
+                return Err(errors::next_action_player_missing());
             };
             println!(
                 "[Next State]: Next-to-act player is: {}",
@@ -1057,9 +1020,7 @@ impl Holdem {
             // Reveal players' hole cards
             for (addr, idxs) in self.hand_index_map.iter() {
                 let Some(player) = self.player_map.get(addr) else {
-                    return Err(HandleError::Custom(
-                        "Player not found in game but assigned cards".to_string()
-                    ));
+                    return Err(errors::internal_player_not_in_game_but_assigned_cards());
                 };
                 if matches!(player.status, PlayerStatus::Acted | PlayerStatus::Allin) {
                     effect.reveal(self.deck_random_id, idxs.clone());
@@ -1229,7 +1190,7 @@ impl Holdem {
                 .map(|p| p.position)
                 .collect::<Vec<usize>>();
             let Some(pos) = (0..11).find(|i| !occupied_pos.contains(i)) else {
-                return Err(HandleError::Custom("Table is full".to_string()))
+                return Err(errors::cannot_join_full_table())
             };
 
             self.player_map.insert(
@@ -1268,7 +1229,13 @@ impl GameHandler for Holdem {
     type Checkpoint = HoldemCheckpoint;
 
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
-        let HoldemAccount { sb, bb, rake, rake_cap, .. } = init_account.data()?;
+        let HoldemAccount {
+            sb,
+            bb,
+            rake,
+            rake_cap,
+            ..
+        } = init_account.data()?;
         let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
         let (player_timeouts, btn) = if let Some(checkpoint) = checkpoint {
             (checkpoint.player_timeouts, checkpoint.btn)
@@ -1333,11 +1300,11 @@ impl GameHandler for Holdem {
                 self.display.clear();
 
                 if !self.is_acting_player(player_id) {
-                    return Err(HandleError::Custom("Player is not acting".to_string()));
+                    return Err(errors::not_the_acting_player());
                 }
 
                 let Some(player) = self.player_map.get_mut(&player_id) else {
-                    return Err(HandleError::Custom("Player not found in game".to_string()));
+                    return Err(errors::internal_player_not_found());
                 };
 
                 let street = self.street;
@@ -1345,7 +1312,7 @@ impl GameHandler for Holdem {
                 // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
                 if self.mode == GameMode::Cash {
                     if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
-                        player.status = PlayerStatus::Leave;
+                        self.set_player_status(player_id, PlayerStatus::Leave)?;
                         self.hand_history.add_action(
                             street,
                             PlayerAction {
@@ -1462,13 +1429,7 @@ impl GameHandler for Holdem {
                 // TODO: Leaving is not allowed in SNG game
                 self.display.clear();
                 println!("Player {} decides to leave game", player_id);
-
-                let Some(leaving_player) = self.player_map.get_mut(&player_id) else {
-                    return Err(HandleError::Custom(
-                        "Player not found in game [Leave]".to_string()
-                    ));
-                };
-                leaving_player.status = PlayerStatus::Leave;
+                self.set_player_status(player_id, PlayerStatus::Leave)?;
 
                 match self.stage {
                     // If current stage is not playing, the player can
@@ -1499,13 +1460,24 @@ impl GameHandler for Holdem {
                     // 3. The leaving player is not the acting player,
                     // and the game can continue.
                     HoldemStage::Play | HoldemStage::ShareKey => {
+                        let unfolded_cnt = self.count_unfolded_players();
                         if self.stage == HoldemStage::Play
                             && !self.is_acting_player(player_id)
-                            && self.count_unfolded_players() > 1
+                            && unfolded_cnt > 1
                         {
-                            println!("Game continue as the folded player is not the acting player");
-                        } else {
+                            println!("Game continues as the leaving player not acting");
+                        } else if self.is_acting_player(player_id) {
+                            // TODO: fold the `Leave' player?
                             self.next_state(effect)?;
+                        } else if unfolded_cnt == 1 {
+                            let winner = self
+                                .player_map
+                                .values()
+                                .find(|p| p.id() != player_id)
+                                .map(|p| p.id())
+                                .ok_or(errors::single_winner_missing())?;
+                            self.single_player_win(effect, winner)?;
+                            self.signal_game_end()?;
                         }
                     }
                 }
@@ -1544,9 +1516,7 @@ impl GameHandler for Holdem {
                                 if let Some(card) = decryption.get(&i) {
                                     self.board.push(card.clone());
                                 } else {
-                                    return Err(HandleError::Custom(
-                                        "Failed to reveal the 3 flop cards".to_string(),
-                                    ));
+                                    return Err(errors::flop_cards_error());
                                 }
                             }
                             self.display.push(Display::DealBoard {
@@ -1567,9 +1537,7 @@ impl GameHandler for Holdem {
                                     board: self.board.clone(),
                                 });
                             } else {
-                                return Err(HandleError::Custom(
-                                    "Failed to reveal the turn card".to_string(),
-                                ));
+                                return Err(errors::turn_card_error());
                             }
 
                             self.hand_history.set_board(self.board.clone());
@@ -1586,9 +1554,7 @@ impl GameHandler for Holdem {
                                     board: self.board.clone(),
                                 });
                             } else {
-                                return Err(HandleError::Custom(
-                                    "Failed to reveal the river card".to_string(),
-                                ));
+                                return Err(errors::river_card_error());
                             }
 
                             self.hand_history.set_board(self.board.clone());
