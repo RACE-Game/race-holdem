@@ -355,6 +355,7 @@ impl Holdem {
     /// Side1: { amount: 5*2,  owners: [A, D], winners [] }
     /// Side2: { amount: 50,   owners: [A], winners [] } <-- should return bet to A
     pub fn collect_bets(&mut self) -> Result<(), HandleError> {
+        let old_pots = self.pots.clone();
         // Remove any folded players from owners of a pot
         let unfolded_player_addrs: Vec<u64> = self
             .player_map
@@ -433,6 +434,7 @@ impl Holdem {
 
         println!("Pots after collecting bets: {:?}", self.pots);
         self.display.push(Display::CollectBets {
+            old_pots,
             bet_map: self.bet_map.clone(),
         });
         self.bet_map.clear();

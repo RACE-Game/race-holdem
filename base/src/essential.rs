@@ -12,7 +12,7 @@ pub const ACTION_TIMEOUT_RIVER: u64 = 30_000;
 
 pub const WAIT_TIMEOUT_DEFAULT: u64 = 5_000;
 pub const WAIT_TIMEOUT_LAST_PLAYER: u64 = 5_000;
-pub const WAIT_TIMEOUT_SHOWDOWN: u64 = 7_000;
+pub const WAIT_TIMEOUT_SHOWDOWN: u64 = 10_000;
 pub const WAIT_TIMEOUT_RUNNER: u64 = 13_000;
 
 pub const RAKE_SLOT_ID: u8 = 0;
@@ -240,6 +240,7 @@ pub enum Display {
         board: Vec<String>,
     },
     CollectBets {
+        old_pots: Vec<Pot>,
         bet_map: BTreeMap<u64, u64>,
     },
     AwardPots {
