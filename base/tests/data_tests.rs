@@ -119,6 +119,7 @@ fn test_borsh_display() {
             ]),
         },
         Display::CollectBets {
+            old_pots: vec![],
             bet_map: make_uneven_betmap(),
         },
     ];

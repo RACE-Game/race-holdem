@@ -39,6 +39,7 @@ fn test_collect_bets_with_even_bets() -> Result<(), HandleError> {
     assert_eq!(
         state.display,
         vec![Display::CollectBets {
+            old_pots: vec![],
             bet_map: make_even_betmap()
         }]
     );
