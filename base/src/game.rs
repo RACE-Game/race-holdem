@@ -108,11 +108,12 @@ impl Holdem {
     }
 
     // Clear data that don't belong to a running game, indicating game end
-    fn signal_game_end(&mut self) -> Result<(), HandleError> {
+    // Additionally, cancel current dispatch if game mode is MTT
+    fn signal_game_end(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         self.street_bet = 0;
         self.min_raise = 0;
         self.acting_player = None;
-
+        effect.cancel_dispatch();
         Ok(())
     }
 
@@ -247,9 +248,7 @@ impl Holdem {
                 position: player.position,
                 clock: effect.timestamp() + timeout,
             });
-            if self.mode != GameMode::Mtt {
-                effect.action_timeout(player_id, timeout); // in msecs
-            }
+            effect.action_timeout(player_id, timeout); // in msecs
             Ok(())
         } else {
             return Err(errors::next_action_player_missing());
@@ -935,7 +934,7 @@ impl Holdem {
         // It happends when the last second player left the game
         if ingame_players.len() == 1 {
             self.stage = HoldemStage::Settle;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             let Some(winner) = ingame_players.first() else {
                 return Err(errors::single_player_missing());
             };
@@ -946,7 +945,7 @@ impl Holdem {
         // Single players wins because others all folded
         else if players_to_stay.len() == 1 {
             self.stage = HoldemStage::Settle;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             let Some(winner) = players_to_stay.first() else {
                 return Err(errors::single_winner_missing());
             };
@@ -982,7 +981,7 @@ impl Holdem {
             println!("[Next State]: Runner");
             self.street = Street::Showdown;
             self.stage = HoldemStage::Runner;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             self.collect_bets()?;
 
             // Reveal all cards for eligible players: not folded and without init status
@@ -1016,7 +1015,7 @@ impl Holdem {
             println!("[Next State]: Showdown");
             self.stage = HoldemStage::Showdown;
             self.street = Street::Showdown;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             self.collect_bets()?;
 
             // Reveal players' hole cards
@@ -1444,7 +1443,7 @@ impl GameHandler for Holdem {
                         effect.settle(Settle::eject(player_id));
                         effect.checkpoint();
                         self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
-                        self.signal_game_end()?;
+                        self.signal_game_end(effect)?;
                     }
 
                     // If current stage is playing, the player will be
@@ -1479,7 +1478,7 @@ impl GameHandler for Holdem {
                                 .map(|p| p.id())
                                 .ok_or(errors::single_winner_missing())?;
                             self.single_player_win(effect, winner)?;
-                            self.signal_game_end()?;
+                            self.signal_game_end(effect)?;
                         }
                     }
                 }

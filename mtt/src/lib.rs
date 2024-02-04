@@ -86,7 +86,7 @@ impl BlindRuleItem {
 }
 
 fn default_blind_rules() -> Vec<BlindRuleItem> {
-    [(1, 2), (2, 3), (3, 6), (8, 12), (12, 16), (16, 20)]
+    [(1, 2), (2, 4), (4, 8), (8, 16), (16, 32), (32, 64)]
         .into_iter()
         .map(|(sb, bb)| BlindRuleItem::new(sb, bb))
         .collect()
@@ -297,6 +297,10 @@ impl GameHandler for Mtt {
         self.timestamp = effect.timestamp();
 
         match event {
+            Event::Custom { .. } => {
+                return Err(errors::error_custom_event_not_allowed())?;
+            }
+
             Event::Ready => {
                 if self.start_time > effect.timestamp {
                     // Schedule the startup
@@ -504,8 +508,18 @@ impl Mtt {
 
     /// Update tables by balancing the players at each table.
     fn update_tables(&mut self, effect: &mut Effect, table_id: TableId) -> Result<(), HandleError> {
+        let (sb, bb) = self.calc_blinds()?;
+
         // No-op for final table
         if self.tables.len() == 1 {
+            effect.bridge_event(
+                table_id as _,
+                HoldemBridgeEvent::StartGame {
+                    sb,
+                    bb,
+                    moved_players: Vec::with_capacity(0),
+                },
+            )?;
             return Ok(());
         }
 
@@ -616,7 +630,6 @@ impl Mtt {
 
             evts.push((smallest_table_id, HoldemBridgeEvent::Relocate { players }));
 
-            let (sb, bb) = self.calc_blinds()?;
             evts.push((
                 table_id,
                 HoldemBridgeEvent::StartGame {
@@ -625,7 +638,17 @@ impl Mtt {
                     moved_players,
                 },
             ));
+        } else {
+            evts.push((
+                table_id,
+                HoldemBridgeEvent::StartGame {
+                    sb,
+                    bb,
+                    moved_players: Vec::with_capacity(0),
+                },
+            ))
         }
+
         for (table_id, evt) in evts {
             effect.bridge_event(table_id as _, evt)?;
         }
