@@ -362,7 +362,10 @@ impl Holdem {
             .filter(|p| {
                 matches!(
                     p.status,
-                    PlayerStatus::Wait | PlayerStatus::Allin | PlayerStatus::Acted | PlayerStatus::Acting
+                    PlayerStatus::Wait
+                        | PlayerStatus::Allin
+                        | PlayerStatus::Acted
+                        | PlayerStatus::Acting
                 )
             })
             .map(|p| p.id)
@@ -646,7 +649,6 @@ impl Holdem {
                     return Err(errors::pot_winner_missing());
                 }
             }
-
         }
 
         let award_pots = self
@@ -883,13 +885,13 @@ impl Holdem {
             for addr in removed_addrs {
                 effect.settle(Settle::eject(addr));
             }
-        }
 
-        if rake > 0 {
-            effect.transfer(0, rake);
-        }
+            if rake > 0 {
+                effect.transfer(0, rake);
+            }
 
-        effect.checkpoint();
+            effect.checkpoint();
+        }
 
         // Save to hand history
         for (id, showdown) in showdowns.into_iter() {

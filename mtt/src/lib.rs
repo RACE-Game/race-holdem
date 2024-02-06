@@ -658,6 +658,8 @@ impl Mtt {
 
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
+            // Simply make a checkpoint is the game is on going
+            effect.checkpoint();
             return Ok(());
         }
 

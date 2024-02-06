@@ -114,7 +114,8 @@ impl MttTable {
                 for id in moved_players {
                     self.holdem.player_map.remove(&id);
                 }
-                effect.start_game();
+                let next_game_start = self.holdem.next_game_start;
+                effect.wait_timeout(next_game_start.checked_sub(effect.timestamp()).unwrap_or(0));
             }
             HoldemBridgeEvent::Relocate { players } => {
                 for mtt_player in players.into_iter() {
