@@ -870,11 +870,13 @@ impl Holdem {
         self.apply_prize()?;
 
         // Add or reduce players chips according to chips change map
-        for (id, chips_change) in chips_change_map.iter() {
-            if *chips_change > 0 {
-                effect.settle(Settle::add(*id, *chips_change as u64))
-            } else if *chips_change < 0 {
-                effect.settle(Settle::sub(*id, -*chips_change as u64))
+        if self.mode == GameMode::Cash {
+            for (id, chips_change) in chips_change_map.iter() {
+                if *chips_change > 0 {
+                    effect.settle(Settle::add(*id, *chips_change as u64))
+                } else if *chips_change < 0 {
+                    effect.settle(Settle::sub(*id, -*chips_change as u64))
+                }
             }
         }
 
@@ -889,7 +891,6 @@ impl Holdem {
             if rake > 0 {
                 effect.transfer(0, rake);
             }
-
             effect.checkpoint();
         }
 

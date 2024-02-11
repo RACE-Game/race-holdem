@@ -273,7 +273,7 @@ impl GameHandler for Mtt {
 
         blind_info.with_default_blind_rules();
 
-        Ok(Self {
+        let mut state = Self {
             start_time,
             alives,
             stage,
@@ -288,7 +288,12 @@ impl GameHandler for Mtt {
             total_prize,
             ticket,
             theme,
-        })
+        };
+
+        // Create tables from checkpoint state
+        state.create_tables(effect)?;
+
+        Ok(state)
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
@@ -330,11 +335,12 @@ impl GameHandler for Mtt {
                 }
             },
 
-            Event::GameStart { .. } => {
+            Event::GameStart => {
                 self.start_time = effect.timestamp();
                 self.stage = MttStage::Playing;
                 self.create_tables(effect)?;
                 self.update_alives();
+                effect.checkpoint();
             }
 
             Event::Bridge { raw, .. } => {
