@@ -18,10 +18,7 @@
 mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_api::{
-    prelude::*,
-    types::{EntryType, SettleOp},
-};
+use race_api::{prelude::*, types::SettleOp};
 use race_holdem_base::essential::Player;
 use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
@@ -120,6 +117,7 @@ impl BlindInfo {
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct MttAccountData {
     start_time: u64,
+    ticket: u64,
     table_size: u8,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
@@ -145,44 +143,6 @@ fn find_checkpoint_rank_by_pos(
         .ok_or(errors::error_player_id_not_found())
 }
 
-impl TryFrom<Mtt> for MttCheckpoint {
-    type Error = HandleError;
-
-    fn try_from(value: Mtt) -> HandleResult<Self> {
-        let Mtt {
-            start_time,
-            time_elapsed,
-            tables,
-            ranks,
-            table_assigns,
-            total_prize,
-            ..
-        } = value;
-
-        let mut ranks_checkpoint = Vec::new();
-
-        for rank in ranks {
-            let PlayerRank { id, chips, .. } = rank;
-            let table_id = *table_assigns
-                .get(&id)
-                .ok_or(errors::error_player_not_found())?;
-            ranks_checkpoint.push(PlayerRankCheckpoint {
-                id,
-                chips,
-                table_id,
-            });
-        }
-
-        Ok(Self {
-            start_time,
-            ranks: ranks_checkpoint,
-            tables,
-            time_elapsed,
-            total_prize,
-        })
-    }
-}
-
 #[game_handler]
 #[derive(BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
@@ -203,25 +163,16 @@ pub struct Mtt {
 }
 
 impl GameHandler for Mtt {
-    type Checkpoint = MttCheckpoint;
-
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let MttAccountData {
             start_time,
+            ticket,
             table_size,
             mut blind_info,
             prize_rules,
             theme,
         } = init_account.data()?;
         let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
-
-        let ticket = match init_account.entry_type {
-            EntryType::Cash { min_deposit, .. } => min_deposit,
-            EntryType::Ticket { amount, .. } => amount,
-            EntryType::Gating { .. } => {
-                panic!("Entry type not supported");
-            }
-        };
 
         let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize) =
             if let Some(checkpoint) = checkpoint {
@@ -298,8 +249,10 @@ impl GameHandler for Mtt {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
         // Update time elapsed for blinds calculation.
-        self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
         self.timestamp = effect.timestamp();
+        if self.stage == MttStage::Playing {
+            self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
+        }
 
         match event {
             Event::Custom { .. } => {
@@ -331,7 +284,7 @@ impl GameHandler for Mtt {
                     for p in players {
                         effect.settle(Settle::eject(p.id))
                     }
-                    effect.checkpoint();
+                    effect.checkpoint(self.build_checkpoint()?);
                 }
             },
 
@@ -340,7 +293,7 @@ impl GameHandler for Mtt {
                 self.stage = MttStage::Playing;
                 self.create_tables(effect)?;
                 self.update_alives();
-                effect.checkpoint();
+                effect.checkpoint(self.build_checkpoint()?);
             }
 
             Event::Bridge { raw, .. } => {
@@ -364,7 +317,7 @@ impl GameHandler for Mtt {
                 MttStage::Init => {
                     if self.ranks.len() < 2 {
                         self.stage = MttStage::Completed;
-                        effect.checkpoint();
+                        effect.checkpoint(self.build_checkpoint()?);
                     } else {
                         effect.start_game();
                     }
@@ -376,10 +329,6 @@ impl GameHandler for Mtt {
         }
 
         Ok(())
-    }
-
-    fn into_checkpoint(self) -> HandleResult<MttCheckpoint> {
-        Ok(self.try_into()?)
     }
 }
 
@@ -425,6 +374,7 @@ impl Mtt {
         effect.launch_sub_game(
             table_id as _,
             SUBGAME_BUNDLE_ADDR.to_string(),
+            self.table_size as _,
             vec![],
             init_table_data,
             checkpoint,
@@ -665,7 +615,7 @@ impl Mtt {
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
             // Simply make a checkpoint is the game is on going
-            effect.checkpoint();
+            effect.checkpoint(self.build_checkpoint()?);
             return Ok(());
         }
 
@@ -688,9 +638,43 @@ impl Mtt {
         }
 
         self.stage = MttStage::Completed;
-        effect.checkpoint();
+        effect.checkpoint(self.build_checkpoint()?);
         effect.allow_exit(true);
         Ok(())
+    }
+
+    fn build_checkpoint(&self) -> HandleResult<MttCheckpoint> {
+        let Mtt {
+            start_time,
+            time_elapsed,
+            tables,
+            ranks,
+            table_assigns,
+            total_prize,
+            ..
+        } = self;
+
+        let mut ranks_checkpoint = Vec::new();
+
+        for rank in ranks {
+            let PlayerRank { id, chips, .. } = rank;
+            let table_id = *table_assigns
+                .get(&id)
+                .ok_or(errors::error_player_not_found())?;
+            ranks_checkpoint.push(PlayerRankCheckpoint {
+                id: *id,
+                chips: *chips,
+                table_id,
+            });
+        }
+
+        Ok(MttCheckpoint {
+            start_time: *start_time,
+            ranks: ranks_checkpoint,
+            tables: tables.clone(),
+            time_elapsed: *time_elapsed,
+            total_prize: *total_prize,
+        })
     }
 }
 

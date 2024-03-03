@@ -48,26 +48,21 @@ pub struct HoldemCheckpoint {
     pub player_timeouts: BTreeMap<u64, u8>,
 }
 
-impl From<Holdem> for HoldemCheckpoint {
-    fn from(value: Holdem) -> Self {
-        let Holdem {
-            player_map, btn, ..
-        } = value;
+// Methods that mutate or query the game state
+impl Holdem {
 
-        let player_timeouts = player_map
-            .into_iter()
-            .map(|p| (p.0, p.1.timeout))
+    fn build_checkpoint(&self) -> HoldemCheckpoint {
+        let player_timeouts = self.player_map
+            .iter()
+            .map(|p| (*p.0, p.1.timeout))
             .collect::<BTreeMap<u64, u8>>();
 
-        Self {
-            btn,
+        HoldemCheckpoint {
+            btn: self.btn,
             player_timeouts,
         }
     }
-}
 
-// Methods that mutate or query the game state
-impl Holdem {
     // Mark out players.
     // An out player is one with zero chips.
     fn mark_out_players(&mut self) {
@@ -765,7 +760,7 @@ impl Holdem {
         }
 
         self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
-        effect.checkpoint();
+        effect.checkpoint(self.build_checkpoint());
         Ok(())
     }
 
@@ -891,8 +886,8 @@ impl Holdem {
             if rake > 0 {
                 effect.transfer(0, rake);
             }
-            effect.checkpoint();
         }
+        effect.checkpoint(self.build_checkpoint());
 
         // Save to hand history
         for (id, showdown) in showdowns.into_iter() {
@@ -1230,8 +1225,6 @@ impl Holdem {
 }
 
 impl GameHandler for Holdem {
-    type Checkpoint = HoldemCheckpoint;
-
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
         let HoldemAccount {
             sb,
@@ -1283,7 +1276,7 @@ impl GameHandler for Holdem {
             display: Vec::<Display>::new(),
             mode: GameMode::Cash,
             next_game_start: 0,
-            table_size: init_account.max_players as u8,
+            table_size: init_account.max_players as _,
             hand_history: HandHistory::default(),
         })
     }
@@ -1364,9 +1357,9 @@ impl GameHandler for Holdem {
             }
 
             Event::WaitingTimeout | Event::Ready => {
-                self.display.clear();
-                self.reset_holdem_state()?;
-                self.reset_player_map_status()?;
+                // self.display.clear();
+                // self.reset_holdem_state()?;
+                // self.reset_player_map_status()?;
 
                 if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                     self.next_game_start = 0;
@@ -1411,7 +1404,7 @@ impl GameHandler for Holdem {
                 Ok(())
             }
 
-            Event::GameStart { .. } => {
+            Event::GameStart => {
                 self.next_game_start = 0;
                 self.display.clear();
 
@@ -1444,7 +1437,7 @@ impl GameHandler for Holdem {
                     | HoldemStage::Showdown => {
                         self.player_map.remove_entry(&player_id);
                         effect.settle(Settle::eject(player_id));
-                        effect.checkpoint();
+                        effect.checkpoint(self.build_checkpoint());
                         self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                         self.signal_game_end(effect)?;
                     }
@@ -1616,10 +1609,5 @@ impl GameHandler for Holdem {
             // Other events
             _ => Ok(()),
         }
-    }
-
-    /// The implementation depends on the game type
-    fn into_checkpoint(self) -> HandleResult<HoldemCheckpoint> {
-        Ok(self.into())
     }
 }

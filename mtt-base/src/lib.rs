@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 type PlayerId = u64;
 
-#[derive(Debug, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
     pub id: u64,
     pub chips: u64,
@@ -34,7 +34,7 @@ pub struct InitTableData {
     pub player_lookup: BTreeMap<PlayerId, Player>,
 }
 
-#[derive(Default, Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableCheckpoint {
     pub btn: usize,
     pub players: Vec<MttTablePlayer>,
