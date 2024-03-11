@@ -10,6 +10,7 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
     let acc = TestGameAccountBuilder::default()
         .with_data(MttAccountData {
             start_time: 1000,
+            ticket: 1000,
             table_size: 2,
             blind_info: BlindInfo::default(),
             prize_rules: vec![50, 30, 20],

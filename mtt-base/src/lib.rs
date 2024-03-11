@@ -1,10 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
-use race_holdem_base::essential::Player;
-use std::collections::BTreeMap;
-
-type PlayerId = u64;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
@@ -26,17 +22,15 @@ impl MttTablePlayer {
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
 pub struct InitTableData {
-    pub btn: usize,
     pub table_id: u8,
-    pub sb: u64,
-    pub bb: u64,
     pub table_size: u8,
-    pub player_lookup: BTreeMap<PlayerId, Player>,
 }
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableCheckpoint {
     pub btn: usize,
+    pub sb: u64,
+    pub bb: u64,
     pub players: Vec<MttTablePlayer>,
 }
 
@@ -88,7 +82,15 @@ impl BridgeEvent for HoldemBridgeEvent {}
 
 #[cfg(test)]
 mod tests {
-    use crate::{MttTableCheckpoint, MttTablePlayer};
+    use borsh::BorshDeserialize;
+    use crate::{MttTableCheckpoint, MttTablePlayer, InitTableData};
+
+    #[test]
+    fn test_parse_mtt_init_table_data() -> anyhow::Result<()> {
+        let data = [207,128,234,18,142,1,0,0,0,225,245,5,0,0,0,0,2,32,161,7,0,0,0,0,0,96,234,0,0,0,0,0,0,0,0,0,0,3,0,0,0,50,30,20,0];
+        let data = InitTableData::try_from_slice(&data);
+        Ok(())
+    }
 
     #[test]
     fn test_add_player_to_table() -> anyhow::Result<()> {

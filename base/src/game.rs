@@ -37,7 +37,6 @@ pub struct Holdem {
     pub winners: Vec<u64>,
     pub display: Vec<Display>,
     pub mode: GameMode,
-    pub next_game_start: u64, // A timestamp indicates when the next game will start
     pub table_size: u8,       // The size of table
     pub hand_history: HandHistory,
 }
@@ -123,7 +122,6 @@ impl Holdem {
         self.bet_map.clear();
         self.total_bet_map.clear();
         self.prize_map.clear();
-        self.next_game_start = 0;
 
         Ok(())
     }
@@ -243,7 +241,7 @@ impl Holdem {
                 position: player.position,
                 clock: effect.timestamp() + timeout,
             });
-            effect.action_timeout(player_id, timeout); // in msecs
+            effect.action_timeout(player_id, timeout)?; // in msecs
             Ok(())
         } else {
             return Err(errors::next_action_player_missing());
@@ -742,9 +740,9 @@ impl Holdem {
         // Add or reduce players chips according to chips change map
         for (id, chips_change) in chips_change_map.iter() {
             if *chips_change > 0 {
-                effect.settle(Settle::add(*id, *chips_change as u64));
+                effect.settle(Settle::add(*id, *chips_change as u64))?;
             } else if *chips_change < 0 {
-                effect.settle(Settle::sub(*id, -*chips_change as u64));
+                effect.settle(Settle::sub(*id, -*chips_change as u64))?;
             }
         }
 
@@ -752,7 +750,7 @@ impl Holdem {
 
         let removed_addrs = self.remove_leave_and_out_players();
         for addr in removed_addrs {
-            effect.settle(Settle::eject(addr));
+            effect.settle(Settle::eject(addr))?;
         }
 
         if rake > 0 {
@@ -765,8 +763,6 @@ impl Holdem {
     }
 
     pub fn wait_timeout(&mut self, effect: &mut Effect, timeout: u64) {
-        self.next_game_start = effect.timestamp() + timeout;
-
         if self.mode != GameMode::Mtt {
             effect.wait_timeout(timeout);
         }
@@ -868,9 +864,9 @@ impl Holdem {
         if self.mode == GameMode::Cash {
             for (id, chips_change) in chips_change_map.iter() {
                 if *chips_change > 0 {
-                    effect.settle(Settle::add(*id, *chips_change as u64))
+                    effect.settle(Settle::add(*id, *chips_change as u64))?;
                 } else if *chips_change < 0 {
-                    effect.settle(Settle::sub(*id, -*chips_change as u64))
+                    effect.settle(Settle::sub(*id, -*chips_change as u64))?;
                 }
             }
         }
@@ -880,7 +876,7 @@ impl Holdem {
 
         if self.mode == GameMode::Cash {
             for addr in removed_addrs {
-                effect.settle(Settle::eject(addr));
+                effect.settle(Settle::eject(addr))?;
             }
 
             if rake > 0 {
@@ -1275,7 +1271,6 @@ impl GameHandler for Holdem {
             winners: Vec::<u64>::new(),
             display: Vec::<Display>::new(),
             mode: GameMode::Cash,
-            next_game_start: 0,
             table_size: init_account.max_players as _,
             hand_history: HandHistory::default(),
         })
@@ -1362,7 +1357,6 @@ impl GameHandler for Holdem {
                 // self.reset_player_map_status()?;
 
                 if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
-                    self.next_game_start = 0;
                     effect.start_game();
                 }
                 Ok(())
@@ -1383,7 +1377,6 @@ impl GameHandler for Holdem {
                         }
 
                         if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
-                            self.next_game_start = 0;
                             effect.start_game();
                         }
                     }
@@ -1405,7 +1398,6 @@ impl GameHandler for Holdem {
             }
 
             Event::GameStart => {
-                self.next_game_start = 0;
                 self.display.clear();
 
                 let next_btn = self.get_next_btn()?;
@@ -1436,7 +1428,7 @@ impl GameHandler for Holdem {
                     | HoldemStage::Runner
                     | HoldemStage::Showdown => {
                         self.player_map.remove_entry(&player_id);
-                        effect.settle(Settle::eject(player_id));
+                        effect.settle(Settle::eject(player_id))?;
                         effect.checkpoint(self.build_checkpoint());
                         self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                         self.signal_game_end(effect)?;
@@ -1487,7 +1479,7 @@ impl GameHandler for Holdem {
                 // Cards are dealt to players but remain invisible to them
                 for (idx, (id, player)) in self.player_map.iter().enumerate() {
                     if player.status != PlayerStatus::Init {
-                        effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1]);
+                        effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
                         self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
                     }
                 }

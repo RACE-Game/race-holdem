@@ -134,7 +134,6 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         winners: Vec::<u64>::new(),
         display: Vec::<Display>::new(),
         mode: GameMode::Cash,
-        next_game_start: 0,
         table_size: 7,
         hand_history: HandHistory::default(),
     };
@@ -157,7 +156,6 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
         street_bet: 20,
         player_map: players_map,
         table_size: 6,
-        next_game_start: 0,
         mode: GameMode::Cash,
         ..Default::default()
     };

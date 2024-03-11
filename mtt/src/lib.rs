@@ -19,7 +19,6 @@ mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::{prelude::*, types::SettleOp};
-use race_holdem_base::essential::Player;
 use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
@@ -282,7 +281,7 @@ impl GameHandler for Mtt {
                 }
                 _ => {
                     for p in players {
-                        effect.settle(Settle::eject(p.id))
+                        effect.settle(Settle::eject(p.id))?;
                     }
                     effect.checkpoint(self.build_checkpoint()?);
                 }
@@ -308,6 +307,7 @@ impl GameHandler for Mtt {
                         self.apply_settles(settles)?;
                         self.update_tables(effect, table_id)?;
                         self.apply_prizes(effect)?;
+                        effect.checkpoint(self.build_checkpoint()?);
                     }
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
@@ -356,28 +356,21 @@ impl Mtt {
         table_id: u8,
         table: &MttTableCheckpoint,
     ) -> Result<(), HandleError> {
-        let (sb, bb) = self.calc_blinds()?;
-        let mut player_lookup = BTreeMap::new();
+        let mut players = Vec::new();
         for p in table.players.iter() {
-            let player = Player::new(p.id, p.chips, p.table_position as _, 0);
-            player_lookup.insert(p.id, player);
+            players.push(GamePlayer::new(p.id, p.chips, p.table_position as _));
         }
         let init_table_data = InitTableData {
-            btn: table.btn,
             table_id,
-            sb,
-            bb,
             table_size: self.table_size,
-            player_lookup,
         };
-        let checkpoint = MttTableCheckpoint::default();
         effect.launch_sub_game(
             table_id as _,
             SUBGAME_BUNDLE_ADDR.to_string(),
             self.table_size as _,
-            vec![],
+            players,
             init_table_data,
-            checkpoint,
+            table.clone(),
         )?;
         Ok(())
     }
@@ -403,7 +396,8 @@ impl Mtt {
                     self.table_assigns.insert(r.id, table_id);
                     j += num_of_tables;
                 }
-                let table = MttTableCheckpoint { btn: 0, players };
+                let (sb, bb) = self.calc_blinds()?;
+                let table = MttTableCheckpoint { btn: 0, sb, bb, players };
                 self.launch_table(effect, table_id, &table)?;
                 self.tables.insert(table_id, table);
             }
@@ -475,6 +469,7 @@ impl Mtt {
                     bb,
                     moved_players: Vec::with_capacity(0),
                 },
+                vec![],
             )?;
             return Ok(());
         }
@@ -525,7 +520,6 @@ impl Mtt {
                 .collect()
         };
 
-        let mut evts = Vec::<(TableId, HoldemBridgeEvent)>::new();
         if table_id == smallest_table_id && smallest_table_players_count <= total_empty_seats {
             // Close current table, move players to other tables
             let mut table_to_close = self
@@ -550,18 +544,19 @@ impl Mtt {
                         .get_mut(&target_table_id)
                         .ok_or(errors::error_table_not_fonud())?;
                     table_ref.add_player(&mut player);
-                    evts.push((
-                        target_table_ids[i],
+                    effect.bridge_event(
+                        target_table_ids[i] as _,
                         HoldemBridgeEvent::Relocate {
-                            players: vec![player],
+                            players: vec![player.clone()],
                         },
-                    ));
+                        vec![GamePlayer::new(player.id, player.chips, player.table_position as _)],
+                    )?;
                 } else {
                     break;
                 }
             }
 
-            evts.push((table_id, HoldemBridgeEvent::CloseTable));
+            effect.bridge_event(table_id as _, HoldemBridgeEvent::CloseTable, vec![])?;
         } else if table_id == largest_table_id
             && largest_table_players_count > smallest_table_players_count + 1
         {
@@ -584,29 +579,31 @@ impl Mtt {
 
             let moved_players = players.iter().map(|p| p.id).collect();
 
-            evts.push((smallest_table_id, HoldemBridgeEvent::Relocate { players }));
+            effect.bridge_event(
+                smallest_table_id as _,
+                HoldemBridgeEvent::Relocate { players: players.clone() },
+                players.into_iter().map(|p| GamePlayer::new(p.id, p.chips, p.table_position as _)).collect()
+            )?;
 
-            evts.push((
-                table_id,
+            effect.bridge_event(
+                table_id as _,
                 HoldemBridgeEvent::StartGame {
                     sb,
                     bb,
                     moved_players,
                 },
-            ));
+                vec![],
+            )?;
         } else {
-            evts.push((
-                table_id,
+            effect.bridge_event(
+                table_id as _,
                 HoldemBridgeEvent::StartGame {
                     sb,
                     bb,
                     moved_players: Vec::with_capacity(0),
                 },
-            ))
-        }
-
-        for (table_id, evt) in evts {
-            effect.bridge_event(table_id as _, evt)?;
+                vec![]
+            )?;
         }
 
         Ok(())
@@ -615,7 +612,6 @@ impl Mtt {
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
             // Simply make a checkpoint is the game is on going
-            effect.checkpoint(self.build_checkpoint()?);
             return Ok(());
         }
 
@@ -630,15 +626,14 @@ impl Mtt {
             let change: i128 = prize as i128 - self.ticket as i128;
             // Tested safe with 9-zero numbers
             if change > 0 {
-                effect.settle(Settle::add(id, change as u64));
+                effect.settle(Settle::add(id, change as u64))?;
             } else if change < 0 {
-                effect.settle(Settle::sub(id, -change as u64))
+                effect.settle(Settle::sub(id, -change as u64))?;
             } else {
             }
         }
 
         self.stage = MttStage::Completed;
-        effect.checkpoint(self.build_checkpoint()?);
         effect.allow_exit(true);
         Ok(())
     }

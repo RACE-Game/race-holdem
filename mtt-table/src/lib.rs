@@ -3,7 +3,7 @@ mod errors;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
-use race_holdem_base::essential::{GameMode, Player, HoldemStage};
+use race_holdem_base::essential::{GameMode, HoldemStage, Player, WAIT_TIMEOUT_DEFAULT};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
 use race_proc_macro::game_handler;
@@ -21,17 +21,23 @@ pub struct MttTable {
 impl GameHandler for MttTable {
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let InitTableData {
-            btn,
-            player_lookup,
             table_id,
-            sb,
-            bb,
             table_size,
         } = init_account.data()?;
+
+        let Some(MttTableCheckpoint {
+            btn,
+            sb,
+            bb,
+            players
+        }) = init_account.checkpoint()? else {
+            return Err(HandleError::InternalError{ message: "Checkpoint is required".into()});
+        };
+
         let mut player_map = BTreeMap::new();
 
-        for (_, player) in player_lookup.clone() {
-            player_map.insert(player.id, player);
+        for p in players {
+            player_map.insert(p.id, Player::new(p.id, p.chips, p.table_position as _, 0));
         }
 
         let holdem = Holdem {
@@ -51,10 +57,14 @@ impl GameHandler for MttTable {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
-            Event::Bridge { dest, raw } => {
+            Event::Bridge {
+                dest,
+                raw,
+                join_players,
+            } => {
                 if dest == self.table_id as _ {
                     let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
-                    self.handle_bridge_event(effect, bridge_event)?;
+                    self.handle_bridge_event(effect, bridge_event, join_players)?;
                 }
             }
             _ => self.holdem.handle_event(effect, event)?,
@@ -65,11 +75,12 @@ impl GameHandler for MttTable {
             let settles = effect.settles.clone();
             let checkpoint = self.build_checkpoint()?;
             let evt = HoldemBridgeEvent::GameResult {
-                checkpoint,
+                checkpoint: checkpoint.clone(),
                 settles,
                 table_id: self.table_id,
             };
-            effect.bridge_event(0, evt)?;
+            effect.checkpoint(checkpoint);
+            effect.bridge_event(0, evt, vec![])?;
         }
         Ok(())
     }
@@ -85,8 +96,11 @@ impl MttTable {
                 table_position: player.position,
             })
         }
+        players.sort_by_key(|p| p.id);
         Ok(MttTableCheckpoint {
             btn: self.holdem.btn,
+            sb: self.holdem.sb,
+            bb: self.holdem.bb,
             players,
         })
     }
@@ -95,6 +109,7 @@ impl MttTable {
         &mut self,
         effect: &mut Effect,
         event: HoldemBridgeEvent,
+        _join_players: Vec<GamePlayer>,
     ) -> HandleResult<()> {
         match event {
             HoldemBridgeEvent::StartGame {
@@ -107,9 +122,9 @@ impl MttTable {
                 for id in moved_players {
                     self.holdem.player_map.remove(&id);
                 }
-                let next_game_start = self.holdem.next_game_start;
-                effect.wait_timeout(next_game_start.checked_sub(effect.timestamp()).unwrap_or(0));
+                effect.wait_timeout(WAIT_TIMEOUT_DEFAULT);
             }
+            // Add players from other tables
             HoldemBridgeEvent::Relocate { players } => {
                 for mtt_player in players.into_iter() {
                     let MttTablePlayer {
@@ -147,10 +162,7 @@ mod tests {
         let mut effect = Effect::default();
         let init_account = InitAccount {
             data: InitTableData {
-                btn: 0,
                 table_id: 1,
-                sb: 50,
-                bb: 100,
                 table_size: 6,
                 player_lookup: BTreeMap::from([
                     (1, Player::new(0, 10000, 0, 0)), // alice id: 0
@@ -174,10 +186,20 @@ mod tests {
     }
 
     #[test]
-    fn a() -> anyhow::Result<()> {
-        let data = vec![1, 1, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 64, 66, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0,0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0,0, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 192, 158, 230, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0, 1, 4, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 165, 114, 77, 234, 141, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 64, 66, 15, 0, 0, 0, 0, 0, 96, 227, 22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let state = MttTable::try_from_slice(&data)?;
-        println!("{:?}", state);
+    fn test_checkpoint() -> anyhow::Result<()> {
+        let data = [
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0,
+            0, 2, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 1, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        let checkpoint = MttTableCheckpoint::try_from_slice(&data);
+        println!("{:?}", checkpoint);
         Ok(())
     }
 
@@ -198,9 +220,6 @@ mod tests {
 
         let acc = acc_builder
             .with_data(InitTableData {
-                sb: 10,
-                bb: 20,
-                btn: 0,
                 table_id: 1,
                 table_size: 6,
                 player_lookup,

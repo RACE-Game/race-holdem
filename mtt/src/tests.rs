@@ -3,6 +3,7 @@ mod helper;
 
 use super::*;
 use helper::*;
+use race_holdem_base::essential::Player;
 use race_test::prelude::*;
 
 #[test]
@@ -11,6 +12,7 @@ fn test_init_state_with_new_game() -> anyhow::Result<()> {
         .with_deposit_range(1000, 1000)
         .with_data(MttAccountData {
             start_time: 1000,
+            ticket: 1000,
             table_size: 6,
             blind_info: BlindInfo::default(),
             prize_rules: vec![50, 30, 20],
@@ -62,7 +64,7 @@ fn test_create_tables() -> anyhow::Result<()> {
     let mut dave = TestClient::player("dave");
     let players = [&mut alice, &mut bob, &mut carol, &mut dave];
     let mut mtt = init_test_state(players)?;
-    let evt = Event::GameStart { access_version: 0 };
+    let evt = Event::GameStart;
     let mut effect = Effect::default();
     mtt.handle_event(&mut effect, evt)?;
     assert_eq!(
@@ -78,31 +80,20 @@ fn test_create_tables() -> anyhow::Result<()> {
     assert_eq!(
         effect.launch_sub_games,
         vec![
-            LaunchSubGame::try_new(
+            SubGame::try_new(
                 1,
                 SUBGAME_BUNDLE_ADDR.into(),
                 InitTableData {
-                    btn: 0,
                     table_id: 1,
-                    sb: 10,
-                    bb: 20,
                     table_size: 2,
-                    player_lookup: BTreeMap::from([
-                        (alice.id(), Player::new(alice.id(), 1000, 0, 0)),
-                        (carol.id(), Player::new(carol.id(), 2000, 1, 0))
-                    ])
                 }
             )?,
-            LaunchSubGame::try_new(
+            SubGame::try_new(
                 2,
                 SUBGAME_BUNDLE_ADDR.into(),
                 InitTableData {
-                    btn: 0,
                     table_id: 2,
-                    sb: 10,
-                    bb: 20,
                     table_size: 2,
-                    player_lookup: BTreeMap::from([(bob.id(), Player::new(bob.id(), 1000, 0, 0)),])
                 }
             )?,
         ]
@@ -265,7 +256,7 @@ fn test_move_players() -> anyhow::Result<()> {
     assert_eq!(
         effect.launch_sub_games,
         vec![
-            LaunchSubGame::try_new(
+            SubGame::try_new(
                 1,
                 SUBGAME_BUNDLE_ADDR.into(),
                 InitTableData {
@@ -281,7 +272,7 @@ fn test_move_players() -> anyhow::Result<()> {
                     ])
                 }
             )?,
-            LaunchSubGame::try_new(
+            SubGame::try_new(
                 2,
                 SUBGAME_BUNDLE_ADDR.into(),
                 InitTableData {
@@ -297,7 +288,7 @@ fn test_move_players() -> anyhow::Result<()> {
                     ])
                 }
             )?,
-            LaunchSubGame::try_new(
+            SubGame::try_new(
                 3,
                 SUBGAME_BUNDLE_ADDR.into(),
                 InitTableData {
