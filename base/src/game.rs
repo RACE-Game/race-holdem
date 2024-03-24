@@ -10,7 +10,7 @@ use crate::essential::{
     WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_LAST_PLAYER, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN,
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
-use crate::hand_history::{BlindInfo, BlindType, HandHistory, PlayerAction, Showdown};
+use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
 
 // Holdem: the game state
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq)]
@@ -21,52 +21,50 @@ pub struct Holdem {
     pub min_raise: u64,
     pub btn: usize,
     pub rake: u16,
+    pub rake_cap: u8,
     pub stage: HoldemStage,
     pub street: Street,
     pub street_bet: u64,
     pub board: Vec<String>,
-    pub hand_index_map: BTreeMap<String, Vec<usize>>,
-    pub bet_map: BTreeMap<String, u64>,
-    pub total_bet_map: BTreeMap<String, u64>,
-    pub prize_map: BTreeMap<String, u64>,
-    pub player_map: BTreeMap<String, Player>,
-    pub player_order: Vec<String>,
+    pub hand_index_map: BTreeMap<u64, Vec<usize>>,
+    pub bet_map: BTreeMap<u64, u64>,
+    pub total_bet_map: BTreeMap<u64, u64>,
+    pub prize_map: BTreeMap<u64, u64>,
+    pub player_map: BTreeMap<u64, Player>,
+    pub player_order: Vec<u64>,
     pub pots: Vec<Pot>,
     pub acting_player: Option<ActingPlayer>,
-    pub winners: Vec<String>,
+    pub winners: Vec<u64>,
     pub display: Vec<Display>,
     pub mode: GameMode,
-    pub next_game_start: u64, // A timestamp indicates when the next game will start
-    pub table_size: u8,       // The size of table
+    pub table_size: u8, // The size of table
     pub hand_history: HandHistory,
+    pub next_game_start: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct HoldemCheckpoint {
     pub btn: usize,
-    pub player_timeouts: BTreeMap<String, u8>,
-}
-
-impl From<Holdem> for HoldemCheckpoint {
-    fn from(value: Holdem) -> Self {
-        let Holdem {
-            player_map, btn, ..
-        } = value;
-
-        let player_timeouts = player_map
-            .into_iter()
-            .map(|p| (p.0, p.1.timeout))
-            .collect::<BTreeMap<String, u8>>();
-
-        Self {
-            btn,
-            player_timeouts,
-        }
-    }
+    pub player_timeouts: BTreeMap<u64, u8>,
+    pub next_game_start: u64,
 }
 
 // Methods that mutate or query the game state
 impl Holdem {
+    fn build_checkpoint(&self) -> HoldemCheckpoint {
+        let player_timeouts = self
+            .player_map
+            .iter()
+            .map(|p| (*p.0, p.1.timeout))
+            .collect::<BTreeMap<u64, u8>>();
+
+        HoldemCheckpoint {
+            btn: self.btn,
+            player_timeouts,
+            next_game_start: self.next_game_start,
+        }
+    }
+
     // Mark out players.
     // An out player is one with zero chips.
     fn mark_out_players(&mut self) {
@@ -80,11 +78,11 @@ impl Holdem {
     }
 
     // Remove players with `Leave` or `Out` status.
-    fn remove_leave_and_out_players(&mut self) -> Vec<String> {
+    fn remove_leave_and_out_players(&mut self) -> Vec<u64> {
         let mut removed = Vec::with_capacity(self.player_map.len());
         self.player_map.retain(|_, p| {
             if p.status == PlayerStatus::Leave || p.status == PlayerStatus::Out {
-                removed.push(p.addr.clone());
+                removed.push(p.id);
                 false
             } else {
                 true
@@ -107,80 +105,60 @@ impl Holdem {
     }
 
     // Clear data that don't belong to a running game, indicating game end
-    fn signal_game_end(&mut self) -> Result<(), HandleError> {
+    // Additionally, cancel current dispatch
+    fn signal_game_end(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         self.street_bet = 0;
         self.min_raise = 0;
         self.acting_player = None;
-
-        Ok(())
-    }
-
-    pub fn reset_holdem_state(&mut self) -> Result<(), HandleError> {
-        self.winners.clear();
-        self.street = Street::Init;
-        self.stage = HoldemStage::Init;
-        self.pots.clear();
-        self.board.clear();
-        self.player_order.clear();
-        self.hand_index_map.clear();
-        self.bet_map.clear();
-        self.total_bet_map.clear();
-        self.prize_map.clear();
-        self.next_game_start = 0;
-
+        effect.cancel_dispatch();
         Ok(())
     }
 
     /// Return the next acting player
-    fn next_action_player(&mut self, next_players: Vec<&String>) -> Option<String> {
-        for addr in next_players {
-            if let Some(player) = self.player_map.get(addr) {
-                let curr_bet: u64 = self.bet_map.get(addr).map(|b| *b).unwrap_or(0);
+    fn next_action_player(&mut self, next_players: Vec<u64>) -> Option<u64> {
+        for id in next_players {
+            if let Some(player) = self.player_map.get(&id) {
+                let curr_bet: u64 = self.bet_map.get(&id).map(|b| *b).unwrap_or(0);
                 if curr_bet < self.street_bet || player.status == PlayerStatus::Wait {
-                    return Some(addr.clone());
+                    return Some(id);
                 }
             }
         }
         None
     }
 
-    pub fn is_acting_player(&self, player_addr: &str) -> bool {
+    pub fn is_acting_player(&self, player_id: u64) -> bool {
         match &self.acting_player {
-            Some(ActingPlayer { addr, .. }) => addr == player_addr,
+            Some(ActingPlayer { id, .. }) => *id == player_id,
             None => false,
         }
     }
 
-    fn get_remainder_player(&mut self) -> Option<String> {
+    fn get_remainder_player(&mut self) -> Option<u64> {
         let eligible_candidates = {
             let mut players = self
                 .player_map
                 .values()
                 .filter(|p| {
-                    self.prize_map.contains_key(&p.addr)
+                    self.prize_map.contains_key(&p.id())
                         && matches!(
                             p.status,
                             PlayerStatus::Acted | PlayerStatus::Allin | PlayerStatus::Wait
                         )
                 })
-                .map(|p| (p.addr(), p.position))
-                .collect::<Vec<(String, usize)>>();
+                .map(|p| (p.id(), p.position))
+                .collect::<Vec<(u64, usize)>>();
             players.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
-            players
-                .into_iter()
-                .map(|(addr, _)| addr)
-                .collect::<Vec<String>>()
+            players.into_iter().map(|(id, _)| id).collect::<Vec<u64>>()
         };
 
         let remainder_player = if eligible_candidates.is_empty() {
             // When no remainder player, use the the first in player map
             self.player_map
                 .first_key_value()
-                .and_then(|(addr, _)| Some(addr.clone()))
+                .and_then(|(id, _)| Some(*id))
         } else {
-            eligible_candidates
-                .first()
-                .and_then(|addr| Some(addr.clone()))
+            eligible_candidates.first().and_then(|id| Some(*id))
         };
 
         remainder_player
@@ -188,12 +166,7 @@ impl Holdem {
 
     /// Return either acting player position or btn for reference
     fn get_ref_position(&self) -> usize {
-        if let Some(ActingPlayer {
-            addr: _,
-            position,
-            clock: _,
-        }) = self.acting_player
-        {
+        if let Some(ActingPlayer { position, .. }) = self.acting_player {
             position
         } else {
             self.btn
@@ -214,18 +187,14 @@ impl Holdem {
 
         if next_positions.is_empty() {
             let Some(next_btn) = player_positions.first() else {
-                return Err(HandleError::Custom(
-                    "Failed to find a player for the next button".to_string(),
-                ));
+                return Err(errors::next_button_player_not_found());
             };
             Ok(*next_btn)
         } else {
             if let Some(next_btn) = next_positions.first() {
                 Ok(*next_btn)
             } else {
-                return Err(HandleError::Custom(
-                    "Failed to find a proper position for the next button".to_string(),
-                ));
+                return Err(errors::next_button_position_not_found());
             }
         }
     }
@@ -248,91 +217,87 @@ impl Holdem {
 
     pub fn ask_for_action(
         &mut self,
-        player_addr: String,
+        player_id: u64,
         effect: &mut Effect,
     ) -> Result<(), HandleError> {
         let timeout = self.get_action_time();
-        if let Some(player) = self.player_map.get_mut(&player_addr) {
-            println!("Asking {} to act", player.addr);
+        if let Some(player) = self.player_map.get_mut(&player_id) {
+            println!("Asking {} to act", player.id);
             player.status = PlayerStatus::Acting;
             self.acting_player = Some(ActingPlayer {
-                addr: player.addr(),
+                id: player.id,
                 position: player.position,
                 clock: effect.timestamp() + timeout,
             });
-            if self.mode != GameMode::Mtt {
-                effect.action_timeout(player_addr, timeout); // in msecs
-            }
+            effect.action_timeout(player_id, timeout)?; // in msecs
             Ok(())
         } else {
-            return Err(HandleError::Custom(
-                "Next player not found in game".to_string(),
-            ));
+            return Err(errors::next_action_player_missing());
         }
     }
 
     /// According to players position, place them in the following order:
     /// SB, BB, UTG (1st-to-act), MID (2nd-to-act), ..., BTN (last-to-act).
     pub fn arrange_players(&mut self, last_pos: usize) -> Result<(), HandleError> {
-        let mut player_pos: Vec<(String, usize)> = self
+        let mut player_pos: Vec<(u64, usize)> = self
             .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Init)
             .map(|p| {
                 if p.position > last_pos {
-                    (p.addr(), p.position - last_pos)
+                    (p.id, p.position - last_pos)
                 } else {
-                    (p.addr(), p.position + 100)
+                    (p.id, p.position + 100)
                 }
             })
             .collect();
         player_pos.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
-        let player_order: Vec<String> = player_pos.into_iter().map(|(addr, _)| addr).collect();
+        let player_order: Vec<u64> = player_pos.into_iter().map(|(id, _)| id).collect();
         println!("Player order {:?}", player_order);
         self.player_order = player_order;
         Ok(())
     }
 
     pub fn blind_bets(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        let (sb_addr, bb_addr) = if self.player_order.len() == 2 {
-            let bb_addr = self
+        let (sb_id, bb_id) = if self.player_order.len() == 2 {
+            let bb_id = self
                 .player_order
                 .first()
                 .cloned()
                 .ok_or(errors::heads_up_missing_sb())?;
-            let sb_addr = self
+            let sb_id = self
                 .player_order
                 .last()
                 .cloned()
                 .ok_or(errors::heads_up_missing_bb())?;
-            (sb_addr, bb_addr)
+            (sb_id, bb_id)
         } else {
-            let sb_addr = self
+            let sb_id = self
                 .player_order
                 .get(0)
                 .cloned()
                 .ok_or(errors::mplayers_missing_sb())?;
-            let bb_addr = self
+            let bb_id = self
                 .player_order
                 .get(1)
                 .cloned()
                 .ok_or(errors::mplayers_missing_bb())?;
-            (sb_addr, bb_addr)
+            (sb_id, bb_id)
         };
 
-        let (allin, real_sb) = self.take_bet(sb_addr.to_owned(), self.sb)?;
+        let (allin, real_sb) = self.take_bet(sb_id, self.sb)?;
         if allin {
-            self.set_player_status(&sb_addr, PlayerStatus::Allin)?;
+            self.set_player_status(sb_id, PlayerStatus::Allin)?;
         }
-        let (allin, real_bb) = self.take_bet(bb_addr.to_owned(), self.bb)?;
+        let (allin, real_bb) = self.take_bet(bb_id, self.bb)?;
         if allin {
-            self.set_player_status(&bb_addr, PlayerStatus::Allin)?;
+            self.set_player_status(bb_id, PlayerStatus::Allin)?;
         }
 
         let hh = &mut self.hand_history;
         hh.set_blinds_infos(vec![
-            BlindInfo::new(&sb_addr, BlindType::Sb, real_sb),
-            BlindInfo::new(&bb_addr, BlindType::Bb, real_bb),
+            BlindBet::new(sb_id, BlindType::Sb, real_sb),
+            BlindBet::new(bb_id, BlindType::Bb, real_bb),
         ]);
         hh.set_pot(Street::Preflop, real_sb + real_bb);
 
@@ -355,7 +320,7 @@ impl Holdem {
 
         match action_addr {
             Some(addr) => self.ask_for_action(addr.to_owned(), effect)?,
-            None => return Err(errors::internal_cannot_find_action_player()),
+            None => self.next_state(effect)?, // players all go all in
         }
 
         self.min_raise = self.bb;
@@ -370,17 +335,21 @@ impl Holdem {
     /// Side1: { amount: 5*2,  owners: [A, D], winners [] }
     /// Side2: { amount: 50,   owners: [A], winners [] } <-- should return bet to A
     pub fn collect_bets(&mut self) -> Result<(), HandleError> {
+        let old_pots = self.pots.clone();
         // Remove any folded players from owners of a pot
-        let unfolded_player_addrs: Vec<String> = self
+        let unfolded_player_addrs: Vec<u64> = self
             .player_map
             .values()
             .filter(|p| {
                 matches!(
                     p.status,
-                    PlayerStatus::Wait | PlayerStatus::Allin | PlayerStatus::Acted
+                    PlayerStatus::Wait
+                        | PlayerStatus::Allin
+                        | PlayerStatus::Acted
+                        | PlayerStatus::Acting
                 )
             })
-            .map(|p| p.addr.clone())
+            .map(|p| p.id)
             .collect();
 
         self.pots
@@ -399,7 +368,7 @@ impl Holdem {
         let mut new_pots = Vec::<Pot>::new();
         let mut acc: u64 = 0;
         for bet in bets {
-            let mut owners: Vec<String> = self
+            let mut owners: Vec<u64> = self
                 .bet_map
                 .iter()
                 .filter(|(_, b)| **b >= bet)
@@ -426,7 +395,7 @@ impl Holdem {
 
                 new_pots.push(Pot {
                     owners,
-                    winners: Vec::<String>::new(),
+                    winners: Vec::<u64>::new(),
                     amount,
                 });
                 acc += actual_bet;
@@ -448,6 +417,7 @@ impl Holdem {
 
         println!("Pots after collecting bets: {:?}", self.pots);
         self.display.push(Display::CollectBets {
+            old_pots,
             bet_map: self.bet_map.clone(),
         });
         self.bet_map.clear();
@@ -567,8 +537,7 @@ impl Holdem {
         }
         let mut total_rake = 0;
 
-        // For now, we use 5BB as rake cap
-        let rake_cap = self.bb * 5;
+        let rake_cap: u64 = self.bb * self.rake_cap as u64;
 
         for (_, prize) in self.prize_map.iter_mut() {
             if *prize > 0 {
@@ -586,7 +555,7 @@ impl Holdem {
     /// Build the prize map for awarding chips
     pub fn calc_prize(&mut self) -> Result<(), HandleError> {
         let pots = &mut self.pots;
-        let mut prize_map = BTreeMap::<String, u64>::new();
+        let mut prize_map = BTreeMap::<u64, u64>::new();
         // TODO: discuss the smallest unit
         let smallest_bet = 1u64;
         let mut odd_chips = 0u64;
@@ -601,7 +570,7 @@ impl Holdem {
             println!("Pot prize = {}", prize);
             for winner in pot.winners.iter() {
                 prize_map
-                    .entry(winner.clone())
+                    .entry(*winner)
                     .and_modify(|p| *p += prize)
                     .or_insert(prize);
             }
@@ -630,13 +599,13 @@ impl Holdem {
     /// their chips will be updated later by update_chips_map.
     pub fn apply_prize(&mut self) -> Result<(), HandleError> {
         for player in self.player_map.values_mut() {
-            match self.prize_map.get(&player.addr) {
+            match self.prize_map.get(&player.id) {
                 Some(prize) => {
                     player.chips += *prize;
-                    println!("Player {} won {} chips", player.addr, *prize);
+                    println!("Player {} won {} chips", player.id, *prize);
                 }
                 None => {
-                    println!("Player {} lost the bet", player.addr);
+                    println!("Player {} lost the bet", player.id);
                 }
             }
         }
@@ -645,32 +614,21 @@ impl Holdem {
 
     /// winner_sets:
     /// examples: [[alice, bob], [charlie, dave]] can be used to represent Royal flush: alice, bob > Flush: charlie, dave
-    pub fn assign_winners(&mut self, winner_sets: Vec<Vec<String>>) -> Result<(), HandleError> {
+    pub fn assign_winners(&mut self, winner_sets: Vec<Vec<u64>>) -> Result<(), HandleError> {
         for pot in self.pots.iter_mut() {
             for winner_set in winner_sets.iter() {
-                let real_winners: Vec<String> = winner_set
+                let real_winners: Vec<u64> = winner_set
                     .iter()
-                    .filter(|&w| pot.owners.contains(w))
-                    .map(|w| w.clone())
+                    .filter(|w| pot.owners.contains(*w))
+                    .map(|w| *w)
                     .collect();
                 // A pot should have at least one winner
                 if real_winners.len() >= 1 {
-                    for w in real_winners.iter() {
-                        let Some(_player) = self.player_map.get_mut(w) else {
-                            return Err(HandleError::Custom(
-                                "Winner not found in player map".to_string()
-                            ));
-                        };
-                    }
                     pot.winners = real_winners;
                     break;
                 } else {
-                    continue;
+                    return Err(errors::pot_winner_missing());
                 }
-            }
-
-            if pot.winners.is_empty() {
-                return Err(HandleError::Custom("Winner not found".to_string()));
             }
         }
 
@@ -690,23 +648,20 @@ impl Holdem {
 
     /// Update the map that records players chips change (increased or decreased)
     /// Used for settlement
-    pub fn update_chips_map(&mut self) -> Result<BTreeMap<String, i64>, HandleError> {
+    pub fn update_chips_map(&mut self) -> Result<BTreeMap<u64, i64>, HandleError> {
         // The i64 change for each player.  The amount = total pots
         // earned - total bet.  This map will be returned for furture
         // calculation.
-        let mut chips_change_map: BTreeMap<String, i64> = self
-            .player_map
-            .keys()
-            .map(|addr| (addr.clone(), 0))
-            .collect();
+        let mut chips_change_map: BTreeMap<u64, i64> =
+            self.player_map.keys().map(|id| (*id, 0)).collect();
 
         // The players for game result information.  The `chips` is
         // the amount before the settlement, the `prize` is the sum of
         // pots earned during the settlement.  This map will be added
         // to display.
-        let mut result_player_map = BTreeMap::<String, PlayerResult>::new();
+        let mut result_player_map = BTreeMap::<u64, PlayerResult>::new();
 
-        self.winners = Vec::<String>::with_capacity(self.player_map.len());
+        self.winners = Vec::<u64>::with_capacity(self.player_map.len());
 
         println!("Chips map before awarding: {:?}", chips_change_map);
         println!("Totol bet map: {:?}", self.total_bet_map);
@@ -728,8 +683,8 @@ impl Holdem {
 
         println!("Chips map after awarding: {:?}", chips_change_map);
 
-        for (addr, player) in self.player_map.iter() {
-            let prize = if let Some(p) = self.prize_map.get(addr).copied() {
+        for (id, player) in self.player_map.iter() {
+            let prize = if let Some(p) = self.prize_map.get(id).copied() {
                 if p == 0 {
                     None
                 } else {
@@ -740,14 +695,14 @@ impl Holdem {
             };
 
             let result = PlayerResult {
-                addr: addr.clone(),
+                id: *id,
                 position: player.position,
                 status: player.status,
                 chips: player.chips,
                 prize,
             };
 
-            result_player_map.insert(addr.clone(), result);
+            result_player_map.insert(*id, result);
         }
 
         self.display.push(Display::GameResult {
@@ -761,7 +716,7 @@ impl Holdem {
     pub fn single_player_win(
         &mut self,
         effect: &mut Effect,
-        winner: String,
+        winner: u64,
     ) -> Result<(), HandleError> {
         self.collect_bets()?;
         self.assign_winners(vec![vec![winner]])?;
@@ -771,11 +726,11 @@ impl Holdem {
         self.apply_prize()?;
 
         // Add or reduce players chips according to chips change map
-        for (player, chips_change) in chips_change_map.iter() {
+        for (id, chips_change) in chips_change_map.iter() {
             if *chips_change > 0 {
-                effect.settle(Settle::add(player, *chips_change as u64));
+                effect.settle(Settle::add(*id, *chips_change as u64))?;
             } else if *chips_change < 0 {
-                effect.settle(Settle::sub(player, -*chips_change as u64));
+                effect.settle(Settle::sub(*id, -*chips_change as u64))?;
             }
         }
 
@@ -783,7 +738,7 @@ impl Holdem {
 
         let removed_addrs = self.remove_leave_and_out_players();
         for addr in removed_addrs {
-            effect.settle(Settle::eject(addr));
+            effect.settle(Settle::eject(addr))?;
         }
 
         if rake > 0 {
@@ -791,13 +746,12 @@ impl Holdem {
         }
 
         self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
-        effect.checkpoint();
+        effect.checkpoint(self.build_checkpoint());
         Ok(())
     }
 
     pub fn wait_timeout(&mut self, effect: &mut Effect, timeout: u64) {
         self.next_game_start = effect.timestamp() + timeout;
-
         if self.mode != GameMode::Mtt {
             effect.wait_timeout(timeout);
         }
@@ -808,22 +762,17 @@ impl Holdem {
         // Board
         let board: Vec<&str> = self.board.iter().map(|c| c.as_str()).collect();
         // Player hands
-        let mut player_hands: Vec<(String, PlayerHand)> =
-            Vec::with_capacity(self.player_order.len());
+        let mut player_hands: Vec<(u64, PlayerHand)> = Vec::with_capacity(self.player_order.len());
 
-        let mut showdowns = Vec::<(String, Showdown)>::new();
+        let mut showdowns = Vec::<(u64, Showdown)>::new();
 
-        for (addr, idxs) in self.hand_index_map.iter() {
+        for (id, idxs) in self.hand_index_map.iter() {
             if idxs.len() != 2 {
-                return Err(HandleError::Custom(
-                    "Invalid hole-card idx vec: length not equal to 2".to_string(),
-                ));
+                return Err(errors::invalid_hole_cards_number());
             }
 
-            let Some(player) = self.player_map.get(addr) else {
-                return Err(HandleError::Custom(
-                    "Player not found in game [settle]".to_string()
-                ));
+            let Some(player) = self.player_map.get(id) else {
+                return Err(errors::internal_player_not_found());
             };
 
             if player.status != PlayerStatus::Fold
@@ -831,25 +780,16 @@ impl Holdem {
                 && player.status != PlayerStatus::Leave
             {
                 let Some(first_card_idx) = idxs.first() else {
-                    return Err(HandleError::Custom(
-                        "Failed to extract index for 1st hole card".to_string()
-                    ));
+                    return Err(errors::first_hole_card_index_missing());
                 };
                 let Some(first_card) = decryption.get(first_card_idx) else {
-                    return Err(HandleError::Custom(
-                        format!("Failed to get revealed info, index: {}, avaliable indexes: {:?}",
-                        first_card_idx, decryption.keys().collect::<Vec<&usize>>())
-                    ));
+                    return Err(errors::first_hole_card_error());
                 };
                 let Some(second_card_idx) = idxs.last() else {
-                    return Err(HandleError::Custom(
-                        "Failed to extract index for 2nd hole card".to_string()
-                    ));
+                    return Err(errors::second_hole_card_index_missing());
                 };
                 let Some(second_card) = decryption.get(second_card_idx) else {
-                    return Err(HandleError::Custom(
-                        "Failed to get 2nd hole card from the revealed info".to_string()
-                    ));
+                    return Err(errors::second_hole_card_error());
                 };
                 let hole_cards = [first_card.as_str(), second_card.as_str()];
                 let cards = create_cards(board.as_slice(), &hole_cards);
@@ -857,9 +797,9 @@ impl Holdem {
                 let hole_cards = hole_cards.iter().map(|c| c.to_string()).collect();
                 let category = hand.category.clone();
                 let picks = hand.picks.iter().map(|c| c.to_string()).collect();
-                player_hands.push((player.addr(), hand));
+                player_hands.push((*id, hand));
                 showdowns.push((
-                    player.addr(),
+                    *id,
                     Showdown {
                         hole_cards,
                         category,
@@ -873,15 +813,13 @@ impl Holdem {
         println!("Player Hands from strong to weak {:?}", player_hands);
 
         // Winners example: [[w1], [w2, w3], ... ] where w2 == w3, i.e. a draw/tie
-        let mut winners: Vec<Vec<String>> = Vec::new();
-        let mut weaker: Vec<Vec<String>> = Vec::new();
+        let mut winners: Vec<Vec<u64>> = Vec::new();
+        let mut weaker: Vec<Vec<u64>> = Vec::new();
         // Players in a draw will be in the same set
-        let mut draws = Vec::<String>::new();
+        let mut draws = Vec::<u64>::new();
         // Each hand is either equal to or weaker than winner (1st)
         let Some((winner, highest_hand)) = player_hands.first() else {
-            return Err(HandleError::Custom(
-                "Failed to spot the strongest hand".to_string()
-            ));
+            return Err(errors::strongest_hand_not_found());
         };
 
         for (player, hand) in player_hands.iter().skip(1) {
@@ -912,32 +850,30 @@ impl Holdem {
         self.apply_prize()?;
 
         // Add or reduce players chips according to chips change map
-        for (player, chips_change) in chips_change_map.iter() {
+        for (id, chips_change) in chips_change_map.iter() {
             if *chips_change > 0 {
-                effect.settle(Settle::add(player, *chips_change as u64))
+                effect.settle(Settle::add(*id, *chips_change as u64))?;
             } else if *chips_change < 0 {
-                effect.settle(Settle::sub(player, -*chips_change as u64))
+                effect.settle(Settle::sub(*id, -*chips_change as u64))?;
             }
         }
 
         self.mark_out_players();
         let removed_addrs = self.remove_leave_and_out_players();
 
-        if self.mode == GameMode::Cash {
-            for addr in removed_addrs {
-                effect.settle(Settle::eject(addr));
-            }
+        for addr in removed_addrs {
+            effect.settle(Settle::eject(addr))?;
         }
 
         if rake > 0 {
             effect.transfer(0, rake);
         }
 
-        effect.checkpoint();
+        effect.checkpoint(self.build_checkpoint());
 
         // Save to hand history
-        for (addr, showdown) in showdowns.into_iter() {
-            self.hand_history.add_showdown(addr, showdown);
+        for (id, showdown) in showdowns.into_iter() {
+            self.hand_history.add_showdown(id, showdown);
         }
         Ok(())
     }
@@ -948,23 +884,23 @@ impl Holdem {
         self.arrange_players(last_pos)?;
         // ingame_players exclude anyone with `Init` status
         let ingame_players = self.player_order.clone();
-        let mut players_to_stay = Vec::<&String>::new();
-        let mut players_to_act = Vec::<&String>::new();
-        let mut players_allin = Vec::<&String>::new();
+        let mut players_to_stay = Vec::<u64>::new();
+        let mut players_to_act = Vec::<u64>::new();
+        let mut players_allin = Vec::<u64>::new();
 
-        for addr in ingame_players.iter() {
-            if let Some(player) = self.player_map.get(addr) {
+        for id in ingame_players.iter() {
+            if let Some(player) = self.player_map.get(id) {
                 match player.status {
                     PlayerStatus::Acting => {
-                        players_to_stay.push(addr);
+                        players_to_stay.push(*id);
                     }
                     PlayerStatus::Wait | PlayerStatus::Acted => {
-                        players_to_stay.push(addr);
-                        players_to_act.push(addr);
+                        players_to_stay.push(*id);
+                        players_to_act.push(*id);
                     }
                     PlayerStatus::Allin => {
-                        players_to_stay.push(addr);
-                        players_allin.push(addr);
+                        players_to_stay.push(*id);
+                        players_allin.push(*id);
                     }
                     _ => {}
                 }
@@ -978,11 +914,9 @@ impl Holdem {
         // It happends when the last second player left the game
         if ingame_players.len() == 1 {
             self.stage = HoldemStage::Settle;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             let Some(winner) = ingame_players.first() else {
-                return Err(HandleError::Custom(
-                    "Failed to get the only player".to_string()
-                ));
+                return Err(errors::single_player_missing());
             };
             println!("[Next State]: Single winner: {}", winner);
             self.single_player_win(effect, winner.clone())?;
@@ -991,11 +925,9 @@ impl Holdem {
         // Single players wins because others all folded
         else if players_to_stay.len() == 1 {
             self.stage = HoldemStage::Settle;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             let Some(winner) = players_to_stay.first() else {
-                return Err(HandleError::Custom(
-                    "Failed to get the single winner left".to_string()
-                ));
+                return Err(errors::single_winner_missing());
             };
             println!(
                 "[Next State]: All others folded and single winner is {}",
@@ -1013,9 +945,7 @@ impl Holdem {
         // Ask next player to act
         else if next_player.is_some() {
             let Some(next_action_player) = next_player else {
-                return Err(HandleError::Custom(
-                    "Failed to get the next-to-act player".to_string()
-                ));
+                return Err(errors::next_action_player_missing());
             };
             println!(
                 "[Next State]: Next-to-act player is: {}",
@@ -1031,12 +961,12 @@ impl Holdem {
             println!("[Next State]: Runner");
             self.street = Street::Showdown;
             self.stage = HoldemStage::Runner;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             self.collect_bets()?;
 
             // Reveal all cards for eligible players: not folded and without init status
-            for (addr, idxs) in self.hand_index_map.iter() {
-                let Some(player) = self.player_map.get(addr) else {
+            for (id, idxs) in self.hand_index_map.iter() {
+                let Some(player) = self.player_map.get(id) else {
                     return Err(errors::internal_player_not_in_game_but_assigned_cards());
                 };
                 if matches!(player.status, PlayerStatus::Acted | PlayerStatus::Allin) {
@@ -1065,15 +995,13 @@ impl Holdem {
             println!("[Next State]: Showdown");
             self.stage = HoldemStage::Showdown;
             self.street = Street::Showdown;
-            self.signal_game_end()?;
+            self.signal_game_end(effect)?;
             self.collect_bets()?;
 
             // Reveal players' hole cards
             for (addr, idxs) in self.hand_index_map.iter() {
                 let Some(player) = self.player_map.get(addr) else {
-                    return Err(HandleError::Custom(
-                        "Player not found in game but assigned cards".to_string()
-                    ));
+                    return Err(errors::internal_player_not_in_game_but_assigned_cards());
                 };
                 if matches!(player.status, PlayerStatus::Acted | PlayerStatus::Allin) {
                     effect.reveal(self.deck_random_id, idxs.clone());
@@ -1088,7 +1016,7 @@ impl Holdem {
         &mut self,
         effect: &mut Effect,
         event: GameEvent,
-        sender: String,
+        sender: u64,
     ) -> Result<(), HandleError> {
         self.display.clear();
 
@@ -1098,7 +1026,7 @@ impl Holdem {
 
         match event {
             GameEvent::Bet(amount) => {
-                if !self.is_acting_player(&sender) {
+                if !self.is_acting_player(sender) {
                     return Err(errors::not_the_acting_player_to_bet());
                 }
                 if self.bet_map.get(&sender).is_some() {
@@ -1113,44 +1041,44 @@ impl Holdem {
                 }
 
                 let (allin, _) = self.take_bet(sender.clone(), amount)?;
-                self.set_player_acted(&sender, allin)?;
+                self.set_player_acted(sender, allin)?;
                 self.min_raise = amount;
                 self.street_bet = amount;
             }
 
             GameEvent::Call => {
-                if !self.is_acting_player(&sender) {
+                if !self.is_acting_player(sender) {
                     return Err(errors::not_the_acting_player_to_call());
                 }
 
-                let betted = self.get_player_bet(&sender);
+                let betted = self.get_player_bet(sender);
                 let call_amount = self.street_bet - betted;
                 let (allin, _) = self.take_bet(sender.clone(), call_amount)?;
-                self.set_player_acted(&sender, allin)?;
+                self.set_player_acted(sender, allin)?;
             }
 
             GameEvent::Check => {
-                if !self.is_acting_player(&sender) {
+                if !self.is_acting_player(sender) {
                     return Err(errors::not_the_acting_player_to_check());
                 }
 
                 // Check is only available when player's current bet equals street bet.
-                let curr_bet = self.get_player_bet(&sender);
+                let curr_bet = self.get_player_bet(sender);
                 if curr_bet != self.street_bet {
                     return Err(errors::player_cant_check());
                 }
-                self.set_player_status(&sender, PlayerStatus::Acted)?;
+                self.set_player_status(sender, PlayerStatus::Acted)?;
             }
 
             GameEvent::Fold => {
-                if !self.is_acting_player(&sender) {
+                if !self.is_acting_player(sender) {
                     return Err(errors::not_the_acting_player_to_fold());
                 }
-                self.set_player_status(&sender, PlayerStatus::Fold)?;
+                self.set_player_status(sender, PlayerStatus::Fold)?;
             }
 
             GameEvent::Raise(amount) => {
-                if !self.is_acting_player(&sender) {
+                if !self.is_acting_player(sender) {
                     return Err(errors::not_the_acting_player_to_raise());
                 }
 
@@ -1158,12 +1086,12 @@ impl Holdem {
                     return Err(errors::player_cant_raise());
                 }
 
-                let betted = self.get_player_bet(&sender);
+                let betted = self.get_player_bet(sender);
                 if amount + betted < self.street_bet + self.min_raise && amount != player.chips {
                     return Err(errors::raise_amount_is_too_small());
                 }
                 let (allin, real_bet) = self.take_bet(sender.clone(), amount)?;
-                self.set_player_acted(&sender, allin)?;
+                self.set_player_acted(sender, allin)?;
                 let new_street_bet = betted + real_bet;
                 let new_min_raise = new_street_bet - self.street_bet;
                 self.street_bet = new_street_bet;
@@ -1174,14 +1102,14 @@ impl Holdem {
         // Save action to hand history
         let street = self.street;
         self.hand_history
-            .add_action(street, PlayerAction::new(&sender, event))?;
+            .add_action(street, PlayerAction::new(sender, event))?;
         self.next_state(effect)?;
         Ok(())
     }
 
-    pub fn set_player_acted(&mut self, player_addr: &str, allin: bool) -> Result<(), HandleError> {
+    pub fn set_player_acted(&mut self, player_id: u64, allin: bool) -> Result<(), HandleError> {
         self.set_player_status(
-            player_addr,
+            player_id,
             if allin {
                 PlayerStatus::Allin
             } else {
@@ -1190,8 +1118,8 @@ impl Holdem {
         )
     }
 
-    pub fn reset_player_timeout(&mut self, player_addr: &str) -> Result<(), HandleError> {
-        let Some(player) = self.player_map.get_mut(player_addr) else {
+    pub fn reset_player_timeout(&mut self, player_id: u64) -> Result<(), HandleError> {
+        let Some(player) = self.player_map.get_mut(&player_id) else {
             return Err(HandleError::InvalidPlayer);
         };
         player.timeout = 0;
@@ -1200,35 +1128,31 @@ impl Holdem {
 
     pub fn set_player_status(
         &mut self,
-        player_addr: &str,
+        player_id: u64,
         status: PlayerStatus,
     ) -> Result<(), HandleError> {
-        let Some(player) = self.player_map.get_mut(player_addr) else {
+        let Some(player) = self.player_map.get_mut(&player_id) else {
             return Err(HandleError::InvalidPlayer);
         };
         player.status = status;
         Ok(())
     }
 
-    pub fn get_player_bet(&self, player_addr: &str) -> u64 {
-        self.bet_map.get(player_addr).cloned().unwrap_or(0)
+    pub fn get_player_bet(&self, player_id: u64) -> u64 {
+        self.bet_map.get(&player_id).cloned().unwrap_or(0)
     }
 
-    pub fn take_bet(
-        &mut self,
-        player_addr: String,
-        amount: u64,
-    ) -> Result<(bool, u64), HandleError> {
-        let Some(player) = self.player_map.get_mut(&player_addr) else {
+    pub fn take_bet(&mut self, player_id: u64, amount: u64) -> Result<(bool, u64), HandleError> {
+        let Some(player) = self.player_map.get_mut(&player_id) else {
             return Err(HandleError::InvalidPlayer);
         };
         let (allin, real_amount) = player.take_bet(amount);
         self.bet_map
-            .entry(player_addr.clone())
+            .entry(player_id)
             .and_modify(|amt| *amt += real_amount)
             .or_insert(real_amount);
         self.total_bet_map
-            .entry(player_addr)
+            .entry(player_id)
             .and_modify(|amt| *amt += real_amount)
             .or_insert(real_amount);
         Ok((allin, real_amount))
@@ -1247,12 +1171,12 @@ impl Holdem {
                 .map(|p| p.position)
                 .collect::<Vec<usize>>();
             let Some(pos) = (0..11).find(|i| !occupied_pos.contains(i)) else {
-                return Err(HandleError::Custom("Table is full".to_string()))
+                return Err(errors::cannot_join_full_table())
             };
 
             self.player_map.insert(
-                p.addr.clone(),
-                Player::new_with_status(p.addr, p.chips, pos, PlayerStatus::Fold),
+                p.id,
+                Player::new_with_status(p.id, p.chips, pos, PlayerStatus::Fold),
             );
         }
         Ok(())
@@ -1283,25 +1207,28 @@ impl Holdem {
 }
 
 impl GameHandler for Holdem {
-    type Checkpoint = HoldemCheckpoint;
-
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
-        let HoldemAccount { sb, bb, rake, .. } = init_account.data()?;
+        let HoldemAccount {
+            sb,
+            bb,
+            rake,
+            rake_cap,
+            ..
+        } = init_account.data()?;
         let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
-        let (player_timeouts, btn) = if let Some(checkpoint) = checkpoint {
-            (checkpoint.player_timeouts, checkpoint.btn)
+        let (player_timeouts, btn, next_game_start) = if let Some(checkpoint) = checkpoint {
+            (checkpoint.player_timeouts, checkpoint.btn, checkpoint.next_game_start)
         } else {
-            (BTreeMap::default(), 0)
+            (BTreeMap::default(), 0, 0)
         };
 
-        let player_map: BTreeMap<String, Player> = init_account
+        let player_map: BTreeMap<u64, Player> = init_account
             .players
             .iter()
             .map(|p| {
-                let addr = p.addr.clone();
-                let timeout = player_timeouts.get(&addr).cloned().unwrap_or_default();
-                let player = Player::new(p.addr.clone(), p.balance, p.position, timeout);
-                (addr, player)
+                let timeout = player_timeouts.get(&p.id).cloned().unwrap_or_default();
+                let player = Player::new(p.id, p.balance, p.position, timeout);
+                (p.id, player)
             })
             .collect();
 
@@ -1314,49 +1241,49 @@ impl GameHandler for Holdem {
             min_raise: bb,
             btn,
             rake,
+            rake_cap,
             stage: HoldemStage::Init,
             street: Street::Init,
             street_bet: 0,
             board: Vec::<String>::with_capacity(5),
-            hand_index_map: BTreeMap::<String, Vec<usize>>::new(),
-            bet_map: BTreeMap::<String, u64>::new(),
-            total_bet_map: BTreeMap::<String, u64>::new(),
-            prize_map: BTreeMap::<String, u64>::new(),
+            hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+            bet_map: BTreeMap::<u64, u64>::new(),
+            total_bet_map: BTreeMap::<u64, u64>::new(),
+            prize_map: BTreeMap::<u64, u64>::new(),
             player_map,
-            player_order: Vec::<String>::new(),
+            player_order: Vec::<u64>::new(),
             pots: Vec::<Pot>::new(),
             acting_player: None,
-            winners: Vec::<String>::new(),
+            winners: Vec::<u64>::new(),
             display: Vec::<Display>::new(),
             mode: GameMode::Cash,
-            next_game_start: 0,
-            table_size: init_account.max_players as u8,
+            table_size: init_account.max_players as _,
             hand_history: HandHistory::default(),
+            next_game_start,
         })
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
-
         match event {
             // Handle holdem specific (custom) events
             Event::Custom { sender, raw } => {
                 self.display.clear();
-                self.reset_player_timeout(&sender)?;
+                self.reset_player_timeout(sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
                 println!("Player action event: {:?}, sender: {:?}", event, sender);
                 self.handle_custom_event(effect, event, sender.clone())?;
                 Ok(())
             }
 
-            Event::ActionTimeout { player_addr } => {
+            Event::ActionTimeout { player_id } => {
                 self.display.clear();
 
-                if !self.is_acting_player(&player_addr) {
-                    return Err(HandleError::Custom("Player is not acting".to_string()));
+                if !self.is_acting_player(player_id) {
+                    return Err(errors::not_the_acting_player());
                 }
 
-                let Some(player) = self.player_map.get_mut(&player_addr) else {
-                    return Err(HandleError::Custom("Player not found in game".to_string()));
+                let Some(player) = self.player_map.get_mut(&player_id) else {
+                    return Err(errors::internal_player_not_found());
                 };
 
                 let street = self.street;
@@ -1364,11 +1291,11 @@ impl GameHandler for Holdem {
                 // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
                 if self.mode == GameMode::Cash {
                     if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
-                        player.status = PlayerStatus::Leave;
+                        self.set_player_status(player_id, PlayerStatus::Leave)?;
                         self.hand_history.add_action(
                             street,
                             PlayerAction {
-                                addr: player_addr.to_owned(),
+                                id: player_id,
                                 event: GameEvent::Fold,
                             },
                         )?;
@@ -1380,29 +1307,29 @@ impl GameHandler for Holdem {
                 }
 
                 let street_bet = self.street_bet;
-                let bet = if let Some(player_bet) = self.bet_map.get(&player_addr) {
+                let bet = if let Some(player_bet) = self.bet_map.get(&player_id) {
                     *player_bet
                 } else {
                     0
                 };
 
                 if bet == street_bet {
-                    self.set_player_status(&player_addr, PlayerStatus::Acted)?;
+                    self.set_player_status(player_id, PlayerStatus::Acted)?;
                     self.hand_history.add_action(
                         street,
                         PlayerAction {
-                            addr: player_addr.to_owned(),
+                            id: player_id,
                             event: GameEvent::Check,
                         },
                     )?;
                     self.next_state(effect)?;
                     Ok(())
                 } else {
-                    self.set_player_status(&player_addr, PlayerStatus::Fold)?;
+                    self.set_player_status(player_id, PlayerStatus::Fold)?;
                     self.hand_history.add_action(
                         street,
                         PlayerAction {
-                            addr: player_addr.to_owned(),
+                            id: player_id,
                             event: GameEvent::Fold,
                         },
                     )?;
@@ -1412,48 +1339,40 @@ impl GameHandler for Holdem {
             }
 
             Event::WaitingTimeout | Event::Ready => {
-                self.display.clear();
-                self.reset_holdem_state()?;
-                self.reset_player_map_status()?;
-
-                if effect.count_players() >= 2 && effect.count_servers() >= 1 {
-                    self.next_game_start = 0;
+                if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                     effect.start_game();
                 }
                 Ok(())
             }
 
-            Event::Sync { new_players, .. } => {
+            Event::Join { players } => {
                 self.display.clear();
                 match self.stage {
                     HoldemStage::Init => {
-                        for p in new_players.into_iter() {
-                            let PlayerJoin {
-                                addr,
+                        for p in players.into_iter() {
+                            let GamePlayer {
+                                id,
                                 position,
                                 balance,
-                                ..
                             } = p;
-                            let player = Player::new(addr, balance, position, 0);
-                            self.player_map.insert(player.addr(), player);
+                            let player = Player::new(id, balance, position, 0);
+                            self.player_map.insert(id, player);
                         }
 
-                        if effect.count_players() >= 2 && effect.count_servers() >= 1 {
-                            self.next_game_start = 0;
+                        if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                             effect.start_game();
                         }
                     }
 
                     _ => {
-                        for p in new_players.into_iter() {
-                            let PlayerJoin {
-                                addr,
+                        for p in players.into_iter() {
+                            let GamePlayer {
+                                id,
                                 position,
                                 balance,
-                                ..
                             } = p;
-                            let player = Player::init(addr, balance, position);
-                            self.player_map.insert(player.addr(), player);
+                            let player = Player::init(id, balance, position);
+                            self.player_map.insert(id, player);
                         }
                     }
                 }
@@ -1461,8 +1380,7 @@ impl GameHandler for Holdem {
                 Ok(())
             }
 
-            Event::GameStart { .. } => {
-                self.next_game_start = 0;
+            Event::GameStart => {
                 self.display.clear();
 
                 let next_btn = self.get_next_btn()?;
@@ -1479,17 +1397,11 @@ impl GameHandler for Holdem {
                 Ok(())
             }
 
-            Event::Leave { player_addr } => {
+            Event::Leave { player_id } => {
                 // TODO: Leaving is not allowed in SNG game
                 self.display.clear();
-                println!("Player {} decides to leave game", player_addr);
-
-                let Some(leaving_player) = self.player_map.get_mut(&player_addr) else {
-                    return Err(HandleError::Custom(
-                        "Player not found in game [Leave]".to_string()
-                    ));
-                };
-                leaving_player.status = PlayerStatus::Leave;
+                println!("Player {} decides to leave game", player_id);
+                self.set_player_status(player_id, PlayerStatus::Leave)?;
 
                 match self.stage {
                     // If current stage is not playing, the player can
@@ -1498,11 +1410,11 @@ impl GameHandler for Holdem {
                     | HoldemStage::Settle
                     | HoldemStage::Runner
                     | HoldemStage::Showdown => {
-                        self.player_map.remove_entry(&player_addr);
-                        effect.settle(Settle::eject(&player_addr));
-                        effect.checkpoint();
+                        self.player_map.remove_entry(&player_id);
+                        effect.settle(Settle::eject(player_id))?;
+                        effect.checkpoint(self.build_checkpoint());
                         self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
-                        self.signal_game_end()?;
+                        self.signal_game_end(effect)?;
                     }
 
                     // If current stage is playing, the player will be
@@ -1520,13 +1432,24 @@ impl GameHandler for Holdem {
                     // 3. The leaving player is not the acting player,
                     // and the game can continue.
                     HoldemStage::Play | HoldemStage::ShareKey => {
+                        let unfolded_cnt = self.count_unfolded_players();
                         if self.stage == HoldemStage::Play
-                            && !self.is_acting_player(&player_addr)
-                            && self.count_unfolded_players() > 1
+                            && !self.is_acting_player(player_id)
+                            && unfolded_cnt > 1
                         {
-                            println!("Game continue as the folded player is not the acting player");
-                        } else {
+                            println!("Game continues as the leaving player not acting");
+                        } else if self.is_acting_player(player_id) {
+                            // TODO: fold the `Leave' player?
                             self.next_state(effect)?;
+                        } else if unfolded_cnt == 1 {
+                            let winner = self
+                                .player_map
+                                .values()
+                                .find(|p| p.id() != player_id)
+                                .map(|p| p.id())
+                                .ok_or(errors::single_winner_missing())?;
+                            self.single_player_win(effect, winner)?;
+                            self.signal_game_end(effect)?;
                         }
                     }
                 }
@@ -1537,11 +1460,10 @@ impl GameHandler for Holdem {
             Event::RandomnessReady { .. } => {
                 self.display.clear();
                 // Cards are dealt to players but remain invisible to them
-                for (idx, (addr, player)) in self.player_map.iter().enumerate() {
+                for (idx, (id, player)) in self.player_map.iter().enumerate() {
                     if player.status != PlayerStatus::Init {
-                        effect.assign(self.deck_random_id, addr, vec![idx * 2, idx * 2 + 1]);
-                        self.hand_index_map
-                            .insert(addr.clone(), vec![idx * 2, idx * 2 + 1]);
+                        effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
+                        self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
                     }
                 }
 
@@ -1566,9 +1488,7 @@ impl GameHandler for Holdem {
                                 if let Some(card) = decryption.get(&i) {
                                     self.board.push(card.clone());
                                 } else {
-                                    return Err(HandleError::Custom(
-                                        "Failed to reveal the 3 flop cards".to_string(),
-                                    ));
+                                    return Err(errors::flop_cards_error());
                                 }
                             }
                             self.display.push(Display::DealBoard {
@@ -1589,9 +1509,7 @@ impl GameHandler for Holdem {
                                     board: self.board.clone(),
                                 });
                             } else {
-                                return Err(HandleError::Custom(
-                                    "Failed to reveal the turn card".to_string(),
-                                ));
+                                return Err(errors::turn_card_error());
                             }
 
                             self.hand_history.set_board(self.board.clone());
@@ -1608,9 +1526,7 @@ impl GameHandler for Holdem {
                                     board: self.board.clone(),
                                 });
                             } else {
-                                return Err(HandleError::Custom(
-                                    "Failed to reveal the river card".to_string(),
-                                ));
+                                return Err(errors::river_card_error());
                             }
 
                             self.hand_history.set_board(self.board.clone());
@@ -1668,10 +1584,5 @@ impl GameHandler for Holdem {
             // Other events
             _ => Ok(()),
         }
-    }
-
-    /// The implementation depends on the game type
-    fn into_checkpoint(self) -> HandleResult<HoldemCheckpoint> {
-        Ok(self.into())
     }
 }
