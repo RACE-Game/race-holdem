@@ -3,7 +3,6 @@ mod helper;
 
 use super::*;
 use helper::*;
-use race_holdem_base::essential::Player;
 use race_test::prelude::*;
 
 #[test]
@@ -83,17 +82,36 @@ fn test_create_tables() -> anyhow::Result<()> {
             SubGame::try_new(
                 1,
                 SUBGAME_BUNDLE_ADDR.into(),
+                2,
+                vec![
+                    GamePlayer::new(alice.id(), 1000, 0),
+                    GamePlayer::new(carol.id(), 2000, 1)
+                ],
                 InitTableData {
                     table_id: 1,
                     table_size: 2,
-                }
+                },
+                MttTableCheckpoint {
+                    sb: 10,
+                    bb: 20,
+                    btn: 0,
+                },
             )?,
             SubGame::try_new(
                 2,
                 SUBGAME_BUNDLE_ADDR.into(),
+                2,
+                vec![
+                    GamePlayer::new(bob.id(), 1000, 0),
+                ],
                 InitTableData {
                     table_id: 2,
                     table_size: 2,
+                },
+                MttTableCheckpoint {
+                    sb: 10,
+                    bb: 20,
+                    btn: 0,
                 }
             )?,
         ]
@@ -122,7 +140,7 @@ fn test_close_table() -> anyhow::Result<()> {
     ];
 
     let mut mtt = setup_mtt_state(players)?;
-    let evt = Event::GameStart { access_version: 0 };
+    let evt = Event::GameStart;
     let mut effect = Effect::default();
     mtt.handle_event(&mut effect, evt)?;
 
@@ -140,8 +158,10 @@ fn test_close_table() -> anyhow::Result<()> {
             Settle::sub(pk.id(), 1000),
         ],
         // checkpoint contains alive players only
-        checkpoint: MttTableCheckpoint {
+        table: MttTable {
             btn: 0,
+            sb: 10,
+            bb: 20,
             players: vec![MttTablePlayer {
                 id: pc.id(),
                 chips: 3000,
@@ -157,8 +177,10 @@ fn test_close_table() -> anyhow::Result<()> {
             Settle::add(ph.id(), 500),
             Settle::sub(pl.id(), 1000),
         ],
-        checkpoint: MttTableCheckpoint {
+        table: MttTable {
             btn: 0,
+            sb: 10,
+            bb: 20,
             players: vec![
                 MttTablePlayer {
                     id: pd.id(),
@@ -177,10 +199,12 @@ fn test_close_table() -> anyhow::Result<()> {
         Event::Bridge {
             dest: 4,
             raw: t4_game_result.try_to_vec()?,
+            join_players: vec![],
         },
         Event::Bridge {
             dest: 3,
             raw: t3_game_result.try_to_vec()?,
+            join_players: vec![],
         },
     ];
 
@@ -199,9 +223,10 @@ fn test_close_table() -> anyhow::Result<()> {
                         chips: 3000,
                         table_position: 2
                     }]
-                }
+                },
+                vec![],
             )?,
-            EmitBridgeEvent::try_new(3, HoldemBridgeEvent::CloseTable)?,
+            EmitBridgeEvent::try_new(3, HoldemBridgeEvent::CloseTable, vec![])?,
         ]
     );
 
@@ -230,7 +255,7 @@ fn test_move_players() -> anyhow::Result<()> {
         &mut pk, &mut pl,
     ];
     let mut mtt = setup_mtt_state(players)?;
-    let evt = Event::GameStart { access_version: 0 };
+    let evt = Event::GameStart;
     let mut effect = Effect::default();
     effect.timestamp = 1001;
     mtt.handle_event(&mut effect, evt)?;
@@ -259,65 +284,77 @@ fn test_move_players() -> anyhow::Result<()> {
             SubGame::try_new(
                 1,
                 SUBGAME_BUNDLE_ADDR.into(),
+                3,
+                vec![
+                    GamePlayer::new(pa.id(), 1000, 0),
+                    GamePlayer::new(pe.id(), 1000, 1),
+                    GamePlayer::new(pi.id(), 1000, 2)
+                ],
                 InitTableData {
-                    btn: 0,
                     table_id: 1,
+                    table_size: 3,
+                },
+                MttTableCheckpoint {
                     sb: 10,
                     bb: 20,
-                    table_size: 3,
-                    player_lookup: BTreeMap::from([
-                        (pa.id(), Player::new(pa.id(), 1000, 0, 0)),
-                        (pe.id(), Player::new(pe.id(), 1000, 1, 0)),
-                        (pi.id(), Player::new(pi.id(), 1000, 2, 0)),
-                    ])
+                    btn: 0
                 }
             )?,
             SubGame::try_new(
                 2,
                 SUBGAME_BUNDLE_ADDR.into(),
+                3,
+                vec![
+                    GamePlayer::new(pb.id(), 1000, 0),
+                    GamePlayer::new(pf.id(), 1000, 1),
+                    GamePlayer::new(pj.id(), 1000, 2)
+                ],
                 InitTableData {
-                    btn: 0,
                     table_id: 2,
+                    table_size: 3,
+                },
+                MttTableCheckpoint {
                     sb: 10,
                     bb: 20,
-                    table_size: 3,
-                    player_lookup: BTreeMap::from([
-                        (pb.id(), Player::new(pb.id(), 1000, 0, 0)),
-                        (pf.id(), Player::new(pf.id(), 1000, 1, 0)),
-                        (pj.id(), Player::new(pj.id(), 1000, 2, 0)),
-                    ])
+                    btn: 0
                 }
             )?,
             SubGame::try_new(
                 3,
                 SUBGAME_BUNDLE_ADDR.into(),
+                3,
+                vec![
+                    GamePlayer::new(pc.id(), 1000, 0),
+                    GamePlayer::new(pg.id(), 1000, 1),
+                    GamePlayer::new(pk.id(), 1000, 2)
+                ],
                 InitTableData {
-                    btn: 0,
                     table_id: 3,
+                    table_size: 3,
+                },
+                MttTableCheckpoint {
                     sb: 10,
                     bb: 20,
-                    table_size: 3,
-                    player_lookup: BTreeMap::from([
-                        (pc.id(), Player::new(pc.id(), 1000, 0, 0)),
-                        (pg.id(), Player::new(pg.id(), 1000, 1, 0)),
-                        (pk.id(), Player::new(pk.id(), 1000, 2, 0)),
-                    ])
+                    btn: 0,
                 }
             )?,
-            LaunchSubGame::try_new(
+            SubGame::try_new(
                 4,
                 SUBGAME_BUNDLE_ADDR.into(),
+                3,
+                vec![
+                    GamePlayer::new(pd.id(), 1000, 0),
+                    GamePlayer::new(ph.id(), 1000, 1),
+                    GamePlayer::new(pl.id(), 1000, 2)
+                ],
                 InitTableData {
-                    btn: 0,
                     table_id: 4,
+                    table_size: 3,
+                },
+                MttTableCheckpoint {
                     sb: 10,
                     bb: 20,
-                    table_size: 3,
-                    player_lookup: BTreeMap::from([
-                        (pd.id(), Player::new(pd.id(), 1000, 0, 0)),
-                        (ph.id(), Player::new(ph.id(), 1000, 1, 0)),
-                        (pl.id(), Player::new(pl.id(), 1000, 2, 0)),
-                    ])
+                    btn: 0,
                 }
             )?,
         ]
@@ -329,7 +366,7 @@ fn test_move_players() -> anyhow::Result<()> {
     assert_eq!(mtt.ranks.len(), 12);
     assert_eq!(mtt.tables.len(), 4);
     assert_eq!(mtt.table_size, 3);
-    assert_eq!(mtt.time_elapsed, 1051);
+    assert_eq!(mtt.time_elapsed, 50);
     assert_eq!(mtt.timestamp, effect.timestamp);
     assert_eq!(mtt.blind_info, BlindInfo::default());
 
@@ -343,8 +380,10 @@ fn test_move_players() -> anyhow::Result<()> {
             Settle::sub(pk.id(), 1000),
         ],
         // checkpoint contains alive players only
-        checkpoint: MttTableCheckpoint {
+        table: MttTable {
             btn: 0,
+            sb: 10,
+            bb: 20,
             players: vec![MttTablePlayer {
                 id: pc.id(),
                 chips: 3000,
@@ -360,8 +399,10 @@ fn test_move_players() -> anyhow::Result<()> {
             Settle::sub(pe.id(), 100),
             Settle::sub(pi.id(), 100),
         ],
-        checkpoint: MttTableCheckpoint {
+        table: MttTable {
             btn: 0,
+            sb: 10,
+            bb: 20,
             players: vec![
                 MttTablePlayer {
                     id: pa.id(),
@@ -386,10 +427,12 @@ fn test_move_players() -> anyhow::Result<()> {
         Event::Bridge {
             dest: 3,
             raw: t3_game_result.try_to_vec()?,
+            join_players: vec![],
         },
         Event::Bridge {
             dest: 3,
             raw: t1_game_result.try_to_vec()?,
+            join_players: vec![],
         },
     ];
 
@@ -408,7 +451,8 @@ fn test_move_players() -> anyhow::Result<()> {
                         chips: 1200,
                         table_position: 1
                     }],
-                }
+                },
+                vec![]
             )?,
             EmitBridgeEvent::try_new(
                 1,
@@ -416,7 +460,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     sb: 10,
                     bb: 20,
                     moved_players: vec![pa.id()] // player pa(id) left
-                }
+                },
+                vec![]
             )?
         ]
     );
@@ -437,7 +482,7 @@ fn test_final_settle() -> anyhow::Result<()> {
     let players = [&mut alice, &mut bob, &mut carol, &mut dave];
     let mut mtt = helper::init_state_with_huge_amt(players)?;
 
-    let evt = Event::GameStart { access_version: 0 };
+    let evt = Event::GameStart;
     let mut effect = Effect::default();
     mtt.handle_event(&mut effect, evt)?;
 
@@ -453,7 +498,9 @@ fn test_final_settle() -> anyhow::Result<()> {
             Settle::add(alice.id(), 2_000_000_000),
             Settle::sub(carol.id(), 2_000_000_000),
         ],
-        checkpoint: MttTableCheckpoint {
+        table: MttTable {
+            sb: 10,
+            bb: 20,
             btn: 0,
             players: vec![MttTablePlayer {
                 id: alice.id(),
@@ -469,7 +516,9 @@ fn test_final_settle() -> anyhow::Result<()> {
             Settle::add(alice.id(), 1_000_000_000),
             Settle::sub(bob.id(), 1_000_000_000),
         ],
-        checkpoint: MttTableCheckpoint {
+        table: MttTable {
+            sb: 10,
+            bb: 20,
             btn: 0,
             players: vec![MttTablePlayer {
                 id: alice.id(),
@@ -483,10 +532,12 @@ fn test_final_settle() -> anyhow::Result<()> {
         Event::Bridge {
             dest: 2,
             raw: t1_game_result.try_to_vec()?,
+            join_players: vec![],
         },
         Event::Bridge {
             dest: 2,
             raw: t2_game_result.try_to_vec()?,
+            join_players: vec![],
         },
     ];
 
@@ -515,6 +566,7 @@ fn test_no_enough_players_complete() -> anyhow::Result<()> {
         .with_deposit_range(1000, 1000)
         .with_data(MttAccountData {
             start_time: 1001,
+            ticket: 1000,
             table_size: 6,
             blind_info: BlindInfo::default(),
             prize_rules: vec![50, 30, 20],

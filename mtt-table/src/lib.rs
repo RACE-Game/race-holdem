@@ -3,9 +3,11 @@ mod errors;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
-use race_holdem_base::essential::{GameMode, HoldemStage, Player, WAIT_TIMEOUT_DEFAULT};
+use race_holdem_base::essential::{GameMode, HoldemStage, Player};
 use race_holdem_base::game::Holdem;
-use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
+use race_holdem_mtt_base::{
+    HoldemBridgeEvent, InitTableData, MttTable as MT, MttTableCheckpoint, MttTablePlayer,
+};
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
 
@@ -29,15 +31,15 @@ impl GameHandler for MttTable {
             btn,
             sb,
             bb,
-            players
+            next_game_start,
         }) = init_account.checkpoint()? else {
             return Err(HandleError::InternalError{ message: "Checkpoint is required".into()});
         };
 
         let mut player_map = BTreeMap::new();
 
-        for p in players {
-            player_map.insert(p.id, Player::new(p.id, p.chips, p.table_position as _, 0));
+        for p in init_account.players {
+            player_map.insert(p.id, Player::new(p.id, p.balance, p.position as _, 0));
         }
 
         let holdem = Holdem {
@@ -47,6 +49,7 @@ impl GameHandler for MttTable {
             player_map,
             table_size,
             mode: GameMode::Mtt,
+            next_game_start,
             ..Default::default()
         };
 
@@ -67,21 +70,29 @@ impl GameHandler for MttTable {
                     self.handle_bridge_event(effect, bridge_event, join_players)?;
                 }
             }
-            _ => self.holdem.handle_event(effect, event)?,
+            _ => {
+                self.holdem.handle_event(effect, event)?;
+                // Check if there's a settlement
+                if effect.is_checkpoint() {
+                    let settles = effect.settles.clone();
+                    let checkpoint = self.build_checkpoint()?;
+                    let players = self
+                        .holdem
+                        .player_map
+                        .values()
+                        .map(|p| MttTablePlayer::new(p.id, p.chips, p.position as _))
+                        .collect();
+                    let evt = HoldemBridgeEvent::GameResult {
+                        table: MT::new(&checkpoint, players),
+                        settles,
+                        table_id: self.table_id,
+                    };
+                    effect.checkpoint(checkpoint);
+                    effect.bridge_event(0, evt, vec![])?;
+                }
+            }
         };
 
-        // Check if there's a settlement
-        if effect.is_checkpoint() {
-            let settles = effect.settles.clone();
-            let checkpoint = self.build_checkpoint()?;
-            let evt = HoldemBridgeEvent::GameResult {
-                checkpoint: checkpoint.clone(),
-                settles,
-                table_id: self.table_id,
-            };
-            effect.checkpoint(checkpoint);
-            effect.bridge_event(0, evt, vec![])?;
-        }
         Ok(())
     }
 }
@@ -101,7 +112,7 @@ impl MttTable {
             btn: self.holdem.btn,
             sb: self.holdem.sb,
             bb: self.holdem.bb,
-            players,
+            next_game_start: self.holdem.next_game_start,
         })
     }
 
@@ -121,8 +132,15 @@ impl MttTable {
                 self.holdem.bb = bb;
                 for id in moved_players {
                     self.holdem.player_map.remove(&id);
+                    effect.settle(Settle::eject(id))?;
                 }
-                effect.wait_timeout(WAIT_TIMEOUT_DEFAULT);
+                effect.checkpoint(self.build_checkpoint()?);
+                let timeout = self
+                    .holdem
+                    .next_game_start
+                    .checked_sub(effect.timestamp())
+                    .unwrap_or(0);
+                effect.wait_timeout(timeout);
             }
             // Add players from other tables
             HoldemBridgeEvent::Relocate { players } => {
@@ -137,11 +155,20 @@ impl MttTable {
                         .insert(id, Player::new(id, chips, table_position as _, 0));
                 }
                 if self.holdem.stage == HoldemStage::Init {
-                    effect.wait_timeout(0);
+                    let timeout = self
+                        .holdem
+                        .next_game_start
+                        .checked_sub(effect.timestamp())
+                        .unwrap_or(0);
+                    effect.wait_timeout(timeout);
                 }
             }
             HoldemBridgeEvent::CloseTable => {
+                for (id, _) in self.holdem.player_map.iter() {
+                    effect.settle(Settle::eject(*id))?;
+                }
                 self.holdem.player_map.clear();
+                effect.checkpoint(self.build_checkpoint()?);
             }
             _ => return Err(errors::internal_invalid_bridge_event()),
         };
@@ -164,10 +191,6 @@ mod tests {
             data: InitTableData {
                 table_id: 1,
                 table_size: 6,
-                player_lookup: BTreeMap::from([
-                    (1, Player::new(0, 10000, 0, 0)), // alice id: 0
-                    (2, Player::new(1, 10000, 0, 0)), // bob id: 1
-                ]),
             }
             .try_to_vec()?,
             ..Default::default()
@@ -213,16 +236,10 @@ mod tests {
             .add_player(&mut bob, 10000)
             .set_transactor(&mut tx);
 
-        let player_lookup = BTreeMap::from([
-            (0, Player::new(alice.id(), 10000, 0, 0)),
-            (1, Player::new(bob.id(), 10000, 1, 0)),
-        ]);
-
         let acc = acc_builder
             .with_data(InitTableData {
                 table_id: 1,
                 table_size: 6,
-                player_lookup,
             })
             .build();
         let mut ctx = GameContext::try_new(&acc)?;

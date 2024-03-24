@@ -19,16 +19,15 @@ mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::{prelude::*, types::SettleOp};
-use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableCheckpoint, MttTablePlayer};
+use race_holdem_mtt_base::{
+    HoldemBridgeEvent, InitTableData, MttTable, MttTableCheckpoint, MttTablePlayer,
+};
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
 
 const SUBGAME_BUNDLE_ADDR: &str = "raceholdemtargetraceholdemmtttablewasm";
 
-pub type TableId = u8;
-pub type PlayerId = u64;
-
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug, Clone, Copy)]
 pub enum MttStage {
     #[default]
     Init,
@@ -127,9 +126,10 @@ pub struct MttAccountData {
 pub struct MttCheckpoint {
     start_time: u64,
     ranks: Vec<PlayerRankCheckpoint>,
-    tables: BTreeMap<TableId, MttTableCheckpoint>,
+    tables: BTreeMap<u8, MttTable>,
     time_elapsed: u64,
     total_prize: u64,
+    stage: MttStage,
 }
 
 fn find_checkpoint_rank_by_pos(
@@ -148,9 +148,9 @@ pub struct Mtt {
     start_time: u64,
     alives: usize, // The number of alive players
     stage: MttStage,
-    table_assigns: BTreeMap<PlayerId, TableId>,
+    table_assigns: BTreeMap<u64, u8>,
     ranks: Vec<PlayerRank>,
-    tables: BTreeMap<TableId, MttTableCheckpoint>,
+    tables: BTreeMap<u8, MttTable>,
     table_size: u8,
     time_elapsed: u64,
     timestamp: u64,
@@ -175,7 +175,7 @@ impl GameHandler for Mtt {
 
         let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize) =
             if let Some(checkpoint) = checkpoint {
-                let mut table_assigns = BTreeMap::<PlayerId, TableId>::new();
+                let mut table_assigns = BTreeMap::<u64, u8>::new();
                 let mut ranks = Vec::<PlayerRank>::new();
 
                 for p in init_account.players.into_iter() {
@@ -197,7 +197,7 @@ impl GameHandler for Mtt {
                     checkpoint.start_time,
                     checkpoint.tables,
                     checkpoint.time_elapsed,
-                    MttStage::Playing,
+                    checkpoint.stage,
                     table_assigns,
                     ranks,
                     checkpoint.total_prize,
@@ -205,10 +205,10 @@ impl GameHandler for Mtt {
             } else {
                 (
                     start_time,
-                    BTreeMap::<TableId, MttTableCheckpoint>::new(),
+                    BTreeMap::<u8, MttTable>::new(),
                     0, // no time elapsed at the init
                     MttStage::Init,
-                    BTreeMap::<u64, TableId>::new(),
+                    BTreeMap::<u64, u8>::new(),
                     Vec::<PlayerRank>::new(),
                     0, // no prize at the init
                 )
@@ -289,9 +289,18 @@ impl GameHandler for Mtt {
 
             Event::GameStart => {
                 self.start_time = effect.timestamp();
-                self.stage = MttStage::Playing;
-                self.create_tables(effect)?;
-                self.update_alives();
+                if self.ranks.is_empty() {
+                    // No player joined, mark game as completed
+                    self.stage = MttStage::Completed;
+                } else if self.ranks.len() == 1 {
+                    // Only 1 player joined, end game with single winner
+                    self.apply_prizes(effect)?;
+                } else {
+                    // Start game normally
+                    self.stage = MttStage::Playing;
+                    self.create_tables(effect)?;
+                    self.update_alives();
+                }
                 effect.checkpoint(self.build_checkpoint()?);
             }
 
@@ -301,9 +310,9 @@ impl GameHandler for Mtt {
                     HoldemBridgeEvent::GameResult {
                         table_id,
                         settles,
-                        checkpoint,
+                        table,
                     } => {
-                        self.tables.insert(table_id, checkpoint);
+                        self.tables.insert(table_id, table);
                         self.apply_settles(settles)?;
                         self.update_tables(effect, table_id)?;
                         self.apply_prizes(effect)?;
@@ -354,7 +363,7 @@ impl Mtt {
         &self,
         effect: &mut Effect,
         table_id: u8,
-        table: &MttTableCheckpoint,
+        table: &MttTable,
     ) -> Result<(), HandleError> {
         let mut players = Vec::new();
         for p in table.players.iter() {
@@ -370,7 +379,7 @@ impl Mtt {
             self.table_size as _,
             players,
             init_table_data,
-            table.clone(),
+            MttTableCheckpoint::new(&table),
         )?;
         Ok(())
     }
@@ -397,7 +406,13 @@ impl Mtt {
                     j += num_of_tables;
                 }
                 let (sb, bb) = self.calc_blinds()?;
-                let table = MttTableCheckpoint { btn: 0, sb, bb, players };
+                let table = MttTable {
+                    btn: 0,
+                    sb,
+                    bb,
+                    players,
+                    next_game_start: 0,
+                };
                 self.launch_table(effect, table_id, &table)?;
                 self.tables.insert(table_id, table);
             }
@@ -421,6 +436,8 @@ impl Mtt {
                     rank.chips -= amount;
                     if rank.chips == 0 {
                         rank.status = PlayerRankStatus::Out;
+                        // In such case, we want to unset player's assignment to table
+                        self.table_assigns.remove(&rank.id);
                     }
                 }
                 _ => (),
@@ -457,37 +474,45 @@ impl Mtt {
     }
 
     /// Update tables by balancing the players at each table.
-    fn update_tables(&mut self, effect: &mut Effect, table_id: TableId) -> Result<(), HandleError> {
+    fn update_tables(&mut self, effect: &mut Effect, table_id: u8) -> Result<(), HandleError> {
         let (sb, bb) = self.calc_blinds()?;
 
         // No-op for final table
         if self.tables.len() == 1 {
-            effect.bridge_event(
-                table_id as _,
-                HoldemBridgeEvent::StartGame {
-                    sb,
-                    bb,
-                    moved_players: Vec::with_capacity(0),
-                },
-                vec![],
-            )?;
+            let Some((_, final_table)) = self.tables.first_key_value() else {
+                return Err(errors::error_table_not_fonud());
+            };
+            if final_table.players.len() > 1 {
+                effect.bridge_event(
+                    table_id as _,
+                    HoldemBridgeEvent::StartGame {
+                        sb,
+                        bb,
+                        moved_players: Vec::with_capacity(0),
+                    },
+                    vec![],
+                )?;
+            }
             return Ok(());
         }
 
         let table_size = self.table_size as usize;
 
-        let Some(first_table) = self.tables.first_key_value() else {
-            return Ok(())
+        let Some(curr_table) = self.tables.get_key_value(&table_id) else {
+            return Err(errors::error_invalid_table_id());
         };
 
-        let mut table_with_least = first_table;
-        let mut table_with_most = first_table;
+        let mut table_with_least = curr_table;
+        let mut table_with_most = curr_table;
 
+        // Find the table with least players and the table with most
+        // players, current table has higher priority.
         for (id, table) in self.tables.iter() {
-            if table.players.len() < table_with_least.1.players.len() {
+            let l = table.players.len();
+            if l < table_with_least.1.players.len() {
                 table_with_least = (id, table);
             }
-            if table.players.len() > table_with_most.1.players.len() {
+            if l > table_with_most.1.players.len() {
                 table_with_most = (id, table);
             }
         }
@@ -508,10 +533,7 @@ impl Mtt {
             })
             .sum::<usize>();
         let target_table_ids: Vec<u8> = {
-            let mut table_refs = self
-                .tables
-                .iter()
-                .collect::<Vec<(&TableId, &MttTableCheckpoint)>>();
+            let mut table_refs = self.tables.iter().collect::<Vec<(&u8, &MttTable)>>();
             table_refs.sort_by_key(|(_id, t)| t.players.len());
             table_refs
                 .into_iter()
@@ -544,12 +566,19 @@ impl Mtt {
                         .get_mut(&target_table_id)
                         .ok_or(errors::error_table_not_fonud())?;
                     table_ref.add_player(&mut player);
+                    self.table_assigns
+                        .entry(player.id)
+                        .and_modify(|v| *v = *target_table_id);
                     effect.bridge_event(
                         target_table_ids[i] as _,
                         HoldemBridgeEvent::Relocate {
                             players: vec![player.clone()],
                         },
-                        vec![GamePlayer::new(player.id, player.chips, player.table_position as _)],
+                        vec![GamePlayer::new(
+                            player.id,
+                            player.chips,
+                            player.table_position as _,
+                        )],
                     )?;
                 } else {
                     break;
@@ -575,14 +604,24 @@ impl Mtt {
                 .get_mut(&smallest_table_id)
                 .ok_or(errors::error_table_not_fonud())?;
 
-            players.iter_mut().for_each(|p| table_ref.add_player(p));
+            for p in players.iter_mut() {
+                table_ref.add_player(p);
+                self.table_assigns
+                    .entry(p.id)
+                    .and_modify(|v| *v = smallest_table_id);
+            }
 
             let moved_players = players.iter().map(|p| p.id).collect();
 
             effect.bridge_event(
                 smallest_table_id as _,
-                HoldemBridgeEvent::Relocate { players: players.clone() },
-                players.into_iter().map(|p| GamePlayer::new(p.id, p.chips, p.table_position as _)).collect()
+                HoldemBridgeEvent::Relocate {
+                    players: players.clone(),
+                },
+                players
+                    .into_iter()
+                    .map(|p| GamePlayer::new(p.id, p.chips, p.table_position as _))
+                    .collect(),
             )?;
 
             effect.bridge_event(
@@ -595,20 +634,30 @@ impl Mtt {
                 vec![],
             )?;
         } else {
-            effect.bridge_event(
-                table_id as _,
-                HoldemBridgeEvent::StartGame {
-                    sb,
-                    bb,
-                    moved_players: Vec::with_capacity(0),
-                },
-                vec![]
-            )?;
+            let Some(table) = self.tables.get(&table_id) else {
+                return Err(errors::error_invalid_table_id())
+            };
+
+            // Send `StartGame` when there's more than 1 players,
+            // Otherwise this table should wait another table for
+            // merging.
+            if table.players.len() > 1 {
+                effect.bridge_event(
+                    table_id as _,
+                    HoldemBridgeEvent::StartGame {
+                        sb,
+                        bb,
+                        moved_players: Vec::with_capacity(0),
+                    },
+                    vec![],
+                )?;
+            }
         }
 
         Ok(())
     }
 
+    /// Apply the prizes and mark the game as completed.
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
             // Simply make a checkpoint is the game is on going
@@ -653,9 +702,8 @@ impl Mtt {
 
         for rank in ranks {
             let PlayerRank { id, chips, .. } = rank;
-            let table_id = *table_assigns
-                .get(&id)
-                .ok_or(errors::error_player_not_found())?;
+            // We use zero `table_id` to indicates there's no table assign for a player
+            let table_id = table_assigns.get(&id).cloned().unwrap_or(0);
             ranks_checkpoint.push(PlayerRankCheckpoint {
                 id: *id,
                 chips: *chips,
@@ -669,6 +717,7 @@ impl Mtt {
             tables: tables.clone(),
             time_elapsed: *time_elapsed,
             total_prize: *total_prize,
+            stage: self.stage,
         })
     }
 }

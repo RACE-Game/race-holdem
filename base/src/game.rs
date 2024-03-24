@@ -37,21 +37,23 @@ pub struct Holdem {
     pub winners: Vec<u64>,
     pub display: Vec<Display>,
     pub mode: GameMode,
-    pub table_size: u8,       // The size of table
+    pub table_size: u8, // The size of table
     pub hand_history: HandHistory,
+    pub next_game_start: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct HoldemCheckpoint {
     pub btn: usize,
     pub player_timeouts: BTreeMap<u64, u8>,
+    pub next_game_start: u64,
 }
 
 // Methods that mutate or query the game state
 impl Holdem {
-
     fn build_checkpoint(&self) -> HoldemCheckpoint {
-        let player_timeouts = self.player_map
+        let player_timeouts = self
+            .player_map
             .iter()
             .map(|p| (*p.0, p.1.timeout))
             .collect::<BTreeMap<u64, u8>>();
@@ -59,6 +61,7 @@ impl Holdem {
         HoldemCheckpoint {
             btn: self.btn,
             player_timeouts,
+            next_game_start: self.next_game_start,
         }
     }
 
@@ -102,27 +105,12 @@ impl Holdem {
     }
 
     // Clear data that don't belong to a running game, indicating game end
-    // Additionally, cancel current dispatch if game mode is MTT
+    // Additionally, cancel current dispatch
     fn signal_game_end(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         self.street_bet = 0;
         self.min_raise = 0;
         self.acting_player = None;
         effect.cancel_dispatch();
-        Ok(())
-    }
-
-    pub fn reset_holdem_state(&mut self) -> Result<(), HandleError> {
-        self.winners.clear();
-        self.street = Street::Init;
-        self.stage = HoldemStage::Init;
-        self.pots.clear();
-        self.board.clear();
-        self.player_order.clear();
-        self.hand_index_map.clear();
-        self.bet_map.clear();
-        self.total_bet_map.clear();
-        self.prize_map.clear();
-
         Ok(())
     }
 
@@ -763,6 +751,7 @@ impl Holdem {
     }
 
     pub fn wait_timeout(&mut self, effect: &mut Effect, timeout: u64) {
+        self.next_game_start = effect.timestamp() + timeout;
         if self.mode != GameMode::Mtt {
             effect.wait_timeout(timeout);
         }
@@ -861,28 +850,25 @@ impl Holdem {
         self.apply_prize()?;
 
         // Add or reduce players chips according to chips change map
-        if self.mode == GameMode::Cash {
-            for (id, chips_change) in chips_change_map.iter() {
-                if *chips_change > 0 {
-                    effect.settle(Settle::add(*id, *chips_change as u64))?;
-                } else if *chips_change < 0 {
-                    effect.settle(Settle::sub(*id, -*chips_change as u64))?;
-                }
+        for (id, chips_change) in chips_change_map.iter() {
+            if *chips_change > 0 {
+                effect.settle(Settle::add(*id, *chips_change as u64))?;
+            } else if *chips_change < 0 {
+                effect.settle(Settle::sub(*id, -*chips_change as u64))?;
             }
         }
 
         self.mark_out_players();
         let removed_addrs = self.remove_leave_and_out_players();
 
-        if self.mode == GameMode::Cash {
-            for addr in removed_addrs {
-                effect.settle(Settle::eject(addr))?;
-            }
-
-            if rake > 0 {
-                effect.transfer(0, rake);
-            }
+        for addr in removed_addrs {
+            effect.settle(Settle::eject(addr))?;
         }
+
+        if rake > 0 {
+            effect.transfer(0, rake);
+        }
+
         effect.checkpoint(self.build_checkpoint());
 
         // Save to hand history
@@ -1230,10 +1216,10 @@ impl GameHandler for Holdem {
             ..
         } = init_account.data()?;
         let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
-        let (player_timeouts, btn) = if let Some(checkpoint) = checkpoint {
-            (checkpoint.player_timeouts, checkpoint.btn)
+        let (player_timeouts, btn, next_game_start) = if let Some(checkpoint) = checkpoint {
+            (checkpoint.player_timeouts, checkpoint.btn, checkpoint.next_game_start)
         } else {
-            (BTreeMap::default(), 0)
+            (BTreeMap::default(), 0, 0)
         };
 
         let player_map: BTreeMap<u64, Player> = init_account
@@ -1273,6 +1259,7 @@ impl GameHandler for Holdem {
             mode: GameMode::Cash,
             table_size: init_account.max_players as _,
             hand_history: HandHistory::default(),
+            next_game_start,
         })
     }
 
@@ -1352,10 +1339,6 @@ impl GameHandler for Holdem {
             }
 
             Event::WaitingTimeout | Event::Ready => {
-                // self.display.clear();
-                // self.reset_holdem_state()?;
-                // self.reset_player_map_status()?;
-
                 if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                     effect.start_game();
                 }

@@ -48,8 +48,10 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
             tables: BTreeMap::from([
                 (
                     1,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![
                             MttTablePlayer {
                                 id: alice.id(),
@@ -66,8 +68,10 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
                 ),
                 (
                     2,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![MttTablePlayer {
                             id: bob.id(),
                             chips: 1000,
@@ -78,6 +82,7 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
             ]),
             time_elapsed: 50,
             total_prize: 4000,
+            stage: MttStage::Playing,
         })
         .build();
     let init_account = acc.derive_init_account();
@@ -106,6 +111,7 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
         .with_deposit_range(1000, 1000)
         .with_data(MttAccountData {
             start_time: 1000,
+            ticket: 1000,
             table_size: 3,
             blind_info: BlindInfo::default(),
             prize_rules: vec![50, 30, 20],
@@ -202,8 +208,10 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
             tables: BTreeMap::from([
                 (
                     1,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![
                             MttTablePlayer {
                                 id: pa.id(),
@@ -225,8 +233,10 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 ),
                 (
                     2,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![
                             MttTablePlayer {
                                 id: pb.id(),
@@ -248,8 +258,10 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 ),
                 (
                     3,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![
                             MttTablePlayer {
                                 id: pc.id(),
@@ -271,8 +283,10 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 ),
                 (
                     4,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![
                             MttTablePlayer {
                                 id: pd.id(),
@@ -295,6 +309,7 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
             ]),
             time_elapsed: 50,
             total_prize: 12_000,
+            stage: MttStage::Playing,
         })
         .build();
     let init_account = acc.derive_init_account();
@@ -312,6 +327,7 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
         .with_deposit_range(1_000_000_000, 1_000_000_000)
         .with_data(MttAccountData {
             start_time: 1000,
+            ticket: 1_000_000_000,
             table_size: 2,
             blind_info: BlindInfo::default(),
             prize_rules: vec![50, 30, 20],
@@ -348,8 +364,10 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
             tables: BTreeMap::from([
                 (
                     1,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![
                             MttTablePlayer {
                                 id: alice.id(),
@@ -366,8 +384,10 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
                 ),
                 (
                     2,
-                    MttTableCheckpoint {
+                    MttTable {
                         btn: 0,
+                        sb: 10,
+                        bb: 20,
                         players: vec![MttTablePlayer {
                             id: bob.id(),
                             chips: 1_000_000_000,
@@ -378,6 +398,7 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
             ]),
             time_elapsed: 50,
             total_prize: 4_000_000_000,
+            stage: MttStage::Playing,
         })
         .build();
     let init_account = acc.derive_init_account();

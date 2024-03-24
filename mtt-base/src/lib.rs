@@ -27,14 +27,46 @@ pub struct InitTableData {
 }
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
-pub struct MttTableCheckpoint {
+pub struct MttTable {
     pub btn: usize,
     pub sb: u64,
     pub bb: u64,
     pub players: Vec<MttTablePlayer>,
+    pub next_game_start: u64,
+}
+
+#[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+pub struct MttTableCheckpoint {
+    pub btn: usize,
+    pub sb: u64,
+    pub bb: u64,
+    pub next_game_start: u64,
 }
 
 impl MttTableCheckpoint {
+    pub fn new(table: &MttTable) -> Self {
+        MttTableCheckpoint {
+            btn: table.btn,
+            sb: table.sb,
+            bb: table.bb,
+            next_game_start: table.next_game_start,
+        }
+    }
+}
+
+// impl From<&MttTable> for MttTableCheckpoint {
+//     fn from(value: &MttTable) -> Self {
+//         Self { sb: value.sb, bb: value.bb, btn: value.btn }
+//     }
+// }
+
+impl MttTable {
+    pub fn new(checkpoint: &MttTableCheckpoint, players: Vec<MttTablePlayer>) -> Self {
+        Self {
+            sb: checkpoint.sb, bb: checkpoint.bb, btn: checkpoint.btn, players, next_game_start: checkpoint.next_game_start
+        }
+    }
+
     pub fn add_player(&mut self, player: &mut MttTablePlayer) {
         let mut table_position = 0;
         for i in 0.. {
@@ -62,19 +94,24 @@ impl MttTableCheckpoint {
 /// through such events to the mtt handler.  Also see [`race_api::event::Event::Bridge`].
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub enum HoldemBridgeEvent {
+    /// Start game with specified SB and BB.
+    /// The `moved_players` indicates those should be removed before next hand.
     StartGame {
         sb: u64,
         bb: u64,
         moved_players: Vec<u64>,
     },
+    /// Add players to current game.
     Relocate {
         players: Vec<MttTablePlayer>,
     },
+    /// Close table, all players should be removed from this game.
+    /// Additionally, the game can be closed.
     CloseTable,
     GameResult {
         table_id: u8,
         settles: Vec<Settle>,
-        checkpoint: MttTableCheckpoint,
+        table: MttTable,
     },
 }
 
