@@ -136,6 +136,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         mode: GameMode::Cash,
         table_size: 7,
         hand_history: HandHistory::default(),
+        next_game_start: 0,
     };
     state.arrange_players(0usize)?;
     Ok(state)
@@ -234,7 +235,7 @@ pub fn create_sync_event(
 ) -> Event {
     ctx.add_node(
         transactor.addr(),
-        ctx.get_access_version(),
+        ctx.access_version(),
         ClientMode::Transactor,
     );
     let mut players = Vec::new();

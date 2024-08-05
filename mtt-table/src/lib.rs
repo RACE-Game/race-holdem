@@ -3,7 +3,7 @@ mod errors;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
-use race_holdem_base::essential::{GameMode, HoldemStage, Player};
+use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{
     HoldemBridgeEvent, InitTableData, MttTable as MT, MttTableCheckpoint, MttTablePlayer,
@@ -17,6 +17,7 @@ pub type PlayerId = u64;
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
 pub struct MttTable {
     pub table_id: u8,
+    pub hand_id: usize,
     pub holdem: Holdem,
 }
 
@@ -32,14 +33,16 @@ impl GameHandler for MttTable {
             sb,
             bb,
             next_game_start,
+            hand_id,
+            players,
         }) = init_account.checkpoint()? else {
             return Err(HandleError::InternalError{ message: "Checkpoint is required".into()});
         };
 
         let mut player_map = BTreeMap::new();
 
-        for p in init_account.players {
-            player_map.insert(p.id, Player::new(p.id, p.balance, p.position as _, 0));
+        for p in players {
+            player_map.insert(p.id, Player::new(p.id, p.chips, p.table_position as _, 0));
         }
 
         let holdem = Holdem {
@@ -55,7 +58,7 @@ impl GameHandler for MttTable {
 
         effect.start_game();
 
-        Ok(Self { table_id, holdem })
+        Ok(Self { table_id, hand_id, holdem })
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
@@ -71,6 +74,9 @@ impl GameHandler for MttTable {
                 }
             }
             _ => {
+                if matches!(event, Event::GameStart) {
+                    self.hand_id += 1;
+                }
                 self.holdem.handle_event(effect, event)?;
                 // Check if there's a settlement
                 if effect.is_checkpoint() {
@@ -83,6 +89,7 @@ impl GameHandler for MttTable {
                         .map(|p| MttTablePlayer::new(p.id, p.chips, p.position as _))
                         .collect();
                     let evt = HoldemBridgeEvent::GameResult {
+                        hand_id: self.hand_id,
                         table: MT::new(&checkpoint, players),
                         settles,
                         table_id: self.table_id,
@@ -113,6 +120,12 @@ impl MttTable {
             sb: self.holdem.sb,
             bb: self.holdem.bb,
             next_game_start: self.holdem.next_game_start,
+            hand_id: self.hand_id,
+            players: self.holdem.player_map.iter().map(|(id, p)| MttTablePlayer {
+                id: *id,
+                chips: p.chips,
+                table_position: p.position
+            }).collect()
         })
     }
 
@@ -132,9 +145,7 @@ impl MttTable {
                 self.holdem.bb = bb;
                 for id in moved_players {
                     self.holdem.player_map.remove(&id);
-                    effect.settle(Settle::eject(id))?;
                 }
-                effect.checkpoint(self.build_checkpoint()?);
                 let timeout = self
                     .holdem
                     .next_game_start
@@ -150,9 +161,10 @@ impl MttTable {
                         chips,
                         table_position,
                     } = mtt_player;
-                    self.holdem
-                        .player_map
-                        .insert(id, Player::new(id, chips, table_position as _, 0));
+                    self.holdem.player_map.insert(
+                        id,
+                        Player::new_with_status(id, chips, table_position as _, PlayerStatus::Init),
+                    );
                 }
                 if self.holdem.stage == HoldemStage::Init {
                     let timeout = self
@@ -291,6 +303,27 @@ mod tests {
             //     }]
             // );
         }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_deser() -> anyhow::Result<()> {
+        let remote = vec![1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 183, 66, 39, 19, 145, 1, 0, 0];
+
+        let local = vec![1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,32,161,7,0,0,0,0,0,64,66,15,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,32,130,253,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,224,63,238,5,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,183,66,39,19,145,1,0,0];
+
+
+        let remote_st = MttTable::try_from_slice(&remote)?;
+        let local_st = MttTable::try_from_slice(&local)?;
+
+        println!("remote: {:?}", remote_st);
+        println!("local: {:?}", local_st);
 
         Ok(())
     }

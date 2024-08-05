@@ -9,3 +9,4 @@ custom_err!(error_invalid_bridge_event);
 custom_err!(error_invalid_index_usage);
 custom_err!(error_custom_event_not_allowed);
 custom_err!(error_invalid_table_id);
+custom_err!(error_invalid_checkpoint_chips);

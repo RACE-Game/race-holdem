@@ -128,6 +128,7 @@ pub struct MttCheckpoint {
     ranks: Vec<PlayerRankCheckpoint>,
     tables: BTreeMap<u8, MttTable>,
     time_elapsed: u64,
+    timestamp: u64,
     total_prize: u64,
     stage: MttStage,
 }
@@ -143,7 +144,7 @@ fn find_checkpoint_rank_by_pos(
 }
 
 #[game_handler]
-#[derive(BorshSerialize, BorshDeserialize, Default)]
+#[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
     start_time: u64,
     alives: usize, // The number of alive players
@@ -173,7 +174,7 @@ impl GameHandler for Mtt {
         } = init_account.data()?;
         let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
 
-        let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize) =
+        let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize, timestamp) =
             if let Some(checkpoint) = checkpoint {
                 let mut table_assigns = BTreeMap::<u64, u8>::new();
                 let mut ranks = Vec::<PlayerRank>::new();
@@ -201,20 +202,21 @@ impl GameHandler for Mtt {
                     table_assigns,
                     ranks,
                     checkpoint.total_prize,
+                    checkpoint.timestamp,
                 )
             } else {
+                // Initialize an empty game when there's no checkpoint available.
                 (
                     start_time,
                     BTreeMap::<u8, MttTable>::new(),
-                    0, // no time elapsed at the init
+                    0, // no time elapsed
                     MttStage::Init,
                     BTreeMap::<u64, u8>::new(),
                     Vec::<PlayerRank>::new(),
                     0, // no prize at the init
+                    0, // no timestamp at the init
                 )
             };
-
-        effect.allow_exit(false);
 
         let alives: usize = ranks
             .iter()
@@ -232,7 +234,7 @@ impl GameHandler for Mtt {
             tables,
             table_size,
             time_elapsed,
-            timestamp: effect.timestamp,
+            timestamp,
             blind_info,
             prize_rules,
             total_prize,
@@ -242,6 +244,8 @@ impl GameHandler for Mtt {
 
         // Create tables from checkpoint state
         state.create_tables(effect)?;
+
+        effect.allow_exit(false);
 
         Ok(state)
     }
@@ -288,7 +292,7 @@ impl GameHandler for Mtt {
             },
 
             Event::GameStart => {
-                self.start_time = effect.timestamp();
+                self.timestamp = effect.timestamp();
                 if self.ranks.is_empty() {
                     // No player joined, mark game as completed
                     self.stage = MttStage::Completed;
@@ -311,6 +315,7 @@ impl GameHandler for Mtt {
                         table_id,
                         settles,
                         table,
+                        ..
                     } => {
                         self.tables.insert(table_id, table);
                         self.apply_settles(settles)?;
@@ -379,7 +384,7 @@ impl Mtt {
             self.table_size as _,
             players,
             init_table_data,
-            MttTableCheckpoint::new(&table),
+            Some(MttTableCheckpoint::new(&table)),
         )?;
         Ok(())
     }
@@ -412,6 +417,7 @@ impl Mtt {
                     bb,
                     players,
                     next_game_start: 0,
+                    hand_id: 0,
                 };
                 self.launch_table(effect, table_id, &table)?;
                 self.tables.insert(table_id, table);
@@ -457,7 +463,11 @@ impl Mtt {
     }
 
     fn sort_ranks(&mut self) {
-        self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
+        self.ranks.sort_by(|r1, r2| {
+            r2.chips
+                .cmp(&r1.chips)
+                .then_with(|| r1.position.cmp(&r2.position))
+        });
     }
 
     fn calc_blinds(&self) -> Result<(u64, u64), HandleError> {
@@ -691,6 +701,7 @@ impl Mtt {
         let Mtt {
             start_time,
             time_elapsed,
+            timestamp,
             tables,
             ranks,
             table_assigns,
@@ -713,12 +724,67 @@ impl Mtt {
 
         Ok(MttCheckpoint {
             start_time: *start_time,
+            timestamp: *timestamp,
             ranks: ranks_checkpoint,
             tables: tables.clone(),
             time_elapsed: *time_elapsed,
             total_prize: *total_prize,
             stage: self.stage,
         })
+    }
+}
+
+#[cfg(test)]
+mod test_t {
+    use std::println;
+
+    use super::*;
+
+    #[test]
+    fn s() {
+        // remote
+        let s1 = Mtt::try_from_slice(&[
+            244, 138, 72, 8, 145, 1, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0,
+            0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0, 0, 0,
+            2, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0,
+            0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63,
+            238, 5, 0, 0, 0, 0, 0, 2, 0, 5, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 3,
+            0, 2, 0, 0, 0, 1, 7, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0,
+            0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0,
+            0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8, 145, 1, 0, 0, 2, 7, 0, 0, 0, 0, 0, 0, 0, 1,
+            0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0,
+            0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8,
+            145, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 6, 177, 74, 8, 145, 1, 0, 0, 32, 161, 7, 0, 0,
+            0, 0, 0, 96, 234, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 1, 0, 2, 0, 2, 0, 4, 0, 4, 0, 8, 0, 8,
+            0, 16, 0, 16, 0, 32, 0, 32, 0, 64, 0, 3, 0, 0, 0, 50, 30, 20, 0, 132, 215, 23, 0, 0, 0,
+            0, 0, 225, 245, 5, 0, 0, 0, 0, 0,
+        ])
+        .unwrap();
+
+        let s2 = Mtt::try_from_slice(&[
+            244, 138, 72, 8, 145, 1, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0,
+            0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0, 0, 0,
+            2, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0,
+            0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63,
+            238, 5, 0, 0, 0, 0, 0, 2, 0, 5, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 3,
+            0, 2, 0, 0, 0, 1, 7, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0,
+            0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0,
+            0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8, 145, 1, 0, 0, 2, 7, 0, 0, 0, 0, 0, 0, 0, 1,
+            0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0,
+            3, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0,
+            0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8,
+            145, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 244, 138, 72, 8, 145, 1, 0, 0, 32, 161, 7, 0,
+            0, 0, 0, 0, 96, 234, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 1, 0, 2, 0, 2, 0, 4, 0, 4, 0, 8, 0,
+            8, 0, 16, 0, 16, 0, 32, 0, 32, 0, 64, 0, 3, 0, 0, 0, 50, 30, 20, 0, 132, 215, 23, 0, 0,
+            0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 0,
+        ])
+        .unwrap();
+
+        println!("remote: {:?}", s1);
+        println!("local:  {:?}", s2);
     }
 }
 

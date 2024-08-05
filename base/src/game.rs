@@ -42,7 +42,7 @@ pub struct Holdem {
     pub next_game_start: u64,
 }
 
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(Debug, BorshSerialize, BorshDeserialize)]
 pub struct HoldemCheckpoint {
     pub btn: usize,
     pub player_timeouts: BTreeMap<u64, u8>,

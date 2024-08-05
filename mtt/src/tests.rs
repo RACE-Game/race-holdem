@@ -92,6 +92,8 @@ fn test_create_tables() -> anyhow::Result<()> {
                     table_size: 2,
                 },
                 MttTableCheckpoint {
+                    hand_id: 0,
+                    next_game_start: 0,
                     sb: 10,
                     bb: 20,
                     btn: 0,
@@ -101,14 +103,14 @@ fn test_create_tables() -> anyhow::Result<()> {
                 2,
                 SUBGAME_BUNDLE_ADDR.into(),
                 2,
-                vec![
-                    GamePlayer::new(bob.id(), 1000, 0),
-                ],
+                vec![GamePlayer::new(bob.id(), 1000, 0),],
                 InitTableData {
                     table_id: 2,
                     table_size: 2,
                 },
                 MttTableCheckpoint {
+                    hand_id: 0,
+                    next_game_start: 0,
                     sb: 10,
                     bb: 20,
                     btn: 0,
@@ -151,6 +153,7 @@ fn test_close_table() -> anyhow::Result<()> {
     // T4 settles: 1 out and 2 alive so one emtpy seats available
     // T3 settles: 2 out and 1 alive, so T3 should be closed and the alive to be moved
     let t3_game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
         table_id: 3,
         settles: vec![
             Settle::add(pc.id(), 2000),
@@ -159,6 +162,8 @@ fn test_close_table() -> anyhow::Result<()> {
         ],
         // checkpoint contains alive players only
         table: MttTable {
+            hand_id: 0,
+            next_game_start: 0,
             btn: 0,
             sb: 10,
             bb: 20,
@@ -171,6 +176,7 @@ fn test_close_table() -> anyhow::Result<()> {
     };
 
     let t4_game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
         table_id: 4,
         settles: vec![
             Settle::add(pd.id(), 500),
@@ -178,6 +184,8 @@ fn test_close_table() -> anyhow::Result<()> {
             Settle::sub(pl.id(), 1000),
         ],
         table: MttTable {
+            hand_id: 0,
+            next_game_start: 0,
             btn: 0,
             sb: 10,
             bb: 20,
@@ -295,6 +303,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     table_size: 3,
                 },
                 MttTableCheckpoint {
+                    hand_id: 0,
+                    next_game_start: 0,
                     sb: 10,
                     bb: 20,
                     btn: 0
@@ -314,6 +324,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     table_size: 3,
                 },
                 MttTableCheckpoint {
+                    hand_id: 0,
+                    next_game_start: 0,
                     sb: 10,
                     bb: 20,
                     btn: 0
@@ -333,6 +345,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     table_size: 3,
                 },
                 MttTableCheckpoint {
+                    hand_id: 0,
+                    next_game_start: 0,
                     sb: 10,
                     bb: 20,
                     btn: 0,
@@ -352,6 +366,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     table_size: 3,
                 },
                 MttTableCheckpoint {
+                    hand_id: 0,
+                    next_game_start: 0,
                     sb: 10,
                     bb: 20,
                     btn: 0,
@@ -373,6 +389,7 @@ fn test_move_players() -> anyhow::Result<()> {
     // T3 settles: 2 players out, 1 player alive
     // T1 settles: 1 player will be moved to t3 (smallest)
     let t3_game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
         table_id: 3,
         settles: vec![
             Settle::add(pc.id(), 2000),
@@ -381,6 +398,8 @@ fn test_move_players() -> anyhow::Result<()> {
         ],
         // checkpoint contains alive players only
         table: MttTable {
+            hand_id: 0,
+            next_game_start: 0,
             btn: 0,
             sb: 10,
             bb: 20,
@@ -393,6 +412,7 @@ fn test_move_players() -> anyhow::Result<()> {
     };
 
     let t1_game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
         table_id: 1,
         settles: vec![
             Settle::add(pa.id(), 200),
@@ -400,6 +420,8 @@ fn test_move_players() -> anyhow::Result<()> {
             Settle::sub(pi.id(), 100),
         ],
         table: MttTable {
+            hand_id: 0,
+            next_game_start: 0,
             btn: 0,
             sb: 10,
             bb: 20,
@@ -493,12 +515,15 @@ fn test_final_settle() -> anyhow::Result<()> {
     // T1 settles: 1 player out and T1 gets closed
     // T2 settles: 1 player out and first three split the prize
     let t1_game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
         table_id: 1,
         settles: vec![
             Settle::add(alice.id(), 2_000_000_000),
             Settle::sub(carol.id(), 2_000_000_000),
         ],
         table: MttTable {
+            hand_id: 0,
+            next_game_start: 0,
             sb: 10,
             bb: 20,
             btn: 0,
@@ -511,12 +536,15 @@ fn test_final_settle() -> anyhow::Result<()> {
     };
 
     let t2_game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
         table_id: 2,
         settles: vec![
             Settle::add(alice.id(), 1_000_000_000),
             Settle::sub(bob.id(), 1_000_000_000),
         ],
         table: MttTable {
+            hand_id: 0,
+            next_game_start: 0,
             sb: 10,
             bb: 20,
             btn: 0,

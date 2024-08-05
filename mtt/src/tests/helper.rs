@@ -23,6 +23,7 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
         .add_player(dave, 0)
         .with_checkpoint(MttCheckpoint {
             start_time: 1001,
+            timestamp: 0,
             ranks: vec![
                 PlayerRankCheckpoint {
                     id: alice.id(),
@@ -49,6 +50,7 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
                 (
                     1,
                     MttTable {
+                        hand_id: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -64,11 +66,13 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
                                 table_position: 1,
                             },
                         ],
+                        next_game_start: 0,
                     },
                 ),
                 (
                     2,
                     MttTable {
+                        hand_id: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -77,6 +81,7 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
                             chips: 1000,
                             table_position: 0,
                         }],
+                        next_game_start: 0,
                     },
                 ),
             ]),
@@ -131,6 +136,7 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
         .add_player(pl, 1000)
         .with_checkpoint(MttCheckpoint {
             start_time: 1001,
+            timestamp: 0,
             ranks: vec![
                 PlayerRankCheckpoint {
                     // pa
@@ -209,6 +215,8 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 (
                     1,
                     MttTable {
+                        hand_id: 0,
+                        next_game_start: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -234,6 +242,8 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 (
                     2,
                     MttTable {
+                        hand_id: 0,
+                        next_game_start: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -259,6 +269,8 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 (
                     3,
                     MttTable {
+                        hand_id: 0,
+                        next_game_start: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -284,6 +296,8 @@ pub fn setup_mtt_state(players: [&mut TestClient; 12]) -> anyhow::Result<Mtt> {
                 (
                     4,
                     MttTable {
+                        hand_id: 0,
+                        next_game_start: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -339,6 +353,7 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
         .add_player(dave, 0)
         .with_checkpoint(MttCheckpoint {
             start_time: 1001,
+            timestamp: 0,
             ranks: vec![
                 PlayerRankCheckpoint {
                     id: alice.id(),
@@ -365,6 +380,8 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
                 (
                     1,
                     MttTable {
+                        hand_id: 0,
+                        next_game_start: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,
@@ -385,6 +402,8 @@ pub fn init_state_with_huge_amt(players: [&mut TestClient; 4]) -> anyhow::Result
                 (
                     2,
                     MttTable {
+                        hand_id: 0,
+                        next_game_start: 0,
                         btn: 0,
                         sb: 10,
                         bb: 20,

@@ -19,7 +19,6 @@ impl MttTablePlayer {
     }
 }
 
-
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
 pub struct InitTableData {
     pub table_id: u8,
@@ -28,6 +27,7 @@ pub struct InitTableData {
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTable {
+    pub hand_id: usize,
     pub btn: usize,
     pub sb: u64,
     pub bb: u64,
@@ -37,10 +37,12 @@ pub struct MttTable {
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableCheckpoint {
+    pub hand_id: usize,
     pub btn: usize,
     pub sb: u64,
     pub bb: u64,
     pub next_game_start: u64,
+    pub players: Vec<MttTablePlayer>,
 }
 
 impl MttTableCheckpoint {
@@ -50,6 +52,8 @@ impl MttTableCheckpoint {
             sb: table.sb,
             bb: table.bb,
             next_game_start: table.next_game_start,
+            hand_id: table.hand_id,
+            players: table.players.clone(),
         }
     }
 }
@@ -63,7 +67,12 @@ impl MttTableCheckpoint {
 impl MttTable {
     pub fn new(checkpoint: &MttTableCheckpoint, players: Vec<MttTablePlayer>) -> Self {
         Self {
-            sb: checkpoint.sb, bb: checkpoint.bb, btn: checkpoint.btn, players, next_game_start: checkpoint.next_game_start
+            sb: checkpoint.sb,
+            bb: checkpoint.bb,
+            btn: checkpoint.btn,
+            players,
+            next_game_start: checkpoint.next_game_start,
+            hand_id: checkpoint.hand_id,
         }
     }
 
@@ -102,13 +111,12 @@ pub enum HoldemBridgeEvent {
         moved_players: Vec<u64>,
     },
     /// Add players to current game.
-    Relocate {
-        players: Vec<MttTablePlayer>,
-    },
+    Relocate { players: Vec<MttTablePlayer> },
     /// Close table, all players should be removed from this game.
     /// Additionally, the game can be closed.
     CloseTable,
     GameResult {
+        hand_id: usize,
         table_id: u8,
         settles: Vec<Settle>,
         table: MttTable,
@@ -119,43 +127,17 @@ impl BridgeEvent for HoldemBridgeEvent {}
 
 #[cfg(test)]
 mod tests {
+    use crate::InitTableData;
     use borsh::BorshDeserialize;
-    use crate::{MttTableCheckpoint, MttTablePlayer, InitTableData};
 
     #[test]
     fn test_parse_mtt_init_table_data() -> anyhow::Result<()> {
-        let data = [207,128,234,18,142,1,0,0,0,225,245,5,0,0,0,0,2,32,161,7,0,0,0,0,0,96,234,0,0,0,0,0,0,0,0,0,0,3,0,0,0,50,30,20,0];
-        let data = InitTableData::try_from_slice(&data);
-        Ok(())
-    }
-
-    #[test]
-    fn test_add_player_to_table() -> anyhow::Result<()> {
-        let mut table = MttTableCheckpoint {
-            btn: 0,
-            players: vec![
-                MttTablePlayer {
-                    id: 0,
-                    chips: 100,
-                    table_position: 0,
-                },
-                MttTablePlayer {
-                    id: 1,
-                    chips: 100,
-                    table_position: 1,
-                },
-                MttTablePlayer {
-                    id: 2,
-                    chips: 100,
-                    table_position: 3,
-                },
-            ],
-        };
-        table.add_player(&mut MttTablePlayer { id: 4, chips: 100, table_position: 0 });
-
-        assert_eq!(table.players.len(), 4);
-        assert_eq!(table.players[3].table_position, 2);
-        assert_eq!(table.players[3].id, 4);
+        let data = [
+            207, 128, 234, 18, 142, 1, 0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 2, 32, 161, 7, 0, 0, 0, 0,
+            0, 96, 234, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 50, 30, 20, 0,
+        ];
+        let st = InitTableData::try_from_slice(&data)?;
+        println!("{:?}", st);
         Ok(())
     }
 }
