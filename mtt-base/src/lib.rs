@@ -127,7 +127,7 @@ impl BridgeEvent for HoldemBridgeEvent {}
 
 #[cfg(test)]
 mod tests {
-    use crate::InitTableData;
+    use crate::{InitTableData, MttTable};
     use borsh::BorshDeserialize;
 
     #[test]

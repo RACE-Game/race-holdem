@@ -626,9 +626,10 @@ impl Holdem {
                 if real_winners.len() >= 1 {
                     pot.winners = real_winners;
                     break;
-                } else {
-                    return Err(errors::pot_winner_missing());
                 }
+            }
+            if pot.winners.is_empty() {
+                return Err(errors::pot_winner_missing());
             }
         }
 

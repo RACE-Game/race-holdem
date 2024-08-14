@@ -97,6 +97,7 @@ fn test_create_tables() -> anyhow::Result<()> {
                     sb: 10,
                     bb: 20,
                     btn: 0,
+                    players: vec![],
                 },
             )?,
             SubGame::try_new(
@@ -114,6 +115,7 @@ fn test_create_tables() -> anyhow::Result<()> {
                     sb: 10,
                     bb: 20,
                     btn: 0,
+                    players: vec![],
                 }
             )?,
         ]
@@ -307,7 +309,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     next_game_start: 0,
                     sb: 10,
                     bb: 20,
-                    btn: 0
+                    btn: 0,
+                    players: vec![],
                 }
             )?,
             SubGame::try_new(
@@ -328,7 +331,8 @@ fn test_move_players() -> anyhow::Result<()> {
                     next_game_start: 0,
                     sb: 10,
                     bb: 20,
-                    btn: 0
+                    btn: 0,
+                    players: vec![],
                 }
             )?,
             SubGame::try_new(
@@ -350,6 +354,7 @@ fn test_move_players() -> anyhow::Result<()> {
                     sb: 10,
                     bb: 20,
                     btn: 0,
+                    players: vec![],
                 }
             )?,
             SubGame::try_new(
@@ -371,6 +376,7 @@ fn test_move_players() -> anyhow::Result<()> {
                     sb: 10,
                     bb: 20,
                     btn: 0,
+                    players: vec![],
                 }
             )?,
         ]

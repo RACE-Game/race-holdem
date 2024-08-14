@@ -18,6 +18,7 @@
 mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use errors::error_not_completed;
 use race_api::{prelude::*, types::SettleOp};
 use race_holdem_mtt_base::{
     HoldemBridgeEvent, InitTableData, MttTable, MttTableCheckpoint, MttTablePlayer,
@@ -133,15 +134,15 @@ pub struct MttCheckpoint {
     stage: MttStage,
 }
 
-fn find_checkpoint_rank_by_pos(
-    ranks: &[PlayerRankCheckpoint],
-    id: u64,
-) -> Result<&PlayerRankCheckpoint, HandleError> {
-    ranks
-        .iter()
-        .find(|rank| rank.id.eq(&id))
-        .ok_or(errors::error_player_id_not_found())
-}
+// fn find_checkpoint_rank_by_pos(
+//     ranks: &[PlayerRankCheckpoint],
+//     id: u64,
+// ) -> Result<&PlayerRankCheckpoint, HandleError> {
+//     ranks
+//         .iter()
+//         .find(|rank| rank.id.eq(&id))
+//         .ok_or(errors::error_player_id_not_found())
+// }
 
 #[game_handler]
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
@@ -179,21 +180,20 @@ impl GameHandler for Mtt {
                 let mut table_assigns = BTreeMap::<u64, u8>::new();
                 let mut ranks = Vec::<PlayerRank>::new();
 
-                for p in init_account.players.into_iter() {
-                    let GamePlayer { id, position, .. } = p;
-                    let r = find_checkpoint_rank_by_pos(&checkpoint.ranks, id)?;
-                    table_assigns.insert(id, r.table_id);
+                for r in checkpoint.ranks.iter() {
+                    table_assigns.insert(r.id, r.table_id);
                     ranks.push(PlayerRank {
-                        id,
+                        id: r.id,
                         chips: r.chips,
                         status: if r.chips > 0 {
                             PlayerRankStatus::Alive
                         } else {
                             PlayerRankStatus::Out
                         },
-                        position,
-                    });
+                        position: init_account.players.iter().find(|p| p.id == r.id).map(|p| p.position).unwrap_or(0),
+                    })
                 }
+
                 (
                     checkpoint.start_time,
                     checkpoint.tables,
@@ -243,9 +243,10 @@ impl GameHandler for Mtt {
         };
 
         // Create tables from checkpoint state
-        state.create_tables(effect)?;
-
-        effect.allow_exit(false);
+        // Unless the game was finished
+        if stage.ne(&MttStage::Completed) {
+            state.create_tables(effect)?;
+        }
 
         Ok(state)
     }
@@ -291,6 +292,17 @@ impl GameHandler for Mtt {
                 }
             },
 
+            Event::Leave { player_id } => {
+                // Only allow leaving when the tourney is completed
+                if self.stage.eq(&MttStage::Completed) {
+                    // Eject this player to return the prize
+                    effect.settle(Settle::eject(player_id))?;
+                    effect.checkpoint(self.build_checkpoint()?);
+                } else {
+                    return Err(error_not_completed());
+                }
+            }
+
             Event::GameStart => {
                 self.timestamp = effect.timestamp();
                 if self.ranks.is_empty() {
@@ -331,6 +343,7 @@ impl GameHandler for Mtt {
                 MttStage::Init => {
                     if self.ranks.len() < 2 {
                         self.stage = MttStage::Completed;
+                        effect.allow_exit(true);
                         effect.checkpoint(self.build_checkpoint()?);
                     } else {
                         effect.start_game();
@@ -739,6 +752,17 @@ mod test_t {
     use std::println;
 
     use super::*;
+
+    #[test]
+    fn a() {
+        let v = vec![
+            1, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 64, 35, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+
+        let e = HoldemBridgeEvent::try_from_slice(&v).unwrap();
+
+        println!("{:?}", e);
+    }
 
     #[test]
     fn s() {
