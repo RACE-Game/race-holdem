@@ -204,7 +204,7 @@ impl Default for HoldemAccount {
 
 /// Holdem specific custom events.  Transactor will pass through such events to the game handler.
 /// Also see [`race_api::event::Event::Custom`].
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone)]
 pub enum GameEvent {
     Bet(u64),
     Check,
@@ -223,7 +223,7 @@ pub struct AwardPot {
     pub amount: u64,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone)]
 pub struct PlayerResult {
     pub id: u64,
     pub chips: u64,
@@ -232,7 +232,7 @@ pub struct PlayerResult {
     pub position: usize,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone)]
 pub enum Display {
     DealCards,
     DealBoard {

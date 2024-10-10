@@ -21,12 +21,13 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_not_completed;
 use race_api::{prelude::*, types::SettleOp};
 use race_holdem_mtt_base::{
-    HoldemBridgeEvent, InitTableData, MttTable, MttTableCheckpoint, MttTablePlayer,
+    HoldemBridgeEvent, InitTableData, MttTableState, MttTablePlayer,
 };
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
 
 const SUBGAME_BUNDLE_ADDR: &str = "raceholdemtargetraceholdemmtttablewasm";
+// const SUBGAME_BUNDLE_ADDR: &str = "E5qgEuuXBffQpaUzn7SGBzUE1hVhG9rGNxbRQqiQ6iFE";
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug, Clone, Copy)]
 pub enum MttStage {
@@ -118,6 +119,7 @@ pub struct MttAccountData {
     start_time: u64,
     ticket: u64,
     table_size: u8,
+    start_chips: u64,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     theme: Option<String>, // optional NFT theme
@@ -127,7 +129,7 @@ pub struct MttAccountData {
 pub struct MttCheckpoint {
     start_time: u64,
     ranks: Vec<PlayerRankCheckpoint>,
-    tables: BTreeMap<u8, MttTable>,
+    tables: BTreeMap<u8, MttTableState>,
     time_elapsed: u64,
     timestamp: u64,
     total_prize: u64,
@@ -152,10 +154,11 @@ pub struct Mtt {
     stage: MttStage,
     table_assigns: BTreeMap<u64, u8>,
     ranks: Vec<PlayerRank>,
-    tables: BTreeMap<u8, MttTable>,
+    tables: BTreeMap<u8, MttTableState>,
     table_size: u8,
     time_elapsed: u64,
     timestamp: u64,
+    start_chips: u64,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     total_prize: u64,
@@ -165,88 +168,56 @@ pub struct Mtt {
 
 impl GameHandler for Mtt {
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
+        if let Some(checkpoint) = init_account.checkpoint::<Self>()? {
+            if !checkpoint.tables.is_empty() {
+                for (id, table) in checkpoint.tables.iter() {
+                    let players = table
+                        .players
+                        .iter()
+                        .map(|p| GamePlayer::new(p.id, p.chips, p.table_position as _))
+                        .collect();
+                    let (start_sb, start_bb) = checkpoint.start_blinds()?;
+                    let init_table_data = InitTableData {
+                        table_id: *id,
+                        start_sb,
+                        start_bb,
+                    };
+                    effect.launch_sub_game(
+                        *id as _,
+                        SUBGAME_BUNDLE_ADDR.into(),
+                        checkpoint.table_size as _,
+                        players,
+                        init_table_data,
+                    )?;
+                    checkpoint.launch_table(effect, *id, table)?;
+                }
+            }
+
+            return Ok(checkpoint);
+        }
+
         let MttAccountData {
             start_time,
             ticket,
             table_size,
+            start_chips,
             mut blind_info,
             prize_rules,
             theme,
         } = init_account.data()?;
-        let checkpoint: Option<MttCheckpoint> = init_account.checkpoint()?;
-
-        let (start_time, tables, time_elapsed, stage, table_assigns, ranks, total_prize, timestamp) =
-            if let Some(checkpoint) = checkpoint {
-                let mut table_assigns = BTreeMap::<u64, u8>::new();
-                let mut ranks = Vec::<PlayerRank>::new();
-
-                for r in checkpoint.ranks.iter() {
-                    table_assigns.insert(r.id, r.table_id);
-                    ranks.push(PlayerRank {
-                        id: r.id,
-                        chips: r.chips,
-                        status: if r.chips > 0 {
-                            PlayerRankStatus::Alive
-                        } else {
-                            PlayerRankStatus::Out
-                        },
-                        position: init_account.players.iter().find(|p| p.id == r.id).map(|p| p.position).unwrap_or(0),
-                    })
-                }
-
-                (
-                    checkpoint.start_time,
-                    checkpoint.tables,
-                    checkpoint.time_elapsed,
-                    checkpoint.stage,
-                    table_assigns,
-                    ranks,
-                    checkpoint.total_prize,
-                    checkpoint.timestamp,
-                )
-            } else {
-                // Initialize an empty game when there's no checkpoint available.
-                (
-                    start_time,
-                    BTreeMap::<u8, MttTable>::new(),
-                    0, // no time elapsed
-                    MttStage::Init,
-                    BTreeMap::<u64, u8>::new(),
-                    Vec::<PlayerRank>::new(),
-                    0, // no prize at the init
-                    0, // no timestamp at the init
-                )
-            };
-
-        let alives: usize = ranks
-            .iter()
-            .filter(|rank| rank.status == PlayerRankStatus::Alive)
-            .count();
 
         blind_info.with_default_blind_rules();
 
-        let mut state = Self {
+        let state = Self {
             start_time,
-            alives,
-            stage,
-            table_assigns,
-            ranks,
-            tables,
             table_size,
-            time_elapsed,
-            timestamp,
+            start_chips,
             blind_info,
             prize_rules,
-            total_prize,
             ticket,
             theme,
+            ..Default::default()
         };
-
-        // Create tables from checkpoint state
-        // Unless the game was finished
-        if stage.ne(&MttStage::Completed) {
-            state.create_tables(effect)?;
-        }
 
         Ok(state)
     }
@@ -277,7 +248,7 @@ impl GameHandler for Mtt {
                     for p in players {
                         self.ranks.push(PlayerRank {
                             id: p.id,
-                            chips: p.balance,
+                            chips: self.start_chips,
                             status: PlayerRankStatus::Alive,
                             position: p.position,
                         });
@@ -288,7 +259,7 @@ impl GameHandler for Mtt {
                     for p in players {
                         effect.settle(Settle::eject(p.id))?;
                     }
-                    effect.checkpoint(self.build_checkpoint()?);
+                    effect.checkpoint();
                 }
             },
 
@@ -297,7 +268,7 @@ impl GameHandler for Mtt {
                 if self.stage.eq(&MttStage::Completed) {
                     // Eject this player to return the prize
                     effect.settle(Settle::eject(player_id))?;
-                    effect.checkpoint(self.build_checkpoint()?);
+                    effect.checkpoint();
                 } else {
                     return Err(error_not_completed());
                 }
@@ -317,7 +288,7 @@ impl GameHandler for Mtt {
                     self.create_tables(effect)?;
                     self.update_alives();
                 }
-                effect.checkpoint(self.build_checkpoint()?);
+                effect.checkpoint();
             }
 
             Event::Bridge { raw, .. } => {
@@ -333,7 +304,7 @@ impl GameHandler for Mtt {
                         self.apply_settles(settles)?;
                         self.update_tables(effect, table_id)?;
                         self.apply_prizes(effect)?;
-                        effect.checkpoint(self.build_checkpoint()?);
+                        effect.checkpoint();
                     }
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
@@ -344,7 +315,7 @@ impl GameHandler for Mtt {
                     if self.ranks.len() < 2 {
                         self.stage = MttStage::Completed;
                         effect.allow_exit(true);
-                        effect.checkpoint(self.build_checkpoint()?);
+                        effect.checkpoint();
                     } else {
                         effect.start_game();
                     }
@@ -381,15 +352,17 @@ impl Mtt {
         &self,
         effect: &mut Effect,
         table_id: u8,
-        table: &MttTable,
+        table: &MttTableState,
     ) -> Result<(), HandleError> {
         let mut players = Vec::new();
+        let (start_sb, start_bb) = self.start_blinds()?;
         for p in table.players.iter() {
             players.push(GamePlayer::new(p.id, p.chips, p.table_position as _));
         }
         let init_table_data = InitTableData {
             table_id,
-            table_size: self.table_size,
+            start_sb,
+            start_bb,
         };
         effect.launch_sub_game(
             table_id as _,
@@ -397,7 +370,6 @@ impl Mtt {
             self.table_size as _,
             players,
             init_table_data,
-            Some(MttTableCheckpoint::new(&table)),
         )?;
         Ok(())
     }
@@ -424,7 +396,7 @@ impl Mtt {
                     j += num_of_tables;
                 }
                 let (sb, bb) = self.calc_blinds()?;
-                let table = MttTable {
+                let table = MttTableState {
                     btn: 0,
                     sb,
                     bb,
@@ -481,6 +453,17 @@ impl Mtt {
                 .cmp(&r1.chips)
                 .then_with(|| r1.position.cmp(&r2.position))
         });
+    }
+
+    fn start_blinds(&self) -> Result<(u64, u64), HandleError> {
+        let blind_rule = self
+            .blind_info
+            .blind_rules
+            .first()
+            .ok_or(errors::error_empty_blind_rules())?;
+        let sb = blind_rule.sb_x as u64 * self.blind_info.blind_base;
+        let bb = blind_rule.bb_x as u64 * self.blind_info.blind_base;
+        Ok((sb, bb))
     }
 
     fn calc_blinds(&self) -> Result<(u64, u64), HandleError> {
@@ -556,7 +539,7 @@ impl Mtt {
             })
             .sum::<usize>();
         let target_table_ids: Vec<u8> = {
-            let mut table_refs = self.tables.iter().collect::<Vec<(&u8, &MttTable)>>();
+            let mut table_refs = self.tables.iter().collect::<Vec<(&u8, &MttTableState)>>();
             table_refs.sort_by_key(|(_id, t)| t.players.len());
             table_refs
                 .into_iter()
@@ -708,42 +691,6 @@ impl Mtt {
         self.stage = MttStage::Completed;
         effect.allow_exit(true);
         Ok(())
-    }
-
-    fn build_checkpoint(&self) -> HandleResult<MttCheckpoint> {
-        let Mtt {
-            start_time,
-            time_elapsed,
-            timestamp,
-            tables,
-            ranks,
-            table_assigns,
-            total_prize,
-            ..
-        } = self;
-
-        let mut ranks_checkpoint = Vec::new();
-
-        for rank in ranks {
-            let PlayerRank { id, chips, .. } = rank;
-            // We use zero `table_id` to indicates there's no table assign for a player
-            let table_id = table_assigns.get(&id).cloned().unwrap_or(0);
-            ranks_checkpoint.push(PlayerRankCheckpoint {
-                id: *id,
-                chips: *chips,
-                table_id,
-            });
-        }
-
-        Ok(MttCheckpoint {
-            start_time: *start_time,
-            timestamp: *timestamp,
-            ranks: ranks_checkpoint,
-            tables: tables.clone(),
-            time_elapsed: *time_elapsed,
-            total_prize: *total_prize,
-            stage: self.stage,
-        })
     }
 }
 

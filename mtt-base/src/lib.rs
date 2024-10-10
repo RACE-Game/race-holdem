@@ -22,11 +22,12 @@ impl MttTablePlayer {
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug)]
 pub struct InitTableData {
     pub table_id: u8,
-    pub table_size: u8,
+    pub start_sb: u64,
+    pub start_bb: u64,
 }
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
-pub struct MttTable {
+pub struct MttTableState {
     pub hand_id: usize,
     pub btn: usize,
     pub sb: u64,
@@ -35,47 +36,7 @@ pub struct MttTable {
     pub next_game_start: u64,
 }
 
-#[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
-pub struct MttTableCheckpoint {
-    pub hand_id: usize,
-    pub btn: usize,
-    pub sb: u64,
-    pub bb: u64,
-    pub next_game_start: u64,
-    pub players: Vec<MttTablePlayer>,
-}
-
-impl MttTableCheckpoint {
-    pub fn new(table: &MttTable) -> Self {
-        MttTableCheckpoint {
-            btn: table.btn,
-            sb: table.sb,
-            bb: table.bb,
-            next_game_start: table.next_game_start,
-            hand_id: table.hand_id,
-            players: table.players.clone(),
-        }
-    }
-}
-
-// impl From<&MttTable> for MttTableCheckpoint {
-//     fn from(value: &MttTable) -> Self {
-//         Self { sb: value.sb, bb: value.bb, btn: value.btn }
-//     }
-// }
-
-impl MttTable {
-    pub fn new(checkpoint: &MttTableCheckpoint, players: Vec<MttTablePlayer>) -> Self {
-        Self {
-            sb: checkpoint.sb,
-            bb: checkpoint.bb,
-            btn: checkpoint.btn,
-            players,
-            next_game_start: checkpoint.next_game_start,
-            hand_id: checkpoint.hand_id,
-        }
-    }
-
+impl MttTableState {
     pub fn add_player(&mut self, player: &mut MttTablePlayer) {
         let mut table_position = 0;
         for i in 0.. {
@@ -119,7 +80,7 @@ pub enum HoldemBridgeEvent {
         hand_id: usize,
         table_id: u8,
         settles: Vec<Settle>,
-        table: MttTable,
+        table: MttTableState,
     },
 }
 

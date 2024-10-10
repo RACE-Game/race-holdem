@@ -19,7 +19,7 @@ opt-level = 3
 race-api.path = "../race/api"
 race-proc-macro.path = "../race/proc-macro"
 race-test.path = "../race/test"
-borsh = "0.9.3"
+borsh = { version = "1.5.1", features = ["derive"] }
 anyhow = "1.0.72"
 
 [workspace.package]

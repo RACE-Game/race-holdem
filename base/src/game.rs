@@ -13,7 +13,7 @@ use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
 
 // Holdem: the game state
-#[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq)]
+#[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
 pub struct Holdem {
     pub deck_random_id: RandomId,
     pub sb: u64,
@@ -42,29 +42,8 @@ pub struct Holdem {
     pub next_game_start: u64,
 }
 
-#[derive(Debug, BorshSerialize, BorshDeserialize)]
-pub struct HoldemCheckpoint {
-    pub btn: usize,
-    pub player_timeouts: BTreeMap<u64, u8>,
-    pub next_game_start: u64,
-}
-
 // Methods that mutate or query the game state
 impl Holdem {
-    fn build_checkpoint(&self) -> HoldemCheckpoint {
-        let player_timeouts = self
-            .player_map
-            .iter()
-            .map(|p| (*p.0, p.1.timeout))
-            .collect::<BTreeMap<u64, u8>>();
-
-        HoldemCheckpoint {
-            btn: self.btn,
-            player_timeouts,
-            next_game_start: self.next_game_start,
-        }
-    }
-
     // Mark out players.
     // An out player is one with zero chips.
     fn mark_out_players(&mut self) {
@@ -747,7 +726,7 @@ impl Holdem {
         }
 
         self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
-        effect.checkpoint(self.build_checkpoint());
+        effect.checkpoint();
         Ok(())
     }
 
@@ -870,7 +849,7 @@ impl Holdem {
             effect.transfer(0, rake);
         }
 
-        effect.checkpoint(self.build_checkpoint());
+        effect.checkpoint();
 
         // Save to hand history
         for (id, showdown) in showdowns.into_iter() {
@@ -1159,6 +1138,29 @@ impl Holdem {
         Ok((allin, real_amount))
     }
 
+    pub fn reset_state(&mut self) -> Result<(), HandleError> {
+        self.deck_random_id = 0;
+        self.min_raise = 0;
+        self.stage = HoldemStage::Init;
+        self.street = Street::Init;
+        self.street_bet = 0;
+        self.board.clear();
+        self.hand_index_map.clear();
+        self.bet_map.clear();
+        self.total_bet_map.clear();
+        self.prize_map.clear();
+        self.player_order.clear();
+        self.pots.clear();
+        self.acting_player = None;
+        self.winners.clear();
+        self.display.clear();
+        self.hand_history = HandHistory::default();
+        self.next_game_start = 0;
+        // Reset player status
+        self.reset_player_map_status()?;
+        Ok(())
+    }
+
     pub fn internal_add_players(
         &mut self,
         add_players: Vec<InternalPlayerJoin>,
@@ -1184,24 +1186,21 @@ impl Holdem {
     }
 
     pub fn internal_start_game(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        // WaitingTimeout + GameStart
-        self.display.clear();
+        self.reset_state()?;
 
         let next_btn = self.get_next_btn()?;
-        println!("Next BTN: {}", next_btn);
+        println!("Game starts and next BTN: {}", next_btn);
         self.btn = next_btn;
 
-        let player_num = self.player_map.len();
-        println!("{} players in game", player_num);
+        // Prepare randomness (shuffling cards)
+        let rnd_spec = RandomSpec::deck_of_cards();
+        self.deck_random_id = effect.init_random_state(rnd_spec);
 
-        if player_num >= 2 {
+        if self.player_map.len() >= 2 {
             // Prepare randomness (shuffling cards)
             let rnd_spec = RandomSpec::deck_of_cards();
             self.deck_random_id = effect.init_random_state(rnd_spec);
         }
-
-        // Init HandHistory
-        self.hand_history = HandHistory::default();
 
         Ok(())
     }
@@ -1209,6 +1208,12 @@ impl Holdem {
 
 impl GameHandler for Holdem {
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
+        effect.allow_exit(true);
+
+        if let Some(checkpoint) = init_account.checkpoint()? {
+            return checkpoint;
+        }
+
         let HoldemAccount {
             sb,
             bb,
@@ -1216,24 +1221,18 @@ impl GameHandler for Holdem {
             rake_cap,
             ..
         } = init_account.data()?;
-        let checkpoint: Option<HoldemCheckpoint> = init_account.checkpoint()?;
-        let (player_timeouts, btn, next_game_start) = if let Some(checkpoint) = checkpoint {
-            (checkpoint.player_timeouts, checkpoint.btn, checkpoint.next_game_start)
-        } else {
-            (BTreeMap::default(), 0, 0)
-        };
+
+        let btn = 0;
+        let next_game_start = 0;
 
         let player_map: BTreeMap<u64, Player> = init_account
             .players
             .iter()
             .map(|p| {
-                let timeout = player_timeouts.get(&p.id).cloned().unwrap_or_default();
-                let player = Player::new(p.id, p.balance, p.position, timeout);
+                let player = Player::new(p.id, p.balance, p.position, 0);
                 (p.id, player)
             })
             .collect();
-
-        effect.allow_exit(true);
 
         Ok(Self {
             deck_random_id: 0,
@@ -1272,7 +1271,7 @@ impl GameHandler for Holdem {
                 self.reset_player_timeout(sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
                 println!("Player action event: {:?}, sender: {:?}", event, sender);
-                self.handle_custom_event(effect, event, sender.clone())?;
+                self.handle_custom_event(effect, event, sender)?;
                 Ok(())
             }
 
@@ -1348,53 +1347,40 @@ impl GameHandler for Holdem {
 
             Event::Join { players } => {
                 self.display.clear();
+
+                for p in players.into_iter() {
+                    let GamePlayer {
+                        id,
+                        position,
+                        balance,
+                    } = p;
+                    let player = Player::init(id, balance, position);
+                    self.player_map.insert(id, player);
+                }
+
                 match self.stage {
                     HoldemStage::Init => {
-                        for p in players.into_iter() {
-                            let GamePlayer {
-                                id,
-                                position,
-                                balance,
-                            } = p;
-                            let player = Player::new(id, balance, position, 0);
-                            self.player_map.insert(id, player);
-                        }
-
                         if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                             effect.start_game();
                         }
                     }
 
-                    _ => {
-                        for p in players.into_iter() {
-                            let GamePlayer {
-                                id,
-                                position,
-                                balance,
-                            } = p;
-                            let player = Player::init(id, balance, position);
-                            self.player_map.insert(id, player);
+                    HoldemStage::Runner | HoldemStage::Settle | HoldemStage::Showdown => {
+                        if self.next_game_start > effect.timestamp() {
+                            effect.wait_timeout(self.next_game_start - effect.timestamp());
+                        } else if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
+                            effect.start_game();
                         }
                     }
+
+                    _ => (),
                 }
 
                 Ok(())
             }
 
             Event::GameStart => {
-                self.display.clear();
-
-                let next_btn = self.get_next_btn()?;
-                println!("Game starts and next BTN: {}", next_btn);
-                self.btn = next_btn;
-
-                // Prepare randomness (shuffling cards)
-                let rnd_spec = RandomSpec::deck_of_cards();
-                self.deck_random_id = effect.init_random_state(rnd_spec);
-
-                // Init HandHistory
-                self.hand_history = HandHistory::default();
-
+                self.internal_start_game(effect)?;
                 Ok(())
             }
 
@@ -1413,7 +1399,7 @@ impl GameHandler for Holdem {
                     | HoldemStage::Showdown => {
                         self.player_map.remove_entry(&player_id);
                         effect.settle(Settle::eject(player_id))?;
-                        effect.checkpoint(self.build_checkpoint());
+                        effect.checkpoint();
                         self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                         self.signal_game_end(effect)?;
                     }
@@ -1450,6 +1436,7 @@ impl GameHandler for Holdem {
                                 .map(|p| p.id())
                                 .ok_or(errors::single_winner_missing())?;
                             self.single_player_win(effect, winner)?;
+                            self.stage = HoldemStage::Settle;
                             self.signal_game_end(effect)?;
                         }
                     }

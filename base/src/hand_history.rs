@@ -8,14 +8,14 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub enum ChipsChange {
     NoUpdate,
     Add(u64),
     Sub(u64),
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub enum BlindType {
     Sb,
     Bb,
@@ -23,7 +23,7 @@ pub enum BlindType {
     Stradle,
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct BlindBet {
     pub id: u64,
     pub blind_type: BlindType,
@@ -40,7 +40,7 @@ impl BlindBet {
     }
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct PlayerAction {
     pub id: u64,
     pub event: GameEvent,
@@ -55,7 +55,7 @@ impl PlayerAction {
     }
 }
 
-#[derive(Debug, Default, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, Default, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct StreetActions {
     pub pot: u64,
     pub actions: Vec<PlayerAction>,
@@ -68,7 +68,7 @@ pub struct Showdown {
     pub picks: Vec<String>,
 }
 
-#[derive(Default, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Default, Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct HandHistory {
     pub board: Vec<String>,
     pub blinds: Vec<BlindBet>,
