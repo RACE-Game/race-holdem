@@ -171,24 +171,6 @@ impl GameHandler for Mtt {
         if let Some(checkpoint) = init_account.checkpoint::<Self>()? {
             if !checkpoint.tables.is_empty() {
                 for (id, table) in checkpoint.tables.iter() {
-                    let players = table
-                        .players
-                        .iter()
-                        .map(|p| GamePlayer::new(p.id, p.chips, p.table_position as _))
-                        .collect();
-                    let (start_sb, start_bb) = checkpoint.start_blinds()?;
-                    let init_table_data = InitTableData {
-                        table_id: *id,
-                        start_sb,
-                        start_bb,
-                    };
-                    effect.launch_sub_game(
-                        *id as _,
-                        SUBGAME_BUNDLE_ADDR.into(),
-                        checkpoint.table_size as _,
-                        players,
-                        init_table_data,
-                    )?;
                     checkpoint.launch_table(effect, *id, table)?;
                 }
             }

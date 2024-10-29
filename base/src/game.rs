@@ -1192,10 +1192,6 @@ impl Holdem {
         println!("Game starts and next BTN: {}", next_btn);
         self.btn = next_btn;
 
-        // Prepare randomness (shuffling cards)
-        let rnd_spec = RandomSpec::deck_of_cards();
-        self.deck_random_id = effect.init_random_state(rnd_spec);
-
         if self.player_map.len() >= 2 {
             // Prepare randomness (shuffling cards)
             let rnd_spec = RandomSpec::deck_of_cards();
