@@ -1206,8 +1206,8 @@ impl GameHandler for Holdem {
     fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
         effect.allow_exit(true);
 
-        if let Some(checkpoint) = init_account.checkpoint()? {
-            return checkpoint;
+        if let Some(checkpoint) = init_account.checkpoint::<Self>()? {
+            return Ok(checkpoint);
         }
 
         let HoldemAccount {
