@@ -206,9 +206,9 @@ impl GameHandler for Mtt {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
         // Update time elapsed for blinds calculation.
-        self.timestamp = effect.timestamp();
         if self.stage == MttStage::Playing {
             self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
+            self.timestamp = effect.timestamp();
         }
 
         match event {
