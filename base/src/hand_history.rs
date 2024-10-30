@@ -8,14 +8,14 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub enum ChipsChange {
     NoUpdate,
     Add(u64),
     Sub(u64),
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub enum BlindType {
     Sb,
     Bb,
@@ -23,64 +23,64 @@ pub enum BlindType {
     Stradle,
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
-pub struct BlindInfo {
-    pub addr: String,
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
+pub struct BlindBet {
+    pub id: u64,
     pub blind_type: BlindType,
     pub amount: u64,
 }
 
-impl BlindInfo {
-    pub fn new<S: Into<String>>(addr: S, blind_type: BlindType, amount: u64) -> Self {
+impl BlindBet {
+    pub fn new(id: u64, blind_type: BlindType, amount: u64) -> Self {
         Self {
-            addr: addr.into(),
+            id,
             blind_type,
             amount,
         }
     }
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct PlayerAction {
-    pub addr: String,
+    pub id: u64,
     pub event: GameEvent,
 }
 
 impl PlayerAction {
-    pub fn new<S: Into<String>>(addr: S, event: GameEvent) -> Self {
+    pub fn new(id: u64, event: GameEvent) -> Self {
         Self {
-            addr: addr.into(),
+            id,
             event,
         }
     }
 }
 
-#[derive(Debug, Default, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, Default, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct StreetActions {
     pub pot: u64,
     pub actions: Vec<PlayerAction>,
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct Showdown {
     pub hole_cards: Vec<String>,
     pub category: Category,
     pub picks: Vec<String>,
 }
 
-#[derive(Default, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Default, Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct HandHistory {
     pub board: Vec<String>,
-    pub blinds: Vec<BlindInfo>,
+    pub blinds: Vec<BlindBet>,
     // actions for each street
     pub preflop: StreetActions,
     pub flop: StreetActions,
     pub turn: StreetActions,
     pub river: StreetActions,
     // Player address -> showdown info
-    pub showdowns: BTreeMap<String, Showdown>,
+    pub showdowns: BTreeMap<u64, Showdown>,
     // Player address -> chips change
-    pub chips_change: BTreeMap<String, ChipsChange>,
+    pub chips_change: BTreeMap<u64, ChipsChange>,
 }
 
 impl HandHistory {
@@ -88,20 +88,20 @@ impl HandHistory {
         self.board = board;
     }
 
-    pub fn set_chips_change(&mut self, chips_change_map: &BTreeMap<String, i64>) {
-        for (addr, change) in chips_change_map.iter() {
+    pub fn set_chips_change(&mut self, chips_change_map: &BTreeMap<u64, i64>) {
+        for (id, change) in chips_change_map.iter() {
             let change = *change;
             if change > 0 {
                 self.chips_change
-                    .insert(addr.to_owned(), ChipsChange::Add(change as u64));
+                    .insert(*id, ChipsChange::Add(change as u64));
             } else if change < 0 {
                 self.chips_change
-                    .insert(addr.to_owned(), ChipsChange::Sub((-change) as u64));
+                    .insert(*id, ChipsChange::Sub((-change) as u64));
             }
         }
     }
 
-    pub fn set_blinds_infos(&mut self, blinds: Vec<BlindInfo>) {
+    pub fn set_blinds_infos(&mut self, blinds: Vec<BlindBet>) {
         self.blinds = blinds
     }
 
@@ -145,7 +145,7 @@ impl HandHistory {
         Ok(())
     }
 
-    pub fn add_showdown<S: Into<String>>(&mut self, addr: S, showdown: Showdown) {
-        self.showdowns.insert(addr.into(), showdown);
+    pub fn add_showdown(&mut self, id: u64, showdown: Showdown) {
+        self.showdowns.insert(id, showdown);
     }
 }
