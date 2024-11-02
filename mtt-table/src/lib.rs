@@ -175,8 +175,9 @@ mod tests {
         let mut effect = Effect::default();
         let init_account = InitAccount {
             data: InitTableData {
+                start_sb: 10,
+                start_bb: 20,
                 table_id: 1,
-                table_size: 6,
             }
                 .try_to_vec()?,
             ..Default::default()

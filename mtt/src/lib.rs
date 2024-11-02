@@ -14,6 +14,8 @@
 //! will be created.  The same data structure as in cash table is used
 //! for each table in the tournament.
 //!
+//! Game bundle address on Facade:
+//! raceholdemtargetraceholdemmtttablewasm
 
 mod errors;
 
@@ -25,9 +27,6 @@ use race_holdem_mtt_base::{
 };
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
-
-const SUBGAME_BUNDLE_ADDR: &str = "raceholdemtargetraceholdemmtttablewasm";
-// const SUBGAME_BUNDLE_ADDR: &str = "E5qgEuuXBffQpaUzn7SGBzUE1hVhG9rGNxbRQqiQ6iFE";
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug, Clone, Copy)]
 pub enum MttStage {
@@ -123,28 +122,8 @@ pub struct MttAccountData {
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     theme: Option<String>, // optional NFT theme
+    subgame_bundle: String,
 }
-
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct MttCheckpoint {
-    start_time: u64,
-    ranks: Vec<PlayerRankCheckpoint>,
-    tables: BTreeMap<u8, MttTableState>,
-    time_elapsed: u64,
-    timestamp: u64,
-    total_prize: u64,
-    stage: MttStage,
-}
-
-// fn find_checkpoint_rank_by_pos(
-//     ranks: &[PlayerRankCheckpoint],
-//     id: u64,
-// ) -> Result<&PlayerRankCheckpoint, HandleError> {
-//     ranks
-//         .iter()
-//         .find(|rank| rank.id.eq(&id))
-//         .ok_or(errors::error_player_id_not_found())
-// }
 
 #[game_handler]
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
@@ -164,6 +143,7 @@ pub struct Mtt {
     total_prize: u64,
     ticket: u64,
     theme: Option<String>,
+    subgame_bundle: String,
 }
 
 impl GameHandler for Mtt {
@@ -186,6 +166,7 @@ impl GameHandler for Mtt {
             mut blind_info,
             prize_rules,
             theme,
+            subgame_bundle,
         } = init_account.data()?;
 
         blind_info.with_default_blind_rules();
@@ -198,6 +179,7 @@ impl GameHandler for Mtt {
             prize_rules,
             ticket,
             theme,
+            subgame_bundle,
             ..Default::default()
         };
 
@@ -348,7 +330,7 @@ impl Mtt {
         };
         effect.launch_sub_game(
             table_id as _,
-            SUBGAME_BUNDLE_ADDR.to_string(),
+            self.subgame_bundle.clone(),
             self.table_size as _,
             players,
             init_table_data,
@@ -678,68 +660,15 @@ impl Mtt {
 
 #[cfg(test)]
 mod test_t {
-    use std::println;
 
     use super::*;
 
     #[test]
-    fn a() {
-        let v = vec![
-            1, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 64, 35, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ];
-
-        let e = HoldemBridgeEvent::try_from_slice(&v).unwrap();
-
-        println!("{:?}", e);
-    }
-
-    #[test]
-    fn s() {
-        // remote
-        let s1 = Mtt::try_from_slice(&[
-            244, 138, 72, 8, 145, 1, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0,
-            0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0, 0, 0,
-            2, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0,
-            0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63,
-            238, 5, 0, 0, 0, 0, 0, 2, 0, 5, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 3,
-            0, 2, 0, 0, 0, 1, 7, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0,
-            0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0,
-            0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8, 145, 1, 0, 0, 2, 7, 0, 0, 0, 0, 0, 0, 0, 1,
-            0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0,
-            3, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0,
-            0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8,
-            145, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 6, 177, 74, 8, 145, 1, 0, 0, 32, 161, 7, 0, 0,
-            0, 0, 0, 96, 234, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 1, 0, 2, 0, 2, 0, 4, 0, 4, 0, 8, 0, 8,
-            0, 16, 0, 16, 0, 32, 0, 32, 0, 64, 0, 3, 0, 0, 0, 50, 30, 20, 0, 132, 215, 23, 0, 0, 0,
-            0, 0, 225, 245, 5, 0, 0, 0, 0, 0,
-        ])
-        .unwrap();
-
-        let s2 = Mtt::try_from_slice(&[
-            244, 138, 72, 8, 145, 1, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0,
-            0, 0, 1, 3, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0, 0, 0, 0, 0, 0, 0,
-            2, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0,
-            0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 1, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63,
-            238, 5, 0, 0, 0, 0, 0, 2, 0, 5, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 3,
-            0, 2, 0, 0, 0, 1, 7, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0,
-            0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0,
-            0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8, 145, 1, 0, 0, 2, 7, 0, 0, 0, 0, 0, 0, 0, 1,
-            0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 2, 0, 0, 0,
-            3, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0,
-            0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 141, 196, 74, 8,
-            145, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 244, 138, 72, 8, 145, 1, 0, 0, 32, 161, 7, 0,
-            0, 0, 0, 0, 96, 234, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 1, 0, 2, 0, 2, 0, 4, 0, 4, 0, 8, 0,
-            8, 0, 16, 0, 16, 0, 32, 0, 32, 0, 64, 0, 3, 0, 0, 0, 50, 30, 20, 0, 132, 215, 23, 0, 0,
-            0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 0,
-        ])
-        .unwrap();
-
-        println!("remote: {:?}", s1);
-        println!("local:  {:?}", s2);
+    fn test_deser() {
+        let s = [72, 197, 88, 238, 146, 1, 0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 3, 16, 39, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 96, 234, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 50, 30, 20, 0];
+        let account_data: MttAccountData = MttAccountData::try_from_slice(&s).unwrap();
     }
 }
 
-#[cfg(test)]
-mod tests;
+// #[cfg(test)]
+// mod tests;

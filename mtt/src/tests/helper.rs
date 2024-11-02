@@ -14,7 +14,9 @@ pub fn init_test_state(players: [&mut TestClient; 4]) -> anyhow::Result<Mtt> {
             table_size: 2,
             blind_info: BlindInfo::default(),
             prize_rules: vec![50, 30, 20],
+            start_chips: 1000_000,
             theme: None,
+            subgame_bundle: "".to_string(),
         })
         .with_deposit_range(1000, 1000)
         .add_player(alice, 1000)
