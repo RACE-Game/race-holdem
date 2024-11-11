@@ -125,6 +125,12 @@ pub struct MttAccountData {
     subgame_bundle: String,
 }
 
+#[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
+pub struct MttWinner {
+    player_id: u64,
+    prize: u64,
+}
+
 #[game_handler]
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
@@ -144,6 +150,7 @@ pub struct Mtt {
     ticket: u64,
     theme: Option<String>,
     subgame_bundle: String,
+    winners: Vec<MttWinner>,
 }
 
 impl GameHandler for Mtt {
@@ -275,6 +282,7 @@ impl GameHandler for Mtt {
             }
 
             Event::WaitingTimeout => match self.stage {
+                // Scheduled game start
                 MttStage::Init => {
                     if self.ranks.len() < 2 {
                         self.stage = MttStage::Completed;
@@ -630,7 +638,7 @@ impl Mtt {
     /// Apply the prizes and mark the game as completed.
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
-            // Simply make a checkpoint is the game is on going
+            // Do nothing is the game is ongoing
             return Ok(());
         }
 
@@ -642,18 +650,12 @@ impl Mtt {
             let id = rank.id;
             let rule = self.prize_rules.get(i).unwrap_or(&0);
             let prize: u64 = prize_share * *rule as u64;
-            let change: i128 = prize as i128 - self.ticket as i128;
-            // Tested safe with 9-zero numbers
-            if change > 0 {
-                effect.settle(Settle::add(id, change as u64))?;
-            } else if change < 0 {
-                effect.settle(Settle::sub(id, -change as u64))?;
-            } else {
-            }
+            self.winners.push(MttWinner { player_id: id, prize });
+            // Assign the slot to winner
+            effect.settle(Settle::assign(id, format!("{}", i + 1)))?;
         }
 
         self.stage = MttStage::Completed;
-        effect.allow_exit(true);
         Ok(())
     }
 }
