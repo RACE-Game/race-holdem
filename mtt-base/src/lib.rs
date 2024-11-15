@@ -1,6 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
-use race_api::prelude::*;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
@@ -79,9 +78,15 @@ pub enum HoldemBridgeEvent {
     GameResult {
         hand_id: usize,
         table_id: u8,
-        settles: Vec<Settle>,
+        chips_change: Vec<(u64, ChipsChange)>,
         table: MttTableState,
     },
+}
+
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+pub enum ChipsChange {
+    Add(u64),
+    Sub(u64),
 }
 
 impl BridgeEvent for HoldemBridgeEvent {}

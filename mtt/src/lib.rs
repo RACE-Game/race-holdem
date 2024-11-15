@@ -20,10 +20,10 @@
 mod errors;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use errors::error_not_completed;
-use race_api::{prelude::*, types::SettleOp};
+use errors::error_leave_not_allowed;
+use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    HoldemBridgeEvent, InitTableData, MttTableState, MttTablePlayer,
+    ChipsChange, HoldemBridgeEvent, InitTableData, MttTablePlayer, MttTableState
 };
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
@@ -154,17 +154,7 @@ pub struct Mtt {
 }
 
 impl GameHandler for Mtt {
-    fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
-        if let Some(checkpoint) = init_account.checkpoint::<Self>()? {
-            if !checkpoint.tables.is_empty() {
-                for (id, table) in checkpoint.tables.iter() {
-                    checkpoint.launch_table(effect, *id, table)?;
-                }
-            }
-
-            return Ok(checkpoint);
-        }
-
+    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
         let MttAccountData {
             start_time,
             ticket,
@@ -218,31 +208,19 @@ impl GameHandler for Mtt {
                 MttStage::Init => {
                     for p in players {
                         self.ranks.push(PlayerRank {
-                            id: p.id,
+                            id: p.id(),
                             chips: self.start_chips,
                             status: PlayerRankStatus::Alive,
-                            position: p.position,
+                            position: p.position(),
                         });
                         self.total_prize += self.ticket;
                     }
                 }
-                _ => {
-                    for p in players {
-                        effect.settle(Settle::eject(p.id))?;
-                    }
-                    effect.checkpoint();
-                }
+                _ => ()
             },
 
-            Event::Leave { player_id } => {
-                // Only allow leaving when the tourney is completed
-                if self.stage.eq(&MttStage::Completed) {
-                    // Eject this player to return the prize
-                    effect.settle(Settle::eject(player_id))?;
-                    effect.checkpoint();
-                } else {
-                    return Err(error_not_completed());
-                }
+            Event::Leave { .. } => {
+                return Err(error_leave_not_allowed());
             }
 
             Event::GameStart => {
@@ -267,12 +245,12 @@ impl GameHandler for Mtt {
                 match bridge_event {
                     HoldemBridgeEvent::GameResult {
                         table_id,
-                        settles,
+                        chips_change,
                         table,
                         ..
                     } => {
                         self.tables.insert(table_id, table);
-                        self.apply_settles(settles)?;
+                        self.apply_chips_change(chips_change)?;
                         self.update_tables(effect, table_id)?;
                         self.apply_prizes(effect)?;
                         effect.checkpoint();
@@ -286,7 +264,6 @@ impl GameHandler for Mtt {
                 MttStage::Init => {
                     if self.ranks.len() < 2 {
                         self.stage = MttStage::Completed;
-                        effect.allow_exit(true);
                         effect.checkpoint();
                     } else {
                         effect.start_game();
@@ -384,18 +361,18 @@ impl Mtt {
         Ok(())
     }
 
-    fn apply_settles(&mut self, settles: Vec<Settle>) -> Result<(), HandleError> {
-        for s in settles.iter() {
+    fn apply_chips_change(&mut self, chips_change: Vec<(u64, ChipsChange)>) -> Result<(), HandleError> {
+        for (pid, change) in chips_change.into_iter() {
             let rank = self
                 .ranks
                 .iter_mut()
-                .find(|r| r.id.eq(&s.id))
+                .find(|r| r.id.eq(&pid))
                 .ok_or(errors::error_player_not_found())?;
-            match s.op {
-                SettleOp::Add(amount) => {
+            match change {
+                ChipsChange::Add(amount) => {
                     rank.chips += amount;
                 }
-                SettleOp::Sub(amount) => {
+                ChipsChange::Sub(amount) => {
                     rank.chips -= amount;
                     if rank.chips == 0 {
                         rank.status = PlayerRankStatus::Out;
@@ -403,7 +380,6 @@ impl Mtt {
                         self.table_assigns.remove(&rank.id);
                     }
                 }
-                _ => (),
             }
         }
         self.sort_ranks();
@@ -652,25 +628,10 @@ impl Mtt {
             let prize: u64 = prize_share * *rule as u64;
             self.winners.push(MttWinner { player_id: id, prize });
             // Assign the slot to winner
-            effect.settle(Settle::assign(id, format!("{}", i + 1)))?;
+            effect.settle(id, prize)?;
         }
 
         self.stage = MttStage::Completed;
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod test_t {
-
-    use super::*;
-
-    #[test]
-    fn test_deser() {
-        let s = [72, 197, 88, 238, 146, 1, 0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 3, 16, 39, 0, 0, 0, 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 96, 234, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 50, 30, 20, 0];
-        let account_data: MttAccountData = MttAccountData::try_from_slice(&s).unwrap();
-    }
-}
-
-// #[cfg(test)]
-// mod tests;

@@ -48,7 +48,7 @@ pub struct InternalPlayerJoin {
 }
 
 /// Representation of a specific player in the game
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Player {
     pub id: u64,
     pub chips: u64,

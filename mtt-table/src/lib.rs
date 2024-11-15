@@ -1,13 +1,11 @@
 mod errors;
 
-use std::collections::BTreeMap;
-
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
-use race_holdem_mtt_base::{HoldemBridgeEvent, InitTableData, MttTableState, MttTablePlayer};
+use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, InitTableData, MttTablePlayer, MttTableState};
 use race_proc_macro::game_handler;
 
 pub type PlayerId = u64;
@@ -21,10 +19,7 @@ pub struct MttTable {
 }
 
 impl GameHandler for MttTable {
-    fn init_state(_effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
-        if let Some(checkpoint) = init_account.checkpoint::<Self>()? {
-            return Ok(checkpoint);
-        }
+    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
 
         let InitTableData {
             table_id,
@@ -32,17 +27,10 @@ impl GameHandler for MttTable {
             start_bb,
         } = init_account.data()?;
 
-        let player_map: BTreeMap<u64, Player> = init_account
-            .players
-            .iter()
-            .map(|p| (p.id, Player::new(p.id, p.balance, p.position, 0)))
-            .collect();
-
         let holdem = Holdem {
             sb: start_sb,
             bb: start_bb,
             table_size: init_account.max_players as _,
-            player_map,
             mode: GameMode::Mtt,
             ..Default::default()
         };
@@ -70,7 +58,6 @@ impl GameHandler for MttTable {
                 self.holdem.handle_event(effect, event)?;
                 // Check if there's a settlement
                 if effect.is_checkpoint() {
-                    let settles = effect.settles.clone();
                     let players = self
                         .holdem
                         .player_map
@@ -85,10 +72,17 @@ impl GameHandler for MttTable {
                         next_game_start: self.holdem.next_game_start,
                         players
                     };
+                    let chips_change = self.holdem.hand_history.chips_change.iter().filter_map(|(pid, change)| {
+                        match change {
+                            race_holdem_base::hand_history::ChipsChange::NoUpdate => None,
+                            race_holdem_base::hand_history::ChipsChange::Add(amt) => Some((*pid, ChipsChange::Add(*amt))),
+                            race_holdem_base::hand_history::ChipsChange::Sub(amt) => Some((*pid, ChipsChange::Sub(*amt))),
+                        }
+                    }).collect();
                     let evt = HoldemBridgeEvent::GameResult {
                         hand_id: self.hand_id,
                         table: mtt_table_state,
-                        settles,
+                        chips_change,
                         table_id: self.table_id,
                     };
                     effect.checkpoint();
@@ -150,9 +144,6 @@ impl MttTable {
                 }
             }
             HoldemBridgeEvent::CloseTable => {
-                for (id, _) in self.holdem.player_map.iter() {
-                    effect.settle(Settle::eject(*id))?;
-                }
                 self.holdem.player_map.clear();
                 effect.checkpoint();
             }

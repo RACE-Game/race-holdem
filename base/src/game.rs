@@ -1,6 +1,7 @@
 //! Game state machine (or handler) of Holdem: the core of this lib.
 use race_api::prelude::*;
 use std::collections::BTreeMap;
+use std::mem::take;
 
 use crate::errors;
 use crate::essential::{
@@ -57,18 +58,16 @@ impl Holdem {
     }
 
     // Remove players with `Leave` or `Out` status.
-    fn remove_leave_and_out_players(&mut self) -> Vec<u64> {
-        let mut removed = Vec::with_capacity(self.player_map.len());
-        self.player_map.retain(|_, p| {
-            if p.status == PlayerStatus::Leave || p.status == PlayerStatus::Out {
-                removed.push(p.id);
-                false
-            } else {
-                true
-            }
-        });
+    fn remove_leave_and_out_players(&mut self) -> Vec<Player> {
+        let player_map = take(&mut self.player_map);
+        let (removed, retained): (Vec<_>, Vec<_>) = player_map
+            .into_iter()
+            .partition(|(_, ref p)| p.status == PlayerStatus::Out || p.status == PlayerStatus::Leave);
+
+        self.player_map = retained.into_iter().collect();
+
         println!("Remove these players: {:?}", removed);
-        removed
+        removed.into_iter().map(|(_, p)| p).collect()
     }
 
     // Make All eligible players Wait
@@ -323,9 +322,9 @@ impl Holdem {
                 matches!(
                     p.status,
                     PlayerStatus::Wait
-                        | PlayerStatus::Allin
-                        | PlayerStatus::Acted
-                        | PlayerStatus::Acting
+                    | PlayerStatus::Allin
+                    | PlayerStatus::Acted
+                    | PlayerStatus::Acting
                 )
             })
             .map(|p| p.id)
@@ -442,9 +441,9 @@ impl Holdem {
                 matches!(
                     p.status,
                     PlayerStatus::Acted
-                        | PlayerStatus::Allin
-                        | PlayerStatus::Acting
-                        | PlayerStatus::Wait
+                    | PlayerStatus::Allin
+                    | PlayerStatus::Acting
+                    | PlayerStatus::Wait
                 )
             })
             .count()
@@ -702,23 +701,14 @@ impl Holdem {
         self.assign_winners(vec![vec![winner]])?;
         self.calc_prize()?;
         let rake = self.take_rake_from_prize()?;
-        let chips_change_map = self.update_chips_map()?;
+        let _ = self.update_chips_map()?;
         self.apply_prize()?;
-
-        // Add or reduce players chips according to chips change map
-        for (id, chips_change) in chips_change_map.iter() {
-            if *chips_change > 0 {
-                effect.settle(Settle::add(*id, *chips_change as u64))?;
-            } else if *chips_change < 0 {
-                effect.settle(Settle::sub(*id, -*chips_change as u64))?;
-            }
-        }
 
         self.mark_out_players();
 
-        let removed_addrs = self.remove_leave_and_out_players();
-        for addr in removed_addrs {
-            effect.settle(Settle::eject(addr))?;
+        let removed_players = self.remove_leave_and_out_players();
+        for player in removed_players {
+            effect.settle(player.id, player.chips)?;
         }
 
         if rake > 0 {
@@ -826,23 +816,14 @@ impl Holdem {
         self.assign_winners(winners)?;
         self.calc_prize()?;
         let rake = self.take_rake_from_prize()?;
-        let chips_change_map = self.update_chips_map()?;
+        let _ = self.update_chips_map()?;
         self.apply_prize()?;
 
-        // Add or reduce players chips according to chips change map
-        for (id, chips_change) in chips_change_map.iter() {
-            if *chips_change > 0 {
-                effect.settle(Settle::add(*id, *chips_change as u64))?;
-            } else if *chips_change < 0 {
-                effect.settle(Settle::sub(*id, -*chips_change as u64))?;
-            }
-        }
-
         self.mark_out_players();
-        let removed_addrs = self.remove_leave_and_out_players();
+        let removed_players = self.remove_leave_and_out_players();
 
-        for addr in removed_addrs {
-            effect.settle(Settle::eject(addr))?;
+        for player in removed_players {
+            effect.settle(player.id, player.chips)?;
         }
 
         if rake > 0 {
@@ -1001,7 +982,7 @@ impl Holdem {
         self.display.clear();
 
         let Some(player) = self.player_map.get(&sender) else {
-            return Err(HandleError::InvalidPlayer)
+            return Err(HandleError::InvalidPlayer);
         };
 
         match event {
@@ -1174,7 +1155,7 @@ impl Holdem {
                 .map(|p| p.position)
                 .collect::<Vec<usize>>();
             let Some(pos) = (0..11).find(|i| !occupied_pos.contains(i)) else {
-                return Err(errors::cannot_join_full_table())
+                return Err(errors::cannot_join_full_table());
             };
 
             self.player_map.insert(
@@ -1203,13 +1184,7 @@ impl Holdem {
 }
 
 impl GameHandler for Holdem {
-    fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
-        effect.allow_exit(true);
-
-        if let Some(checkpoint) = init_account.checkpoint::<Self>()? {
-            return Ok(checkpoint);
-        }
-
+    fn init_state(init_account: InitAccount) -> Result<Self, HandleError> {
         let HoldemAccount {
             sb,
             bb,
@@ -1220,15 +1195,6 @@ impl GameHandler for Holdem {
 
         let btn = 0;
         let next_game_start = 0;
-
-        let player_map: BTreeMap<u64, Player> = init_account
-            .players
-            .iter()
-            .map(|p| {
-                let player = Player::new(p.id, p.balance, p.position, 0);
-                (p.id, player)
-            })
-            .collect();
 
         Ok(Self {
             deck_random_id: 0,
@@ -1241,21 +1207,10 @@ impl GameHandler for Holdem {
             stage: HoldemStage::Init,
             street: Street::Init,
             street_bet: 0,
-            board: Vec::<String>::with_capacity(5),
-            hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
-            bet_map: BTreeMap::<u64, u64>::new(),
-            total_bet_map: BTreeMap::<u64, u64>::new(),
-            prize_map: BTreeMap::<u64, u64>::new(),
-            player_map,
-            player_order: Vec::<u64>::new(),
-            pots: Vec::<Pot>::new(),
-            acting_player: None,
-            winners: Vec::<u64>::new(),
-            display: Vec::<Display>::new(),
+            next_game_start,
             mode: GameMode::Cash,
             table_size: init_account.max_players as _,
-            hand_history: HandHistory::default(),
-            next_game_start,
+            ..Default::default()
         })
     }
 
@@ -1345,13 +1300,8 @@ impl GameHandler for Holdem {
                 self.display.clear();
 
                 for p in players.into_iter() {
-                    let GamePlayer {
-                        id,
-                        position,
-                        balance,
-                    } = p;
-                    let player = Player::init(id, balance, position);
-                    self.player_map.insert(id, player);
+                    let player = Player::init(p.id(), 0, p.position());
+                    self.player_map.insert(p.id(), player);
                 }
 
                 match self.stage {
@@ -1375,6 +1325,18 @@ impl GameHandler for Holdem {
                 Ok(())
             }
 
+            Event::Deposit { deposits } => {
+                for d in deposits.into_iter() {
+                    if let Some(p) = self.player_map.get_mut(&d.id()) {
+                        p.chips += d.balance();
+                        p.status = PlayerStatus::Init;
+                    } else {
+                        return Err(HandleError::InvalidDeposit);
+                    }
+                }
+                Ok(())
+            }
+
             Event::GameStart => {
                 self.internal_start_game(effect)?;
                 Ok(())
@@ -1393,11 +1355,15 @@ impl GameHandler for Holdem {
                     | HoldemStage::Settle
                     | HoldemStage::Runner
                     | HoldemStage::Showdown => {
-                        self.player_map.remove_entry(&player_id);
-                        effect.settle(Settle::eject(player_id))?;
-                        effect.checkpoint();
-                        self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
-                        self.signal_game_end(effect)?;
+                        let removed = self.player_map.remove_entry(&player_id);
+                        if let Some((id, p)) = removed {
+                            effect.settle(id, p.chips)?;
+                            effect.checkpoint();
+                            self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
+                            self.signal_game_end(effect)?;
+                        } else {
+                            return Err(HandleError::InvalidPlayer)?;
+                        }
                     }
 
                     // If current stage is playing, the player will be
@@ -1568,5 +1534,34 @@ impl GameHandler for Holdem {
             // Other events
             _ => Ok(()),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_players() -> BTreeMap<u64, Player> {
+        let mut player_map = BTreeMap::new();
+        player_map.insert(1, Player::new_with_status(1, 0, 0, PlayerStatus::Leave));
+        player_map.insert(2, Player::new_with_status(2, 0, 0, PlayerStatus::Out));
+        player_map.insert(3, Player::new_with_status(3, 100, 0, PlayerStatus::Acting));
+        player_map
+    }
+
+    #[test]
+    fn test_remove_leave_and_out_players() {
+        let mut holdem = Holdem {
+            player_map: setup_players(),
+            ..Default::default()
+        };
+        let removed = holdem.remove_leave_and_out_players();
+
+        assert_eq!(removed.len(), 2);
+        assert!(removed.iter().any(|p| p.id == 1 && p.status == PlayerStatus::Leave));
+        assert!(removed.iter().any(|p| p.id == 2 && p.status == PlayerStatus::Out));
+        assert_eq!(holdem.player_map.len(), 1);
+        assert!(holdem.player_map.contains_key(&3));
     }
 }

@@ -11,3 +11,4 @@ custom_err!(error_custom_event_not_allowed);
 custom_err!(error_invalid_table_id);
 custom_err!(error_invalid_checkpoint_chips);
 custom_err!(error_not_completed);
+custom_err!(error_leave_not_allowed);
