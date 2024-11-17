@@ -23,7 +23,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, InitTableData, MttTablePlayer, MttTableState
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState
 };
 use race_proc_macro::game_handler;
 use std::collections::BTreeMap;
@@ -301,24 +301,13 @@ impl Mtt {
         &self,
         effect: &mut Effect,
         table_id: u8,
-        table: &MttTableState,
+        table: &MttTableState
     ) -> Result<(), HandleError> {
-        let mut players = Vec::new();
-        let (start_sb, start_bb) = self.start_blinds()?;
-        for p in table.players.iter() {
-            players.push(GamePlayer::new(p.id, p.chips, p.table_position as _));
-        }
-        let init_table_data = InitTableData {
-            table_id,
-            start_sb,
-            start_bb,
-        };
         effect.launch_sub_game(
             table_id as _,
             self.subgame_bundle.clone(),
             self.table_size as _,
-            players,
-            init_table_data,
+            table,
         )?;
         Ok(())
     }
@@ -346,6 +335,7 @@ impl Mtt {
                 }
                 let (sb, bb) = self.calc_blinds()?;
                 let table = MttTableState {
+                    table_id,
                     btn: 0,
                     sb,
                     bb,
@@ -361,7 +351,7 @@ impl Mtt {
         Ok(())
     }
 
-    fn apply_chips_change(&mut self, chips_change: Vec<(u64, ChipsChange)>) -> Result<(), HandleError> {
+    fn apply_chips_change(&mut self, chips_change: BTreeMap<u64, ChipsChange>) -> Result<(), HandleError> {
         for (pid, change) in chips_change.into_iter() {
             let rank = self
                 .ranks
@@ -403,6 +393,7 @@ impl Mtt {
         });
     }
 
+    #[allow(unused)]
     fn start_blinds(&self) -> Result<(u64, u64), HandleError> {
         let blind_rule = self
             .blind_info
@@ -444,7 +435,6 @@ impl Mtt {
                         bb,
                         moved_players: Vec::with_capacity(0),
                     },
-                    vec![],
                 )?;
             }
             return Ok(());
@@ -528,18 +518,13 @@ impl Mtt {
                         HoldemBridgeEvent::Relocate {
                             players: vec![player.clone()],
                         },
-                        vec![GamePlayer::new(
-                            player.id,
-                            player.chips,
-                            player.table_position as _,
-                        )],
                     )?;
                 } else {
                     break;
                 }
             }
 
-            effect.bridge_event(table_id as _, HoldemBridgeEvent::CloseTable, vec![])?;
+            effect.bridge_event(table_id as _, HoldemBridgeEvent::CloseTable)?;
         } else if table_id == largest_table_id
             && largest_table_players_count > smallest_table_players_count + 1
         {
@@ -572,10 +557,6 @@ impl Mtt {
                 HoldemBridgeEvent::Relocate {
                     players: players.clone(),
                 },
-                players
-                    .into_iter()
-                    .map(|p| GamePlayer::new(p.id, p.chips, p.table_position as _))
-                    .collect(),
             )?;
 
             effect.bridge_event(
@@ -585,7 +566,6 @@ impl Mtt {
                     bb,
                     moved_players,
                 },
-                vec![],
             )?;
         } else {
             let Some(table) = self.tables.get(&table_id) else {
@@ -602,8 +582,7 @@ impl Mtt {
                         sb,
                         bb,
                         moved_players: Vec::with_capacity(0),
-                    },
-                    vec![],
+                    }
                 )?;
             }
         }

@@ -5,7 +5,7 @@ use race_api::event::BridgeEvent;
 use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
-use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, InitTableData, MttTablePlayer, MttTableState};
+use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState};
 use race_proc_macro::game_handler;
 
 pub type PlayerId = u64;
@@ -21,17 +21,17 @@ pub struct MttTable {
 impl GameHandler for MttTable {
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
 
-        let InitTableData {
-            table_id,
-            start_sb,
-            start_bb,
-        } = init_account.data()?;
+        let MttTableState { sb, bb, players, table_id, btn, .. } = init_account.data()?;
+
+        let player_map = players.into_iter().map(|p| (p.id, Player::new(p.id, p.chips, p.table_position as _, 0))).collect();
 
         let holdem = Holdem {
-            sb: start_sb,
-            bb: start_bb,
+            btn,
+            sb,
+            bb,
             table_size: init_account.max_players as _,
             mode: GameMode::Mtt,
+            player_map,
             ..Default::default()
         };
 
@@ -47,11 +47,10 @@ impl GameHandler for MttTable {
             Event::Bridge {
                 dest,
                 raw,
-                join_players,
             } => {
                 if dest == self.table_id as _ {
                     let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
-                    self.handle_bridge_event(effect, bridge_event, join_players)?;
+                    self.handle_bridge_event(effect, bridge_event)?;
                 }
             }
             _ => {
@@ -65,6 +64,7 @@ impl GameHandler for MttTable {
                         .map(|p| MttTablePlayer::new(p.id, p.chips, p.position as _))
                         .collect();
                     let mtt_table_state = MttTableState {
+                        table_id: self.table_id,
                         btn: self.holdem.btn,
                         hand_id: self.hand_id,
                         sb: self.holdem.sb,
@@ -86,7 +86,7 @@ impl GameHandler for MttTable {
                         table_id: self.table_id,
                     };
                     effect.checkpoint();
-                    effect.bridge_event(0, evt, vec![])?;
+                    effect.bridge_event(0, evt)?;
                 }
             }
         };
@@ -100,7 +100,6 @@ impl MttTable {
         &mut self,
         effect: &mut Effect,
         event: HoldemBridgeEvent,
-        _join_players: Vec<GamePlayer>,
     ) -> HandleResult<()> {
         match event {
             HoldemBridgeEvent::StartGame {
