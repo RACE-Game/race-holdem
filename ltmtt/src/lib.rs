@@ -1,92 +1,53 @@
+mod account_data;
+use crate::account_data::LtMttAccountData;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
-use race_api::prelude::*;
-use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState};
-use std::{collections::BTreeMap, f32::consts::E};
+use race_api::{prelude::*, types::EntryLock};
 
-type PlayerId = u64;
+type Millis = u64;
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum LtMttStage {
     #[default]
     Init,
-    Playing,
+    EntryOpened,
     EntryClosed,
-    Completed,
+    Settled,
 }
-
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
-pub struct BlindRuleItem {
-    sb_x: u16,
-    bb_x: u16,
-}
-
-#[derive(BorshSerialize, Default, BorshDeserialize, Debug, PartialEq, Eq)]
-pub struct BlindInfo {
-    blind_base: u64,
-    blind_interval: u64,
-    blind_rules: Vec<BlindRuleItem>,
-}
-
-#[derive(Default, BorshSerialize, BorshDeserialize)]
-pub struct LtMttAccountData {
-    start_time: u64,
-    ticket: u64,
-    table_size: u8,
-    start_chips: u64,
-    // blind_info: BlindInfo,
-    prize_rules: Vec<u8>,
-    theme: Option<String>, // optional NFT theme
-    subgame_bundle: String,
-}
-#[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
-pub struct Player {
-    id: PlayerId,
-    chips: u64,
-}
-
-// impl Ord for Player {
-//     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-//         self.chips.cmp(&other.chips).reverse()
-//     }
-// }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
 pub struct LtMtt {
-    start_time: u64,
+    entry_start_time: Millis,
+    entry_close_time: Millis,
+    settle_time: Millis,
     stage: LtMttStage,
-    ticket: u64,
     table_size: u8,
-    start_chips: u64,
-    prize_rules: Vec<u8>,
-    theme: Option<String>,
-    subgame_bundle: String,
-    tables: BTreeMap<u8, MttTableState>,
-    table_assigns: BTreeMap<PlayerId, u8>,
-    rankings: Vec<Player>,
+    // start_chips: u64,
+    // rake: u64,
+    // blind_info: BlindInfo,
+    // prize_rules: Vec<u8>,
+    // theme: Option<String>,
+    // subgame_bundle: String,
+    // tables: BTreeMap<u8, MttTableState>,
+    // table_assigns: BTreeMap<PlayerId, u8>,
+    // rankings: Vec<Player>,
 }
+
 impl GameHandler for LtMtt {
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
         let LtMttAccountData {
-            start_time,
-            ticket,
+            entry_start_time,
+            entry_close_time,
+            settle_time,
             table_size,
-            start_chips,
-            // mut blind_info,
-            prize_rules,
-            theme,
-            subgame_bundle,
         } = init_account.data()?;
 
         let state = Self {
-            start_time,
-            ticket,
+            entry_start_time,
+            entry_close_time,
+            settle_time,
             table_size,
-            start_chips,
-            // blind_info,
-            prize_rules,
-            theme,
-            subgame_bundle,
             ..Default::default()
         };
 
@@ -95,46 +56,105 @@ impl GameHandler for LtMtt {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
-            Event::Ready => {
-                self.stage = LtMttStage::EntryClosed;
-            }
-
-            Event::Join { players } => {
-                self.stage = LtMttStage::Playing;
-                for player in players {
-                    self.rankings.push(Player {
-                        id: player.id(),
-                        chips: self.start_chips,
-                    });
-                }
-            }
-
-            _ => {}
+            Event::Ready => self.send_wait_timeout(effect)?,
+            Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
+            _ => (),
         }
-        effect.wait_timeout(5000);
+
         Ok(())
     }
 }
 
 impl LtMtt {
-    // implement some crud methods here
+    fn send_wait_timeout(&self, effect: &mut Effect) -> HandleResult<()> {
+        let timeout = match self.stage {
+            LtMttStage::Init => self.entry_start_time - effect.timestamp(),
+            _ => 0,
+        };
+
+        effect.wait_timeout(timeout);
+        Ok(())
+    }
+
+    fn on_waiting_timeout(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        match self.stage {
+            LtMttStage::Init => {
+                self.stage = LtMttStage::EntryOpened;
+            }
+
+            LtMttStage::EntryOpened => {
+                self.stage = LtMttStage::EntryClosed;
+                effect.set_entry_lock(EntryLock::Closed);
+            }
+
+            LtMttStage::EntryClosed => {
+                self.stage = LtMttStage::Settled;
+                self.settle(effect)?;
+            }
+
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        effect.settle(0, 0)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use std::time::SystemTime;
+    // use super::*;
+    // use race_test::prelude::*;
 
-    #[test]
-    fn test_join() -> anyhow::Result<()> {
-        let mut state = LtMtt::default();
-        let mut effect = Effect::default();
-        let event = Event::Join {
-            players: vec![GamePlayer::new(1, 100)],
-        };
-        state.handle_event(&mut effect, event)?;
-        assert_eq!(state.rankings.len(), 1);
-        assert_eq!(effect.wait_timeout, Some(5000));
-        
-        Ok(())
-    }
+    // #[test]
+    // fn test_join() -> anyhow::Result<()> {
+    //     let mut state = LtMtt::default();
+    //     let mut effect = Effect::default();
+    //     let event = Event::Join {
+    //         players: vec![GamePlayer::new(1, 100)],
+    //     };
+    //     state.handle_event(&mut effect, event)?;
+    //     assert_eq!(state.rankings.len(), 1);
+    //     assert_eq!(effect.wait_timeout, Some(5000));
+
+    //     Ok(())
+    // }
+
+    // #[test]
+    // fn test_with_account() -> anyhow::Result<()> {
+    //     let mut transactor = TestClient::transactor("server");
+    //     let mut alice = TestClient::player("Alice");
+    //     // let mut bob = TestClient::player("Bob");
+    //     // alice.custom_event(custom_event::Game::Ready);
+    //     let ts = SystemTime::now()
+    //         .duration_since(SystemTime::UNIX_EPOCH)?
+    //         .as_millis() as u64;
+
+    //     let (mut context, _) = TestContextBuilder::default()
+    //         .set_transactor(&mut transactor)
+    //         .with_data(LtMttAccountData {
+    //             start_time: ts,
+    //             end_time: ts + 60 * 60 * 1000,
+    //             table_size: 2,
+    //             start_chips: 100,
+    //             prize_rules: vec![100, 50, 30],
+    //             theme: None,
+    //             subgame_bundle: "subgame".to_string(),
+    //         })
+    //         .with_max_players(10)
+    //         .build_with_init_state::<LtMtt>()?;
+
+    //     let event = context.join(&mut alice, 100);
+    //     context.handle_event(&event)?;
+
+    //     {
+    //         let state = context.state();
+    //         assert_eq!(state.rankings.len(), 1);
+    //     }
+
+    //     Ok(())
+    // }
 }
