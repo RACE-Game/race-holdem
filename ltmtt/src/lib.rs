@@ -62,8 +62,9 @@ impl GameHandler for LtMtt {
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
             Event::Ready => self.on_ready(effect)?,
+            Event::GameStart => (),
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
-            Event::Join { players } => self.on_join(effect, players)?,
+            Event::Join { players } => self.on_join(players)?,
             _ => (),
         }
 
@@ -79,6 +80,7 @@ impl LtMtt {
         {
             effect.set_entry_lock(EntryLock::Closed);
         } else {
+            effect.start_game();
             effect.wait_timeout(self.entry_start_time - effect.timestamp());
         }
 
@@ -108,13 +110,13 @@ impl LtMtt {
         Ok(())
     }
 
-    fn on_join(&mut self, effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
+    fn on_join(&mut self, new_players: Vec<GamePlayer>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for player in new_players {
                 self.rankings.push(LtMttPlayer {
                     id: player.id(),
-                    chips: self.start_chips,
                     position: player.position(),
+                    chips: self.start_chips,
                 });
             }
         }
