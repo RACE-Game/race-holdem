@@ -3,7 +3,7 @@ use crate::account_data::LtMttAccountData;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
-use race_api::{prelude::*, types::EntryLock};
+use race_api::{effect, prelude::*, types::EntryLock};
 
 type Millis = u64;
 
@@ -56,7 +56,7 @@ impl GameHandler for LtMtt {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
-            Event::Ready => self.send_wait_timeout(effect)?,
+            Event::Ready => self.on_ready(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
             _ => (),
         }
@@ -66,13 +66,16 @@ impl GameHandler for LtMtt {
 }
 
 impl LtMtt {
-    fn send_wait_timeout(&self, effect: &mut Effect) -> HandleResult<()> {
-        let timeout = match self.stage {
-            LtMttStage::Init => self.entry_start_time - effect.timestamp(),
-            _ => 0,
-        };
+    fn on_ready(&self, effect: &mut Effect) -> HandleResult<()> {
+        if effect.timestamp() > self.entry_start_time
+            || self.entry_start_time > self.entry_close_time
+            || self.entry_close_time > self.settle_time
+        {
+            effect.set_entry_lock(EntryLock::Closed);
+        } else {
+            effect.wait_timeout(self.entry_start_time - effect.timestamp());
+        }
 
-        effect.wait_timeout(timeout);
         Ok(())
     }
 
@@ -80,11 +83,13 @@ impl LtMtt {
         match self.stage {
             LtMttStage::Init => {
                 self.stage = LtMttStage::EntryOpened;
+                effect.wait_timeout(self.entry_close_time - effect.timestamp());
             }
 
             LtMttStage::EntryOpened => {
                 self.stage = LtMttStage::EntryClosed;
                 effect.set_entry_lock(EntryLock::Closed);
+                effect.wait_timeout(self.settle_time - effect.timestamp());
             }
 
             LtMttStage::EntryClosed => {
