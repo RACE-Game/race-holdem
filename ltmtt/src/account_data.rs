@@ -8,7 +8,7 @@ pub struct LtMttAccountData {
     pub entry_close_time: Millis,
     pub settle_time: Millis,
     pub table_size: u8,
-    // start_chips: u64,
+    pub start_chips: u64,
     // blind_info: BlindInfo,
     // prize_rules: Vec<u8>,
     // theme: Option<String>, // optional NFT theme
