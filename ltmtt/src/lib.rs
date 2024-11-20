@@ -1,13 +1,16 @@
 mod account_data;
+mod player;
+
 use crate::account_data::LtMttAccountData;
+use crate::player::LtMttPlayer;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
-use race_api::{effect, prelude::*, types::EntryLock};
+use race_api::{prelude::*, types::EntryLock};
 
 type Millis = u64;
 
-#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
+#[derive(Default, PartialEq, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum LtMttStage {
     #[default]
     Init,
@@ -23,7 +26,8 @@ pub struct LtMtt {
     settle_time: Millis,
     stage: LtMttStage,
     table_size: u8,
-    // start_chips: u64,
+    start_chips: u64,
+    rankings: Vec<LtMttPlayer>,
     // rake: u64,
     // blind_info: BlindInfo,
     // prize_rules: Vec<u8>,
@@ -31,7 +35,6 @@ pub struct LtMtt {
     // subgame_bundle: String,
     // tables: BTreeMap<u8, MttTableState>,
     // table_assigns: BTreeMap<PlayerId, u8>,
-    // rankings: Vec<Player>,
 }
 
 impl GameHandler for LtMtt {
@@ -41,6 +44,7 @@ impl GameHandler for LtMtt {
             entry_close_time,
             settle_time,
             table_size,
+            start_chips,
         } = init_account.data()?;
 
         let state = Self {
@@ -48,6 +52,7 @@ impl GameHandler for LtMtt {
             entry_close_time,
             settle_time,
             table_size,
+            start_chips,
             ..Default::default()
         };
 
@@ -58,6 +63,7 @@ impl GameHandler for LtMtt {
         match event {
             Event::Ready => self.on_ready(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
+            Event::Join { players } => self.on_join(effect, players)?,
             _ => (),
         }
 
@@ -99,6 +105,20 @@ impl LtMtt {
 
             _ => {}
         }
+        Ok(())
+    }
+
+    fn on_join(&mut self, effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
+        if self.stage == LtMttStage::EntryOpened {
+            for player in new_players {
+                self.rankings.push(LtMttPlayer {
+                    id: player.id(),
+                    chips: self.start_chips,
+                    position: player.position(),
+                });
+            }
+        }
+
         Ok(())
     }
 
