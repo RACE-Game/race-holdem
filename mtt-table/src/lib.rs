@@ -45,10 +45,10 @@ impl GameHandler for MttTable {
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
             Event::Bridge {
-                dest,
+                dest_game_id,
                 raw,
             } => {
-                if dest == self.table_id as _ {
+                if dest_game_id == self.table_id as _ {
                     let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
                     self.handle_bridge_event(effect, bridge_event)?;
                 }
@@ -110,8 +110,7 @@ impl MttTable {
                 let timeout = self
                     .holdem
                     .next_game_start
-                    .checked_sub(effect.timestamp())
-                    .unwrap_or(0);
+                    .saturating_sub(effect.timestamp());
                 self.holdem.reset_state()?;
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
@@ -137,8 +136,7 @@ impl MttTable {
                     let timeout = self
                         .holdem
                         .next_game_start
-                        .checked_sub(effect.timestamp())
-                        .unwrap_or(0);
+                        .saturating_sub(effect.timestamp());
                     effect.wait_timeout(timeout);
                 }
             }
@@ -157,132 +155,29 @@ mod tests {
 
     use super::*;
 
+
     #[test]
-    fn test_init_game() -> anyhow::Result<()> {
-        let st = vec![1, 50, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0];
+    fn a() -> anyhow::Result<()> {
+        let effect = vec![0,0,0,0,0,133,223,135,73,147,1,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+        let event = vec![19,1,0,0,0,0,0,0,0,21,0,0,0,0,100,0,0,0,0,0,0,0,200,0,0,0,0,0,0,0,0,0,0,0];
 
-        let st = InitTableData::try_from_slice(&st)?;
+        let mut effect = Effect::try_from_slice(&effect)?;
+        let event = Event::try_from_slice(&event)?;
 
-        println!("{:?}", st);
+        println!("1");
 
+        let st = effect.handler_state.clone().unwrap();
+        println!("effect: {:?}", effect);
+
+        println!("2");
+        println!("st: {:?}", st);
+
+        let mut st = MttTable::try_from_slice(&st)?;
+
+        println!("3");
+        st.handle_event(&mut effect, event)?;
+
+        println!("4");
         Ok(())
     }
-
-    // use std::collections::HashMap;
-
-    // use super::*;
-    // use race_holdem_base::essential::{GameEvent, Street};
-    // use race_test::prelude::*;
-
-    // #[test]
-    // fn test_init_state() -> anyhow::Result<()> {
-    //     let mut effect = Effect::default();
-    //     let init_account = InitAccount {
-    //         data: InitTableData {
-    //             start_sb: 10,
-    //             start_bb: 20,
-    //             table_id: 1,
-    //         }
-    //             .try_to_vec()?,
-    //         ..Default::default()
-    //     };
-
-    //     let mtt_table = MttTable::init_state(&mut effect, init_account)?;
-
-    //     assert_eq!(mtt_table.table_id, 1);
-    //     // assert_eq!(
-    //     //     mtt_table.player_lookup.get(&1).map(|p| p.id),
-    //     //     Some(&0)
-    //     // );
-    //     assert_eq!(effect.start_game, true);
-
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn test_checkpoint() -> anyhow::Result<()> {
-    //     let data = [
-    //         1, 0, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0,
-    //         0, 2, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 1, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0,
-    //     ];
-    //     let checkpoint = MttTableCheckpoint::try_from_slice(&data);
-    //     println!("{:?}", checkpoint);
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn settle_should_emit_game_result() -> anyhow::Result<()> {
-    //     let mut alice = TestClient::player("alice");
-    //     let mut bob = TestClient::player("bob");
-    //     let mut tx = TestClient::transactor("tx");
-    //     let acc_builder = TestGameAccountBuilder::default()
-    //         .add_player(&mut alice, 10000)
-    //         .add_player(&mut bob, 10000)
-    //         .set_transactor(&mut tx);
-
-    //     let acc = acc_builder
-    //         .with_data(InitTableData {
-    //             table_id: 1,
-    //             table_size: 6,
-    //         })
-    //         .build();
-    //     let mut ctx = GameContext::try_new(&acc)?;
-    //     let mut hdlr = TestHandler::<MttTable>::init_state(&mut ctx, &acc)?;
-    //     hdlr.handle_dispatch_until_no_events(&mut ctx, vec![&mut tx])?;
-    //     {
-    //         let state = hdlr.get_state();
-    //         assert_eq!(
-    //             state.holdem.acting_player.as_ref().map(|a| a.id),
-    //             Some(bob.id())
-    //         );
-    //         ctx.add_revealed_random(
-    //             state.holdem.deck_random_id,
-    //             HashMap::from([
-    //                 (0, "ha".to_string()),
-    //                 (1, "hk".to_string()),
-    //                 (2, "h5".to_string()),
-    //                 (3, "h6".to_string()),
-    //                 (4, "h2".to_string()),
-    //                 (5, "h4".to_string()),
-    //                 (6, "h3".to_string()),
-    //                 (7, "s3".to_string()),
-    //                 (8, "s5".to_string()),
-    //             ]),
-    //         )?;
-    //     }
-
-    //     let evts = [
-    //         bob.custom_event(GameEvent::Raise(10000)), // BTN/SB
-    //         alice.custom_event(GameEvent::Call),       // BB
-    //     ];
-
-    //     for evt in evts {
-    //         hdlr.handle_until_no_events(&mut ctx, &evt, vec![&mut tx])?;
-    //     }
-
-    //     {
-    //         let state = hdlr.get_state();
-    //         assert_eq!(state.holdem.street, Street::Showdown);
-    //         // assert_eq!(
-    //         //     ctx.get_bridge_events::<HoldemBridgeEvent>()?,
-    //         //     vec![HoldemBridgeEvent::GameResult {
-    //         //         table_id: 1,
-    //         //         settles: vec![Settle::sub(alice.id(), 10000), Settle::add(bob.id(), 10000)],
-    //         //         checkpoint: MttTableCheckpoint {
-    //         //             btn: 1,
-    //         //             players: vec![MttTablePlayer::new(1, 20000, 1)]
-    //         //         }
-    //         //     }]
-    //         // );
-    //     }
-
-    //     Ok(())
-    // }
 }

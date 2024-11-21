@@ -1,5 +1,6 @@
 //! # Holdem MTT
 //!
+//!
 //! # Stages
 //!
 //! There are three stages in the whole game progress:
@@ -71,20 +72,20 @@ pub struct PlayerRankCheckpoint {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindRuleItem {
-    sb_x: u16,
-    bb_x: u16,
+    sb_x: u32,
+    bb_x: u32,
 }
 
 impl BlindRuleItem {
-    fn new(sb_x: u16, bb_x: u16) -> Self {
+    fn new(sb_x: u32, bb_x: u32) -> Self {
         Self { sb_x, bb_x }
     }
 }
 
 fn default_blind_rules() -> Vec<BlindRuleItem> {
-    [(1, 2), (2, 4), (4, 8), (8, 16), (16, 32), (32, 64)]
+    [5, 10, 15, 20, 30, 40, 60, 80, 100, 120, 160, 200, 240, 280, 360, 440, 520, 600, 750, 900, 1050, 1200, 1500, 1800, 2100, 2400, 3000, 3600, 4200, 5000, 5800, 6600, 7200, 8000, 9000, 10000, 11000, 12000, 14000, 16000, 18000, 20000, 24000, 28000, 32000, 36000, 40000, 44000, 50000, 56000, 62000, 68000, 80000, 100000]
         .into_iter()
-        .map(|(sb, bb)| BlindRuleItem::new(sb, bb))
+        .map(|sb| BlindRuleItem::new(sb, 2 * sb))
         .collect()
 }
 
@@ -151,6 +152,7 @@ pub struct Mtt {
     theme: Option<String>,
     subgame_bundle: String,
     winners: Vec<MttWinner>,
+    launched_table_ids: Vec<u8>,
 }
 
 impl GameHandler for Mtt {
@@ -196,11 +198,23 @@ impl GameHandler for Mtt {
             }
 
             Event::Ready => {
-                if self.start_time > effect.timestamp {
-                    // Schedule the startup
-                    effect.wait_timeout(self.start_time - effect.timestamp);
-                } else {
-                    effect.wait_timeout(0);
+                match self.stage {
+                    // Schedule game start or start directly
+                    MttStage::Init => {
+                        if self.start_time > effect.timestamp {
+                            effect.wait_timeout(self.start_time - effect.timestamp);
+                        } else {
+                            effect.start_game();
+                        }
+                    }
+                    MttStage::Playing => {
+                        for (id, table) in self.tables.iter() {
+                            if !self.launched_table_ids.contains(&id) {
+                                self.launch_table(effect, &table)?;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -259,6 +273,11 @@ impl GameHandler for Mtt {
                 }
             }
 
+            Event::SubGameReady { game_id } => {
+                self.launched_table_ids.push(game_id as u8);
+                effect.checkpoint();
+            }
+
             Event::WaitingTimeout => match self.stage {
                 // Scheduled game start
                 MttStage::Init => {
@@ -269,8 +288,11 @@ impl GameHandler for Mtt {
                         effect.start_game();
                     }
                 }
+
                 MttStage::Playing => {}
-                _ => (),
+
+                MttStage::Completed => {
+                }
             },
             _ => (),
         }
@@ -300,11 +322,10 @@ impl Mtt {
     fn launch_table(
         &self,
         effect: &mut Effect,
-        table_id: u8,
         table: &MttTableState
     ) -> Result<(), HandleError> {
         effect.launch_sub_game(
-            table_id as _,
+            table.table_id as _,
             self.subgame_bundle.clone(),
             self.table_size as _,
             table,
@@ -314,8 +335,8 @@ impl Mtt {
 
     fn create_tables(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         if !self.tables.is_empty() {
-            for (id, table) in self.tables.iter() {
-                self.launch_table(effect, *id, table)?;
+            for table in self.tables.values() {
+                self.launch_table(effect, table)?;
             }
         } else {
             let num_of_players = self.ranks.len();
@@ -343,7 +364,7 @@ impl Mtt {
                     next_game_start: 0,
                     hand_id: 0,
                 };
-                self.launch_table(effect, table_id, &table)?;
+                self.launch_table(effect, &table)?;
                 self.tables.insert(table_id, table);
             }
         }
@@ -603,14 +624,15 @@ impl Mtt {
         // Get eligible ids for prizes
         for (i, rank) in self.ranks.iter().enumerate() {
             let id = rank.id;
-            let rule = self.prize_rules.get(i).unwrap_or(&0);
-            let prize: u64 = prize_share * *rule as u64;
-            self.winners.push(MttWinner { player_id: id, prize });
-            // Assign the slot to winner
-            effect.settle(id, prize)?;
+            if let Some(rule) = self.prize_rules.get(i) {
+                let prize: u64 = prize_share * *rule as u64;
+                self.winners.push(MttWinner { player_id: id, prize });
+                effect.settle(id, prize)?;
+            }
         }
 
         self.stage = MttStage::Completed;
+        effect.reset();
         Ok(())
     }
 }
