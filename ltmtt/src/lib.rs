@@ -26,8 +26,10 @@ pub struct LtMtt {
     settle_time: Millis,
     stage: LtMttStage,
     table_size: u8,
+    ticket: u64,
     start_chips: u64,
     rankings: Vec<LtMttPlayer>,
+    total_prize: u64,
     // rake: u64,
     // blind_info: BlindInfo,
     // prize_rules: Vec<u8>,
@@ -44,6 +46,7 @@ impl GameHandler for LtMtt {
             entry_close_time,
             settle_time,
             table_size,
+            ticket,
             start_chips,
         } = init_account.data()?;
 
@@ -52,6 +55,7 @@ impl GameHandler for LtMtt {
             entry_close_time,
             settle_time,
             table_size,
+            ticket,
             start_chips,
             ..Default::default()
         };
@@ -118,6 +122,8 @@ impl LtMtt {
                     position: player.position(),
                     chips: self.start_chips,
                 });
+
+                self.total_prize += self.ticket;
             }
         }
 
