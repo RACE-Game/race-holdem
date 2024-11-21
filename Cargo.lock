@@ -706,6 +706,7 @@ dependencies = [
  "rs_merkle",
  "sha256",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
