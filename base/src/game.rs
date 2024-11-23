@@ -997,7 +997,9 @@ impl Holdem {
                 if self.street_bet != 0 {
                     return Err(errors::player_cant_bet());
                 }
-                if self.bb > amount {
+
+                // When bet amount is less than 1BB, only allin is allowed.
+                if self.bb > amount && player.chips != amount{
                     return Err(errors::bet_amonut_is_too_small());
                 }
 

@@ -132,7 +132,7 @@ impl MttTable {
                         Player::new_with_status(id, chips, table_position as _, PlayerStatus::Init),
                     );
                 }
-                if self.holdem.stage == HoldemStage::Init {
+                if matches!(self.holdem.stage, HoldemStage::Init | HoldemStage::Settle | HoldemStage::Runner) {
                     let timeout = self
                         .holdem
                         .next_game_start
