@@ -1144,6 +1144,10 @@ impl Holdem {
         Ok(())
     }
 
+    pub fn position_occupied(&self, position: usize) -> bool {
+        self.player_map.iter().find(|(_, ref p)| p.position == position).is_some()
+    }
+
     pub fn internal_add_players(
         &mut self,
         add_players: Vec<InternalPlayerJoin>,
