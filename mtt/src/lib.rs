@@ -87,9 +87,9 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
         10000, 11000, 12000, 14000, 16000, 18000, 20000, 24000, 28000, 32000, 36000, 40000, 44000,
         50000, 56000, 62000, 68000, 80000, 100000,
     ]
-        .into_iter()
-        .map(|sb| BlindRuleItem::new(sb, 2 * sb))
-        .collect()
+    .into_iter()
+    .map(|sb| BlindRuleItem::new(sb, 2 * sb))
+    .collect()
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
@@ -481,13 +481,16 @@ impl Mtt {
 
         let mut relocates = BTreeMap::<usize, Vec<MttTablePlayer>>::default();
         for target_table_id in target_table_ids.iter().cycle() {
-            let target_table = self.tables.get(target_table_id).ok_or(errors::error_invalid_index_usage())?;
+            let target_table = self
+                .tables
+                .get(target_table_id)
+                .ok_or(errors::error_invalid_index_usage())?;
 
             if table_to_close.players.is_empty() {
                 break;
             }
 
-            if target_table.players.len() < self.table_size as _{
+            if target_table.players.len() < self.table_size as _ {
                 if let Some(mut player) = table_to_close.players.pop() {
                     let table_ref = self
                         .tables
@@ -501,7 +504,7 @@ impl Mtt {
                     match relocates.entry(*target_table_id as usize) {
                         Entry::Vacant(e) => {
                             e.insert(vec![player.clone()]);
-                        },
+                        }
                         Entry::Occupied(mut e) => {
                             e.get_mut().push(player.clone());
                         }
@@ -515,12 +518,7 @@ impl Mtt {
         effect.bridge_event(close_table_id as _, HoldemBridgeEvent::CloseTable)?;
 
         for (table_id, players) in relocates {
-            effect.bridge_event(
-                table_id,
-                HoldemBridgeEvent::Relocate {
-                    players,
-                },
-            )?;
+            effect.bridge_event(table_id, HoldemBridgeEvent::Relocate { players })?;
         }
         Ok(())
     }
@@ -591,7 +589,6 @@ impl Mtt {
     ///
     /// Do nothing when there's only one table.
     fn update_tables(&mut self, effect: &mut Effect, table_id: u8) -> Result<(), HandleError> {
-
         // No-op for final table
         if self.tables.len() == 1 {
             let Some((_, final_table)) = self.tables.first_key_value() else {
@@ -648,7 +645,6 @@ impl Mtt {
                 smallest_table_id,
                 (largest_table_players_count - smallest_table_players_count) / 2,
             )?;
-
         } else {
             let Some(table) = self.tables.get(&table_id) else {
                 return Err(errors::error_invalid_table_id());
@@ -709,13 +705,11 @@ impl Mtt {
 #[cfg(test)]
 mod tests {
 
-    use race_api::effect::EmitBridgeEvent;
-
     use super::*;
 
     // Create Mtt with a number of players. If `with_tables` is
     // true, also create MttTable states.
-    pub fn create_mtt_with_players(player_count: usize, table_size: u8, with_tables: bool) -> Mtt {
+    pub fn create_mtt_with_players(player_nums_per_table: &[usize], table_size: u8) -> Mtt {
         let start_chips = 10000;
         let mut mtt = Mtt {
             table_size,
@@ -726,46 +720,43 @@ mod tests {
         let mut rank_id = 1;
         let mut table_id = 0;
 
-        for i in 0..player_count {
-            mtt.ranks.push(PlayerRank {
-                id: rank_id,
-                chips: start_chips,
-                status: PlayerRankStatus::Alive,
-                position: rank_id as u16 % table_size as u16,
-            });
+        for player_num in player_nums_per_table {
+            table_id += 1;
+            let table_state = MttTableState {
+                table_id,
+                btn: 0,
+                sb: DEFAULT_SB,
+                bb: DEFAULT_BB,
+                players: vec![],
+                ..Default::default()
+            };
 
-            if with_tables {
-                let table_state = if i % (table_size as usize) == 0 {
-                    table_id += 1;
-                    let table_state = MttTableState {
-                        table_id,
-                        btn: 0,
-                        sb: 100,
-                        bb: 200,
-                        players: vec![],
-                        ..Default::default()
-                    };
-                    mtt.tables.insert(table_id, table_state);
-                    let table_state = mtt.tables.get_mut(&table_id).unwrap();
-                    table_state
-                } else {
-                    mtt.tables.get_mut(&table_id).unwrap()
-                };
-                let player = MttTablePlayer::new(rank_id, start_chips, 0);
+            mtt.tables.insert(table_id, table_state);
+            let table_state = mtt.tables.get_mut(&table_id).unwrap();
+
+            for i in 0..*player_num {
+                mtt.ranks.push(PlayerRank {
+                    id: rank_id,
+                    chips: start_chips,
+                    status: PlayerRankStatus::Alive,
+                    position: rank_id as u16 % table_size as u16,
+                });
+
+                let player = MttTablePlayer::new(rank_id, start_chips, i);
                 table_state.players.push(player);
                 mtt.table_assigns.insert(rank_id, table_id);
+                rank_id += 1;
             }
-
-            rank_id += 1;
         }
+
         mtt
     }
 
     #[test]
-    fn test_create_mtt_with_players() {
+    fn create_mtt_with_15_players_in_3_tables() {
         let player_count = 15;
         let table_size = 6;
-        let mtt = create_mtt_with_players(player_count, table_size, true);
+        let mtt = create_mtt_with_players(&[6, 6, 3], table_size);
         assert_eq!(mtt.ranks.len(), player_count);
         assert_eq!(mtt.tables.len(), 3);
         let first_table = mtt.tables.values().next().unwrap();
@@ -775,16 +766,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_mtt_without_tables() {
-        let player_count = 10;
-        let table_size = 6;
-        let mtt = create_mtt_with_players(player_count, table_size, false);
-        assert_eq!(mtt.ranks.len(), player_count);
-        assert_eq!(mtt.tables.len(), 0);
-    }
-
-    #[test]
-    fn test_ready_event_in_init_stage() {
+    fn test_ready_event_in_init_stage_dispatch_wait_timeout() {
         let mut mtt = Mtt::default();
         let mut effect = Effect::default();
         mtt.stage = MttStage::Init;
@@ -797,8 +779,8 @@ mod tests {
     }
 
     #[test]
-    fn test_ready_event_in_playing_stage_without_launch() {
-        let mut mtt = create_mtt_with_players(15, 6, true);
+    fn test_ready_event_in_playing_stage_launch_sub_games() {
+        let mut mtt = create_mtt_with_players(&[6, 6, 2], 6);
         let mut effect = Effect::default();
         mtt.stage = MttStage::Playing;
         mtt.timestamp = 0;
@@ -811,6 +793,9 @@ mod tests {
     // ----------------------
     // Update table tests
     // ----------------------
+
+    const DEFAULT_SB: u64 = 50;
+    const DEFAULT_BB: u64 = 100;
 
     #[test]
     fn test_get_tables_with_least_most_players() {
@@ -902,9 +887,9 @@ mod tests {
     }
 
     #[test]
-    fn test_game_result_from_table_with_1_player() {
+    fn test_game_result_given_2_tables_and_current_table_has_1_player_do_dispatch_nothing() {
         // Create three tables with number of players: 3, 3, 2
-        let mut mtt = create_mtt_with_players(8, 3, true);
+        let mut mtt = create_mtt_with_players(&[3, 3, 2], 3);
         let mut effect = Effect::default();
 
         // Player 7 lost to player 8, thus there's only one player on the table
@@ -925,6 +910,7 @@ mod tests {
         };
         let game_result_event = Event::Bridge {
             dest_game_id: 0, // the table with two players
+            from_game_id: 3,
             raw: borsh::to_vec(&game_result).unwrap(),
         };
 
@@ -936,9 +922,45 @@ mod tests {
     }
 
     #[test]
-    fn test_game_result_with_table_with_1_player() {
+    fn test_game_result_given_3_tables_and_current_table_has_1_player_do_dispatch_nothing() {
+        // Create three tables with number of players: 3, 3, 2
+        let mut mtt = create_mtt_with_players(&[3, 2], 3);
+        let mut effect = Effect::default();
+
+        // Player 7 lost to player 8, thus there's only one player on the table
+        let game_result = HoldemBridgeEvent::GameResult {
+            hand_id: 1,
+            table_id: 2,
+            chips_change: BTreeMap::from([
+                (4, ChipsChange::Sub(10000)),
+                (5, ChipsChange::Add(10000)),
+            ]),
+            table: MttTableState {
+                hand_id: 1,
+                table_id: 2,
+                players: vec![MttTablePlayer::new(8, 20000, 1)],
+                next_game_start: 0,
+                ..Default::default()
+            },
+        };
+        let game_result_event = Event::Bridge {
+            dest_game_id: 0, // the table with two players
+            from_game_id: 2,
+            raw: borsh::to_vec(&game_result).unwrap(),
+        };
+
+        mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+        assert_eq!(mtt.get_rank(4).unwrap().chips, 0);
+        assert_eq!(mtt.get_rank(5).unwrap().chips, 20000);
+        assert_eq!(effect.bridge_events, vec![]);
+    }
+
+    #[test]
+    fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispatch_relocate_and_start_game(
+    ) {
         // Create three tables with number of players: 3, 3, 1
-        let mut mtt = create_mtt_with_players(7, 3, true);
+        let mut mtt = create_mtt_with_players(&[3, 3, 1], 3);
         let mut effect = Effect::default();
 
         // Whatever happened on current table should trigger the balancing
@@ -960,6 +982,7 @@ mod tests {
 
         let game_result_event = Event::Bridge {
             dest_game_id: 0,
+            from_game_id: 2,
             raw: borsh::to_vec(&game_result).unwrap(),
         };
 
@@ -969,32 +992,30 @@ mod tests {
         assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
         assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 2);
         assert_eq!(
-            effect.bridge_events,
+            effect.list_bridge_events().unwrap(),
             vec![
-                EmitBridgeEvent::try_new(
+                (
                     3,
                     HoldemBridgeEvent::Relocate {
                         players: vec![MttTablePlayer::new(4, 10000, 1),],
                     },
-                )
-                .unwrap(),
-                EmitBridgeEvent::try_new(
+                ),
+                (
                     2,
                     HoldemBridgeEvent::StartGame {
-                        sb: 50,
-                        bb: 100,
+                        sb: DEFAULT_SB,
+                        bb: DEFAULT_BB,
                         moved_players: vec![4],
                     },
                 )
-                .unwrap(),
             ]
         );
     }
 
     #[test]
-    fn test_game_result_with_table_to_close() {
+    fn test_game_result_given_3_tables_do_close_table() {
         // Create three tables with number of players: 3, 3, 1
-        let mut mtt = create_mtt_with_players(7, 3, true);
+        let mut mtt = create_mtt_with_players(&[3, 3, 1], 3);
         let mut effect = Effect::default();
 
         // Eliminate one player on table 1
@@ -1018,6 +1039,7 @@ mod tests {
 
         let game_result_event = Event::Bridge {
             dest_game_id: 0,
+            from_game_id: 1,
             raw: borsh::to_vec(&game_result).unwrap(),
         };
 
@@ -1028,10 +1050,10 @@ mod tests {
         assert_eq!(mtt.get_rank(2).unwrap().chips, 0);
         assert_eq!(mtt.get_rank(1).unwrap().chips, 20000);
         assert_eq!(
-            effect.bridge_events,
+            effect.list_bridge_events().unwrap(),
             vec![
-                EmitBridgeEvent::try_new(1, HoldemBridgeEvent::CloseTable).unwrap(),
-                EmitBridgeEvent::try_new(
+                (1, HoldemBridgeEvent::CloseTable),
+                (
                     3,
                     HoldemBridgeEvent::Relocate {
                         players: vec![
@@ -1040,8 +1062,113 @@ mod tests {
                         ],
                     }
                 )
-                .unwrap(),
             ]
         );
+    }
+
+    #[test]
+    fn test_game_result_given_2_tables_do_close_table() {
+        // Create three tables with number of players: 3, 3, 1
+        let mut mtt = create_mtt_with_players(&[2, 2], 3);
+        let mut effect = Effect::default();
+
+        // Eliminate one player on table 1
+        let game_result = HoldemBridgeEvent::GameResult {
+            hand_id: 1,
+            table_id: 1,
+            chips_change: BTreeMap::from([
+                (1, ChipsChange::Add(10000)),
+                (2, ChipsChange::Sub(10000)),
+            ]),
+            table: MttTableState {
+                hand_id: 1,
+                table_id: 1,
+                players: vec![MttTablePlayer::new(1, 20000, 0)],
+                ..Default::default()
+            },
+        };
+
+        let game_result_event = Event::Bridge {
+            dest_game_id: 0,
+            from_game_id: 1,
+            raw: borsh::to_vec(&game_result).unwrap(),
+        };
+
+        mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+        // Table 1 should be closed, two players should be moved to table 3
+        // assert_eq!(mtt.tables.len(), 2);
+        assert_eq!(mtt.get_rank(2).unwrap().chips, 0);
+        assert_eq!(mtt.get_rank(1).unwrap().chips, 20000);
+        assert_eq!(
+            effect.list_bridge_events().unwrap(),
+            vec![
+                (1, HoldemBridgeEvent::CloseTable),
+                (
+                    2,
+                    HoldemBridgeEvent::Relocate {
+                        players: vec![MttTablePlayer::new(1, 20000, 2),],
+                    }
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn test_game_result_given_2_tables_move_one_player() {
+        // Create three tables with number of players: 3, 3, 1
+        let mut mtt = create_mtt_with_players(&[3, 1], 3);
+        let mut effect = Effect::default();
+
+        let game_result = HoldemBridgeEvent::GameResult {
+            hand_id: 1,
+            table_id: 1,
+            chips_change: BTreeMap::default(),
+            table: MttTableState {
+                hand_id: 1,
+                table_id: 1,
+                players: vec![
+                    MttTablePlayer::new(1, 10000, 0),
+                    MttTablePlayer::new(2, 10000, 1),
+                    MttTablePlayer::new(3, 10000, 2),
+                ],
+                ..Default::default()
+            },
+        };
+
+        let game_result_event = Event::Bridge {
+            dest_game_id: 0,
+            from_game_id: 1,
+            raw: borsh::to_vec(&game_result).unwrap(),
+        };
+
+        mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+        assert_eq!(
+            effect.list_bridge_events().unwrap(),
+            vec![
+                (
+                    2,
+                    HoldemBridgeEvent::Relocate {
+                        players: vec![MttTablePlayer::new(1, 10000, 1)],
+                    }
+                ),
+                (
+                    1,
+                    HoldemBridgeEvent::StartGame {
+                        moved_players: vec![1],
+                        sb: DEFAULT_SB,
+                        bb: DEFAULT_BB,
+                    }
+                )
+            ]
+        );
+
+        assert_eq!(mtt.table_assigns.get(&1), Some(&2));
+        assert_eq!(mtt.table_assigns.get(&2), Some(&1));
+        assert_eq!(mtt.table_assigns.get(&3), Some(&1));
+        assert_eq!(mtt.table_assigns.get(&4), Some(&2));
+        assert_eq!(mtt.tables.get(&1).map(|t| t.players.len()), Some(2));
+        assert_eq!(mtt.tables.get(&2).map(|t| t.players.len()), Some(2));
     }
 }
