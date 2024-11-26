@@ -1,5 +1,7 @@
 mod errors;
 
+use std::collections::btree_map::Entry;
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
@@ -20,10 +22,19 @@ pub struct MttTable {
 
 impl GameHandler for MttTable {
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
+        let MttTableState {
+            sb,
+            bb,
+            players,
+            table_id,
+            btn,
+            ..
+        } = init_account.data()?;
 
-        let MttTableState { sb, bb, players, table_id, btn, .. } = init_account.data()?;
-
-        let player_map = players.into_iter().map(|p| (p.id, Player::new(p.id, p.chips, p.table_position as _, 0))).collect();
+        let player_map = players
+            .into_iter()
+            .map(|p| (p.id, Player::new(p.id, p.chips, p.table_position as _, 0)))
+            .collect();
 
         let holdem = Holdem {
             btn,
@@ -44,18 +55,17 @@ impl GameHandler for MttTable {
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
-            Event::Bridge {
-                dest,
-                raw,
-            } => {
-                if dest == self.table_id as _ {
+            Event::Bridge { dest_game_id, raw } => {
+                if dest_game_id == self.table_id as _ {
                     let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
                     self.handle_bridge_event(effect, bridge_event)?;
+                } else {
+                    Err(errors::invalid_bridge_event())?
                 }
             }
             _ => {
                 self.holdem.handle_event(effect, event)?;
-                // Check if there's a settlement
+                // Check if there's a checkpoint
                 if effect.is_checkpoint() {
                     let players = self
                         .holdem
@@ -70,22 +80,29 @@ impl GameHandler for MttTable {
                         sb: self.holdem.sb,
                         bb: self.holdem.bb,
                         next_game_start: self.holdem.next_game_start,
-                        players
+                        players,
                     };
-                    let chips_change = self.holdem.hand_history.chips_change.iter().filter_map(|(pid, change)| {
-                        match change {
+                    let chips_change = self
+                        .holdem
+                        .hand_history
+                        .chips_change
+                        .iter()
+                        .filter_map(|(pid, change)| match change {
                             race_holdem_base::hand_history::ChipsChange::NoUpdate => None,
-                            race_holdem_base::hand_history::ChipsChange::Add(amt) => Some((*pid, ChipsChange::Add(*amt))),
-                            race_holdem_base::hand_history::ChipsChange::Sub(amt) => Some((*pid, ChipsChange::Sub(*amt))),
-                        }
-                    }).collect();
+                            race_holdem_base::hand_history::ChipsChange::Add(amt) => {
+                                Some((*pid, ChipsChange::Add(*amt)))
+                            }
+                            race_holdem_base::hand_history::ChipsChange::Sub(amt) => {
+                                Some((*pid, ChipsChange::Sub(*amt)))
+                            }
+                        })
+                        .collect();
                     let evt = HoldemBridgeEvent::GameResult {
                         hand_id: self.hand_id,
                         table: mtt_table_state,
                         chips_change,
                         table_id: self.table_id,
                     };
-                    effect.checkpoint();
                     effect.bridge_event(0, evt)?;
                 }
             }
@@ -110,13 +127,17 @@ impl MttTable {
                 let timeout = self
                     .holdem
                     .next_game_start
-                    .checked_sub(effect.timestamp())
-                    .unwrap_or(0);
+                    .saturating_sub(effect.timestamp());
                 self.holdem.reset_state()?;
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
                 for id in moved_players {
-                    self.holdem.player_map.remove(&id);
+                    match self.holdem.player_map.entry(id) {
+                        Entry::Vacant(_) => return Err(errors::invalid_player_in_start_game()),
+                        Entry::Occupied(e) => {
+                            e.remove();
+                        }
+                    }
                 }
                 effect.wait_timeout(timeout);
             }
@@ -128,17 +149,28 @@ impl MttTable {
                         chips,
                         table_position,
                     } = mtt_player;
-                    self.holdem.player_map.insert(
-                        id,
-                        Player::new_with_status(id, chips, table_position as _, PlayerStatus::Init),
-                    );
+                    if self.holdem.position_occupied(table_position) {
+                        return Err(errors::duplicated_position_in_relocate())
+                    }
+                    match self.holdem.player_map.entry(id) {
+                        Entry::Vacant(e) =>
+                            e.insert(Player::new_with_status(
+                                id,
+                                chips,
+                                table_position as _,
+                                PlayerStatus::Init,
+                            )),
+                        Entry::Occupied(_) => return Err(errors::duplicated_player_in_relocate()),
+                    };
                 }
-                if self.holdem.stage == HoldemStage::Init {
+                if matches!(
+                    self.holdem.stage,
+                    HoldemStage::Init | HoldemStage::Settle | HoldemStage::Runner
+                ) {
                     let timeout = self
                         .holdem
                         .next_game_start
-                        .checked_sub(effect.timestamp())
-                        .unwrap_or(0);
+                        .saturating_sub(effect.timestamp());
                     effect.wait_timeout(timeout);
                 }
             }
@@ -156,133 +188,203 @@ impl MttTable {
 mod tests {
 
     use super::*;
+    use borsh::BorshDeserialize;
+    use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
+    use std::collections::BTreeMap;
 
-    #[test]
-    fn test_init_game() -> anyhow::Result<()> {
-        let st = vec![1, 50, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0];
-
-        let st = InitTableData::try_from_slice(&st)?;
-
-        println!("{:?}", st);
-
-        Ok(())
+    fn default_3_players() -> Vec<MttTablePlayer> {
+        vec![
+            MttTablePlayer::new(1, 1000, 0),
+            MttTablePlayer::new(2, 1500, 1),
+            MttTablePlayer::new(3, 2000, 1),
+        ]
     }
 
-    // use std::collections::HashMap;
+    fn default_mtt_table_state() -> MttTableState {
+        MttTableState {
+            sb: 100,
+            bb: 200,
+            players: default_3_players(),
+            table_id: 1,
+            btn: 0,
+            ..Default::default()
+        }
+    }
 
-    // use super::*;
-    // use race_holdem_base::essential::{GameEvent, Street};
-    // use race_test::prelude::*;
+    fn mtt_table_with_3_players() -> MttTable {
+        let init_data = default_mtt_table_state();
 
-    // #[test]
-    // fn test_init_state() -> anyhow::Result<()> {
-    //     let mut effect = Effect::default();
-    //     let init_account = InitAccount {
-    //         data: InitTableData {
-    //             start_sb: 10,
-    //             start_bb: 20,
-    //             table_id: 1,
-    //         }
-    //             .try_to_vec()?,
-    //         ..Default::default()
-    //     };
+        let init_account = InitAccount {
+            max_players: 9,
+            data: borsh::to_vec(&init_data).unwrap(),
+        };
 
-    //     let mtt_table = MttTable::init_state(&mut effect, init_account)?;
+        let mtt_table = MttTable::init_state(init_account).unwrap();
+        mtt_table
+    }
 
-    //     assert_eq!(mtt_table.table_id, 1);
-    //     // assert_eq!(
-    //     //     mtt_table.player_lookup.get(&1).map(|p| p.id),
-    //     //     Some(&0)
-    //     // );
-    //     assert_eq!(effect.start_game, true);
+    #[test]
+    fn test_init_state() {
+        let init_data = MttTableState {
+            sb: 100,
+            bb: 200,
+            players: vec![
+                MttTablePlayer::new(1, 1000, 0),
+                MttTablePlayer::new(2, 1500, 1),
+            ],
+            table_id: 1,
+            btn: 0,
+            ..Default::default()
+        };
 
-    //     Ok(())
-    // }
+        let init_account = InitAccount {
+            max_players: 9,
+            data: borsh::to_vec(&init_data).unwrap(),
+        };
 
-    // #[test]
-    // fn test_checkpoint() -> anyhow::Result<()> {
-    //     let data = [
-    //         1, 0, 0, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0,
-    //         0, 2, 0, 0, 0, 0, 0, 0, 0, 224, 63, 238, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 130, 253, 5, 0, 0, 0, 0, 1, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    //         0, 0, 0,
-    //     ];
-    //     let checkpoint = MttTableCheckpoint::try_from_slice(&data);
-    //     println!("{:?}", checkpoint);
-    //     Ok(())
-    // }
+        let mtt_table = MttTable::init_state(init_account).unwrap();
+        assert_eq!(mtt_table.table_id, 1);
+        assert_eq!(mtt_table.holdem.sb, 100);
+        assert_eq!(mtt_table.holdem.bb, 200);
+        assert_eq!(mtt_table.holdem.table_size, 9);
+        assert_eq!(mtt_table.holdem.player_map.len(), 2);
+    }
 
-    // #[test]
-    // fn settle_should_emit_game_result() -> anyhow::Result<()> {
-    //     let mut alice = TestClient::player("alice");
-    //     let mut bob = TestClient::player("bob");
-    //     let mut tx = TestClient::transactor("tx");
-    //     let acc_builder = TestGameAccountBuilder::default()
-    //         .add_player(&mut alice, 10000)
-    //         .add_player(&mut bob, 10000)
-    //         .set_transactor(&mut tx);
+    #[test]
+    fn test_start_game_invalid_player_id() {
+        let mut mtt_table = mtt_table_with_3_players();
+        let mut effect = Effect::default();
+        let invalid_player_id_event = HoldemBridgeEvent::StartGame {
+            sb: 100,
+            bb: 200,
+            moved_players: vec![999], // Invalid player ID
+        };
+        let result = mtt_table.handle_bridge_event(&mut effect, invalid_player_id_event);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), errors::invalid_player_in_start_game());
+    }
 
-    //     let acc = acc_builder
-    //         .with_data(InitTableData {
-    //             table_id: 1,
-    //             table_size: 6,
-    //         })
-    //         .build();
-    //     let mut ctx = GameContext::try_new(&acc)?;
-    //     let mut hdlr = TestHandler::<MttTable>::init_state(&mut ctx, &acc)?;
-    //     hdlr.handle_dispatch_until_no_events(&mut ctx, vec![&mut tx])?;
-    //     {
-    //         let state = hdlr.get_state();
-    //         assert_eq!(
-    //             state.holdem.acting_player.as_ref().map(|a| a.id),
-    //             Some(bob.id())
-    //         );
-    //         ctx.add_revealed_random(
-    //             state.holdem.deck_random_id,
-    //             HashMap::from([
-    //                 (0, "ha".to_string()),
-    //                 (1, "hk".to_string()),
-    //                 (2, "h5".to_string()),
-    //                 (3, "h6".to_string()),
-    //                 (4, "h2".to_string()),
-    //                 (5, "h4".to_string()),
-    //                 (6, "h3".to_string()),
-    //                 (7, "s3".to_string()),
-    //                 (8, "s5".to_string()),
-    //             ]),
-    //         )?;
-    //     }
+    #[test]
+    fn test_handle_bridge_event_start_game() {
+        let mut mtt_table = mtt_table_with_3_players();
+        let mut effect = Effect::default();
 
-    //     let evts = [
-    //         bob.custom_event(GameEvent::Raise(10000)), // BTN/SB
-    //         alice.custom_event(GameEvent::Call),       // BB
-    //     ];
+        let bridge_event = HoldemBridgeEvent::StartGame {
+            sb: 100,
+            bb: 200,
+            moved_players: vec![1, 2],
+        };
 
-    //     for evt in evts {
-    //         hdlr.handle_until_no_events(&mut ctx, &evt, vec![&mut tx])?;
-    //     }
+        mtt_table
+            .handle_bridge_event(&mut effect, bridge_event)
+            .unwrap();
 
-    //     {
-    //         let state = hdlr.get_state();
-    //         assert_eq!(state.holdem.street, Street::Showdown);
-    //         // assert_eq!(
-    //         //     ctx.get_bridge_events::<HoldemBridgeEvent>()?,
-    //         //     vec![HoldemBridgeEvent::GameResult {
-    //         //         table_id: 1,
-    //         //         settles: vec![Settle::sub(alice.id(), 10000), Settle::add(bob.id(), 10000)],
-    //         //         checkpoint: MttTableCheckpoint {
-    //         //             btn: 1,
-    //         //             players: vec![MttTablePlayer::new(1, 20000, 1)]
-    //         //         }
-    //         //     }]
-    //         // );
-    //     }
+        assert_eq!(mtt_table.holdem.sb, 100);
+        assert_eq!(mtt_table.holdem.bb, 200);
+        assert_eq!(mtt_table.holdem.player_map.len(), 1);
+    }
 
-    //     Ok(())
-    // }
+    #[test]
+    fn test_handle_bridge_event_relocate_duplicate_player() {
+        let mut mtt_table = mtt_table_with_3_players();
+        let mut effect = Effect::default();
+
+        // Attempt to relocate the same player to the table
+        let bridge_event = HoldemBridgeEvent::Relocate {
+            players: vec![
+                MttTablePlayer::new(1, 1000, 4) // Duplicate player
+            ],
+        };
+
+        let result = mtt_table.handle_bridge_event(&mut effect, bridge_event);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), errors::duplicated_player_in_relocate());
+    }
+
+    #[test]
+    fn test_handle_bridge_event_relocate_duplicate_position() {
+        let mut mtt_table = mtt_table_with_3_players();
+        let mut effect = Effect::default();
+
+        // Attempt to relocate a player to an already occupied position
+        let bridge_event = HoldemBridgeEvent::Relocate {
+            players: vec![
+                MttTablePlayer::new(4, 3000, 1), // Position 1 is already occupied
+            ],
+        };
+
+        let result = mtt_table.handle_bridge_event(&mut effect, bridge_event);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), errors::duplicated_position_in_relocate());
+    }
+
+    #[test]
+    fn test_handle_bridge_event_relocate() {
+        let mut mtt_table = mtt_table_with_3_players();
+        let mut effect = Effect::default();
+
+        let players = vec![
+            MttTablePlayer::new(4, 1000, 3),
+            MttTablePlayer::new(5, 1500, 4),
+        ];
+
+        let bridge_event = HoldemBridgeEvent::Relocate { players };
+
+        mtt_table
+            .handle_bridge_event(&mut effect, bridge_event)
+            .unwrap();
+
+        assert_eq!(mtt_table.holdem.player_map.len(), 5);
+        assert!(mtt_table.holdem.player_map.contains_key(&4));
+        assert!(mtt_table.holdem.player_map.contains_key(&5));
+    }
+
+    #[test]
+    fn test_handle_bridge_event_close_table() {
+        let mut mtt_table = MttTable::default();
+        let mut effect = Effect::default();
+
+        let bridge_event = HoldemBridgeEvent::CloseTable;
+
+        mtt_table
+            .handle_bridge_event(&mut effect, bridge_event)
+            .unwrap();
+
+        assert!(mtt_table.holdem.player_map.is_empty());
+        assert!(effect.is_checkpoint());
+    }
+
+    #[test]
+    fn test_handle_event_with_checkpoint() {
+        let mut mtt_table = mtt_table_with_3_players();
+        let mut effect = Effect::default();
+        let event = Event::Ready; // The event doesn't really matter here.
+        effect.checkpoint();      // Set checkpoint
+
+        mtt_table.handle_event(&mut effect, event).unwrap();
+
+        let chips_change = BTreeMap::new(); // Assuming no chips change in this test
+        let expected_event = HoldemBridgeEvent::GameResult {
+            hand_id: 0,
+            table: MttTableState {
+                table_id: 1,
+                btn: 0,
+                hand_id: 0,
+                sb: 100,
+                bb: 200,
+                next_game_start: 0,
+                players: default_3_players(),
+            },
+            chips_change,
+            table_id: 1,
+        };
+
+        let bridge_event = effect.bridge_events.pop().unwrap();
+        let actual_event: HoldemBridgeEvent =
+            BorshDeserialize::try_from_slice(&bridge_event.raw).unwrap();
+
+        assert_eq!(expected_event, actual_event);
+    }
 }

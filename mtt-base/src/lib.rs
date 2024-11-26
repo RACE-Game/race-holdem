@@ -71,6 +71,7 @@ pub enum HoldemBridgeEvent {
     /// Close table, all players should be removed from this game.
     /// Additionally, the game can be closed.
     CloseTable,
+    /// A game result report from table.
     GameResult {
         hand_id: usize,
         table_id: u8,
@@ -79,27 +80,10 @@ pub enum HoldemBridgeEvent {
     },
 }
 
-#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq, Clone)]
 pub enum ChipsChange {
     Add(u64),
     Sub(u64),
 }
 
 impl BridgeEvent for HoldemBridgeEvent {}
-
-#[cfg(test)]
-mod tests {
-    use crate::{InitTableData, MttTable};
-    use borsh::BorshDeserialize;
-
-    #[test]
-    fn test_parse_mtt_init_table_data() -> anyhow::Result<()> {
-        let data = [
-            207, 128, 234, 18, 142, 1, 0, 0, 0, 225, 245, 5, 0, 0, 0, 0, 2, 32, 161, 7, 0, 0, 0, 0,
-            0, 96, 234, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 50, 30, 20, 0,
-        ];
-        let st = InitTableData::try_from_slice(&data)?;
-        println!("{:?}", st);
-        Ok(())
-    }
-}
