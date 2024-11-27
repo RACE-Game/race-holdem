@@ -1,14 +1,17 @@
 mod account_data;
 mod player;
 
+use std::collections::BTreeMap;
+
 use crate::account_data::LtMttAccountData;
-use crate::player::LtMttPlayer;
+use crate::player::{PlayerStatus, Player, Ranking};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
 use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
 
 type Millis = u64;
+type PlayerId = u64;
 
 #[derive(Default, PartialEq, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum LtMttStage {
@@ -19,6 +22,14 @@ pub enum LtMttStage {
     Settled,
 }
 
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone)]
+pub enum ClientEvent {
+    SitIn,
+    SitOut,
+}
+
+impl CustomEvent for ClientEvent {}
+
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
 pub struct LtMtt {
     entry_start_time: Millis,
@@ -28,7 +39,8 @@ pub struct LtMtt {
     ticket: u64,
     start_chips: u64,
     //
-    rankings: Vec<LtMttPlayer>,
+    players: BTreeMap<PlayerId, Player>,
+    rankings: Vec<Ranking>,
     total_prize: u64,
     stage: LtMttStage,
     // rake: u64,
@@ -119,10 +131,10 @@ impl LtMtt {
     fn on_join(&mut self, new_players: Vec<GamePlayer>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for player in new_players {
-                self.rankings.push(LtMttPlayer {
-                    id: player.id(),
+                self.players.insert(player.id(), Player {
+                    player_id: player.id(),
                     position: player.position(),
-                    chips: 0,
+                    status: PlayerStatus::SatIn,
                 });
             }
         }
@@ -134,8 +146,16 @@ impl LtMtt {
         if self.stage == LtMttStage::EntryOpened {
             for deposit in deposits {
                 self.total_prize += deposit.balance();
-                if let Some(rank) = self.rankings.iter_mut().find(|r| r.id == deposit.id()) {
+
+                if let Some(rank) = self.rankings.iter_mut().find(|r| r.player_id == deposit.id()) {
                     rank.chips = self.start_chips;
+                    rank.deposit_history.push(deposit.balance());
+                } else {
+                   self.rankings.push(Ranking {
+                       player_id: deposit.id(),
+                       chips: self.start_chips,
+                       deposit_history: vec![deposit.balance()],
+                   }) 
                 }
             }
         }
