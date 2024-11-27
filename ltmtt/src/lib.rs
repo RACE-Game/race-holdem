@@ -6,7 +6,7 @@ use crate::player::LtMttPlayer;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
-use race_api::{prelude::*, types::EntryLock};
+use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
 
 type Millis = u64;
 
@@ -24,12 +24,13 @@ pub struct LtMtt {
     entry_start_time: Millis,
     entry_close_time: Millis,
     settle_time: Millis,
-    stage: LtMttStage,
     table_size: u8,
     ticket: u64,
     start_chips: u64,
+    //
     rankings: Vec<LtMttPlayer>,
     total_prize: u64,
+    stage: LtMttStage,
     // rake: u64,
     // blind_info: BlindInfo,
     // prize_rules: Vec<u8>,
@@ -69,6 +70,7 @@ impl GameHandler for LtMtt {
             Event::GameStart => (),
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
             Event::Join { players } => self.on_join(players)?,
+            Event::Deposit { deposits } => self.on_deposit(deposits)?,
             _ => (),
         }
 
@@ -120,10 +122,21 @@ impl LtMtt {
                 self.rankings.push(LtMttPlayer {
                     id: player.id(),
                     position: player.position(),
-                    chips: self.start_chips,
+                    chips: 0,
                 });
+            }
+        }
 
-                self.total_prize += self.ticket;
+        Ok(())
+    }
+
+    fn on_deposit(&mut self, deposits: Vec<GameDeposit>) -> HandleResult<()> {
+        if self.stage == LtMttStage::EntryOpened {
+            for deposit in deposits {
+                self.total_prize += deposit.balance();
+                if let Some(rank) = self.rankings.iter_mut().find(|r| r.id == deposit.id()) {
+                    rank.chips = self.start_chips;
+                }
             }
         }
 
