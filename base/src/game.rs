@@ -708,7 +708,7 @@ impl Holdem {
 
         let removed_players = self.remove_leave_and_out_players();
         for player in removed_players {
-            effect.settle(player.id, player.chips)?;
+            effect.settle(player.id, player.chips, true)?;
         }
 
         if rake > 0 {
@@ -823,7 +823,7 @@ impl Holdem {
         let removed_players = self.remove_leave_and_out_players();
 
         for player in removed_players {
-            effect.settle(player.id, player.chips)?;
+            effect.settle(player.id, player.chips, true)?;
         }
 
         if rake > 0 {
@@ -1303,6 +1303,9 @@ impl GameHandler for Holdem {
             }
 
             Event::Join { players } => {
+
+                effect.info("A player joined!");
+
                 self.display.clear();
 
                 for p in players.into_iter() {
@@ -1363,7 +1366,7 @@ impl GameHandler for Holdem {
                     | HoldemStage::Showdown => {
                         let removed = self.player_map.remove_entry(&player_id);
                         if let Some((id, p)) = removed {
-                            effect.settle(id, p.chips)?;
+                            effect.settle(id, p.chips, true)?;
                             effect.checkpoint();
                             self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                             self.signal_game_end(effect)?;

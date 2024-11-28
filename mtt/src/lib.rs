@@ -243,13 +243,16 @@ impl GameHandler for Mtt {
             Event::GameStart => {
                 self.timestamp = effect.timestamp();
                 if self.ranks.is_empty() {
+                    effect.info("Game is empty, just complete the game");
                     // No player joined, mark game as completed
                     self.stage = MttStage::Completed;
                 } else if self.ranks.len() == 1 {
                     // Only 1 player joined, end game with single winner
+                    effect.info("Game has only one player, set it the winner and complete the game");
                     self.apply_prizes(effect)?;
                 } else {
                     // Start game normally
+                    effect.info(format!("Start game with {} players", self.ranks.len()));
                     self.stage = MttStage::Playing;
                     self.create_tables(effect)?;
                     self.update_alives();
@@ -284,12 +287,7 @@ impl GameHandler for Mtt {
             Event::WaitingTimeout => match self.stage {
                 // Scheduled game start
                 MttStage::Init => {
-                    if self.ranks.len() < 2 {
-                        self.stage = MttStage::Completed;
-                        effect.checkpoint();
-                    } else {
-                        effect.start_game();
-                    }
+                    effect.start_game();
                 }
 
                 MttStage::Playing => {}
@@ -686,12 +684,11 @@ impl Mtt {
                     player_id: id,
                     prize,
                 });
-                effect.settle(id, prize)?;
+                effect.settle(id, prize, false)?;
             }
         }
 
         self.stage = MttStage::Completed;
-        effect.reset();
         Ok(())
     }
 
