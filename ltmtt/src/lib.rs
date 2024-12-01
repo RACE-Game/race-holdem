@@ -79,7 +79,7 @@ impl GameHandler for LtMtt {
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
             Event::Ready => self.on_ready(effect)?,
-            Event::GameStart => (),
+            Event::GameStart => self.on_game_start(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
             Event::Join { players } => self.on_join(players)?,
             Event::Deposit { deposits } => self.on_deposit(deposits)?,
@@ -99,7 +99,16 @@ impl LtMtt {
             effect.set_entry_lock(EntryLock::Closed);
         } else {
             effect.start_game();
+        }
+
+        Ok(())
+    }
+
+    fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        if self.entry_start_time > effect.timestamp() {
             effect.wait_timeout(self.entry_start_time - effect.timestamp());
+        } else {
+            effect.set_entry_lock(EntryLock::Closed);
         }
 
         Ok(())
