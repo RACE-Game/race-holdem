@@ -9,7 +9,7 @@ use crate::player::{Player, PlayerStatus, Ranking};
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
 use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
-use race_holdem_mtt_base::{HoldemBridgeEvent, MttTableState};
+use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 
 type Millis = u64;
 type PlayerId = u64;
@@ -193,10 +193,41 @@ impl LtMtt {
             // no availiable table found
             let new_table_id = self.create_table(effect)?;
             self.table_assigns.insert(player_id, new_table_id);
+
+            let table_ref = self
+                .tables
+                .get_mut(&new_table_id)
+                .ok_or(errors::error_table_not_fonud)?;
+
+            let mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
+            table_ref.add_player(&mut mtt_table_player);
+
+            effect.bridge_event(
+                new_table_id,
+                HoldemBridgeEvent::Relocate {
+                    players: vec![player_id],
+                },
+            );
         } else {
             self.table_assigns.insert(player_id, table_id);
+
+            let table_ref = self
+                .tables
+                .get_mut(&table_id)
+                .ok_or(errors::error_table_not_fonud)?;
+
+            let mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
+            table_ref.add_player(&mut mtt_table_player);
+
+            effect.bridge_event(
+                table_id,
+                HoldemBridgeEvent::Relocate {
+                    players: vec![player_id],
+                },
+            );
         }
 
+        effect.checkpoint();
         Ok(())
     }
 
