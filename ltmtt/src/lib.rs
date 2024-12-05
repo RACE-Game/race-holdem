@@ -4,11 +4,12 @@ mod player;
 use std::collections::BTreeMap;
 
 use crate::account_data::LtMttAccountData;
-use crate::player::{PlayerStatus, Player, Ranking};
+use crate::player::{Player, PlayerStatus, Ranking};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
 use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
+use race_holdem_mtt_base::{HoldemBridgeEvent, MttTableState};
 
 type Millis = u64;
 type PlayerId = u64;
@@ -43,13 +44,13 @@ pub struct LtMtt {
     rankings: Vec<Ranking>,
     total_prize: u64,
     stage: LtMttStage,
+    tables: BTreeMap<u8, MttTableState>,
+    table_assigns: BTreeMap<PlayerId, u8>,
+    subgame_bundle: String,
     // rake: u64,
     // blind_info: BlindInfo,
     // prize_rules: Vec<u8>,
     // theme: Option<String>,
-    // subgame_bundle: String,
-    // tables: BTreeMap<u8, MttTableState>,
-    // table_assigns: BTreeMap<PlayerId, u8>,
 }
 
 impl GameHandler for LtMtt {
@@ -81,7 +82,7 @@ impl GameHandler for LtMtt {
             Event::Ready => self.on_ready(effect)?,
             Event::GameStart => self.on_game_start(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
-            Event::Join { players } => self.on_join(players)?,
+            Event::Join { players } => self.on_join(effect, players)?,
             Event::Deposit { deposits } => self.on_deposit(deposits)?,
             _ => (),
         }
@@ -137,14 +138,18 @@ impl LtMtt {
         Ok(())
     }
 
-    fn on_join(&mut self, new_players: Vec<GamePlayer>) -> HandleResult<()> {
+    fn on_join(&mut self, effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for player in new_players {
-                self.players.insert(player.id(), Player {
-                    player_id: player.id(),
-                    position: player.position(),
-                    status: PlayerStatus::SatIn,
-                });
+                self.players.insert(
+                    player.id(),
+                    Player {
+                        player_id: player.id(),
+                        position: player.position(),
+                        status: PlayerStatus::SatIn,
+                    },
+                );
+                self.do_sit_in(effect, player.id())?;
             }
         }
 
@@ -156,15 +161,19 @@ impl LtMtt {
             for deposit in deposits {
                 self.total_prize += deposit.balance();
 
-                if let Some(rank) = self.rankings.iter_mut().find(|r| r.player_id == deposit.id()) {
+                if let Some(rank) = self
+                    .rankings
+                    .iter_mut()
+                    .find(|r| r.player_id == deposit.id())
+                {
                     rank.chips = self.start_chips;
                     rank.deposit_history.push(deposit.balance());
                 } else {
-                   self.rankings.push(Ranking {
-                       player_id: deposit.id(),
-                       chips: self.start_chips,
-                       deposit_history: vec![deposit.balance()],
-                   }) 
+                    self.rankings.push(Ranking {
+                        player_id: deposit.id(),
+                        chips: self.start_chips,
+                        deposit_history: vec![deposit.balance()],
+                    })
                 }
             }
         }
@@ -175,6 +184,61 @@ impl LtMtt {
     fn settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.settle(0, 0)?;
         Ok(())
+    }
+
+    fn do_sit_in(&mut self, effect: &mut Effect, player_id: PlayerId) -> HandleResult<()> {
+        let table_id = self.find_table_sit_in();
+
+        if table_id == 0 {
+            // no availiable table found
+            let new_table_id = self.create_table(effect)?;
+            self.table_assigns.insert(player_id, new_table_id);
+        } else {
+            self.table_assigns.insert(player_id, table_id);
+        }
+
+        Ok(())
+    }
+
+    fn find_table_sit_in(&self) -> u8 {
+        let mut min = self.table_size;
+
+        // After iteration, it will be the table with the least players,
+        // or 0 represents no table or all tables are full.
+        self.tables.iter().fold(0, |table_id, (id, table)| {
+            if (table.players.len() as u8) < min {
+                min = table.players.len() as u8;
+                *id
+            } else {
+                table_id
+            }
+        })
+    }
+
+    fn create_table(&mut self, effect: &mut Effect) -> HandleResult<u8> {
+        let table_id = self.tables.iter().map(|(id, _)| *id).max().unwrap_or(0) + 1;
+        let sb = 1000 as u64;
+        let bb = 2000 as u64;
+
+        let table = MttTableState {
+            table_id,
+            btn: 0,
+            sb,
+            bb,
+            players: Vec::new(),
+            next_game_start: 0,
+            hand_id: 0,
+        };
+
+        effect.launch_sub_game(
+            table_id as _,
+            self.subgame_bundle.clone(),
+            self.table_size as _,
+            &table,
+        )?;
+        self.tables.insert(table_id, table);
+
+        Ok(table_id)
     }
 }
 
