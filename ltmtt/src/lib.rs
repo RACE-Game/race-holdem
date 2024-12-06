@@ -205,7 +205,7 @@ impl LtMtt {
             effect.bridge_event(
                 new_table_id,
                 HoldemBridgeEvent::Relocate {
-                    players: vec![player_id],
+                    players: vec![mtt_table_player],
                 },
             );
         } else {
@@ -222,7 +222,7 @@ impl LtMtt {
             effect.bridge_event(
                 table_id,
                 HoldemBridgeEvent::Relocate {
-                    players: vec![player_id],
+                    players: vec![mtt_table_player],
                 },
             );
         }
