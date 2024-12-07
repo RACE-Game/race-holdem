@@ -47,9 +47,9 @@ pub struct LtMtt {
     tables: BTreeMap<u8, MttTableState>,
     table_assigns: BTreeMap<PlayerId, u8>,
     subgame_bundle: String,
+    prize_rules: Vec<u8>,
     // rake: u64,
     // blind_info: BlindInfo,
-    // prize_rules: Vec<u8>,
     // theme: Option<String>,
 }
 
@@ -130,7 +130,7 @@ impl LtMtt {
 
             LtMttStage::EntryClosed => {
                 self.stage = LtMttStage::Settled;
-                self.settle(effect)?;
+                self.do_settle(effect)?;
             }
 
             _ => {}
@@ -181,11 +181,6 @@ impl LtMtt {
         Ok(())
     }
 
-    fn settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
-        effect.settle(0, 0)?;
-        Ok(())
-    }
-
     fn do_sit_in(&mut self, effect: &mut Effect, player_id: PlayerId) -> HandleResult<()> {
         let table_id = self.find_table_sit_in();
 
@@ -228,6 +223,22 @@ impl LtMtt {
         }
 
         effect.checkpoint();
+        Ok(())
+    }
+
+    fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        let total_shares: u8 = self.prize_rules.iter().take(self.rankings.len()).sum();
+        let prize_share: u64 = self.total_prize / total_shares as u64;
+
+        for (i, ranking) in self.rankings.iter().enumerate() {
+            let player_id = ranking.player_id;
+
+            if let Some(rank) = self.prize_rules.get(i) {
+                let prize: u64 = prize_share * *rank as u64;
+                effect.settle(player_id, prize);
+            }
+        }
+
         Ok(())
     }
 
