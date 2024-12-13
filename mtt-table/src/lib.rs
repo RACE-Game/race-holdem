@@ -15,7 +15,7 @@ pub type PlayerId = u64;
 #[game_handler]
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default, Clone)]
 pub struct MttTable {
-    pub table_id: u8,
+    pub table_id: GameId,
     pub hand_id: usize,
     pub holdem: Holdem,
 }
@@ -33,7 +33,7 @@ impl GameHandler for MttTable {
 
         let player_map = players
             .into_iter()
-            .map(|p| (p.id, Player::new(p.id, p.chips, p.table_position as _, 0)))
+            .map(|p| (p.id, Player::new_with_timeout(p.id, p.chips, p.table_position as _, 0)))
             .collect();
 
         let holdem = Holdem {
@@ -154,7 +154,7 @@ impl MttTable {
                     }
                     match self.holdem.player_map.entry(id) {
                         Entry::Vacant(e) =>
-                            e.insert(Player::new_with_status(
+                            e.insert(Player::new_with_timeout_and_status(
                                 id,
                                 chips,
                                 table_position as _,

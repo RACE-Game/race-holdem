@@ -7,7 +7,6 @@ edition = "2021"
 race-api.workspace = true
 race-proc-macro.workspace = true
 borsh.workspace = true
-race-holdem-base = { path = "../base" }
 
 [dev-dependencies]
 race-test.workspace = true

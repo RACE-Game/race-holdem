@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use race_api::event::BridgeEvent;
+use race_api::prelude::*;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
@@ -22,8 +22,8 @@ impl MttTablePlayer {
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableState {
+    pub table_id: GameId,
     pub hand_id: usize,
-    pub table_id: u8,
     pub btn: usize,
     pub sb: u64,
     pub bb: u64,
@@ -74,7 +74,7 @@ pub enum HoldemBridgeEvent {
     /// A game result report from table.
     GameResult {
         hand_id: usize,
-        table_id: u8,
+        table_id: GameId,
         chips_change: BTreeMap<u64, ChipsChange>,
         table: MttTableState,
     },

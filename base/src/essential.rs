@@ -52,23 +52,25 @@ pub struct InternalPlayerJoin {
 pub struct Player {
     pub id: u64,
     pub chips: u64,
-    pub position: usize, // zero indexed
+    pub position: usize,      // zero indexed
     pub status: PlayerStatus,
-    pub timeout: u8, // count the times of action timeout
+    pub timeout: u8,          // count the times of action timeout
+    pub deposit: u64,         // The deposited amount
 }
 
 impl Player {
-    pub fn new(id: u64, chips: u64, position: u16, timeout: u8) -> Player {
+    pub fn new_with_timeout(id: u64, chips: u64, position: u16, timeout: u8) -> Player {
         Self {
             id,
             chips,
             position: position as usize,
             status: PlayerStatus::default(),
             timeout,
+            deposit: 0,
         }
     }
 
-    pub fn new_with_status(
+    pub fn new_with_timeout_and_status(
         id: u64,
         chips: u64,
         position: usize,
@@ -80,6 +82,7 @@ impl Player {
             position,
             status,
             timeout: 0,
+            deposit: 0,
         }
     }
 
@@ -90,6 +93,7 @@ impl Player {
             position: position as usize,
             status: PlayerStatus::Init,
             timeout: 0,
+            deposit: 0,
         }
     }
 
@@ -184,8 +188,9 @@ pub struct HoldemAccount {
     pub sb: u64,
     pub bb: u64,
     pub ante: u64,
-    pub rake: u16, // an integer representing the rake (per thousand)
-    pub rake_cap: u8, // the maximum rake in BB
+    pub rake: u16,             // an integer representing the rake (per thousand)
+    pub rake_cap: u8,          // the maximum rake in BB
+    pub max_deposit: u64,      // the maximum deposit in chips, usually 100BB
     pub theme: Option<String>, // an optional theme identifier
 }
 
@@ -197,6 +202,7 @@ impl Default for HoldemAccount {
             ante: 0,
             rake: 3,
             rake_cap: 1,
+            max_deposit: 2000,
             theme: None
         }
     }

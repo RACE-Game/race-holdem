@@ -17,6 +17,7 @@ use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdo
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
 pub struct Holdem {
     pub deck_random_id: RandomId,
+    pub max_deposit: u64,
     pub sb: u64,
     pub bb: u64,
     pub min_raise: u64,
@@ -49,7 +50,8 @@ impl Holdem {
     // An out player is one with zero chips.
     fn mark_out_players(&mut self) {
         for (_, v) in self.player_map.iter_mut() {
-            if v.status != PlayerStatus::Leave && v.chips == 0 {
+            if v.status != PlayerStatus::Leave && v.chips + v.deposit == 0 {
+                // Set player status to Out to indicates this player has no chips
                 v.status = PlayerStatus::Out;
                 // Here we use timeout for rebuy timeout.
                 v.timeout = 0;
@@ -60,14 +62,30 @@ impl Holdem {
     // Remove players with `Leave` or `Out` status.
     fn remove_leave_and_out_players(&mut self) -> Vec<Player> {
         let player_map = take(&mut self.player_map);
-        let (removed, retained): (Vec<_>, Vec<_>) = player_map
-            .into_iter()
-            .partition(|(_, ref p)| p.status == PlayerStatus::Out || p.status == PlayerStatus::Leave);
+        let mut removed = Vec::new();
+        let mut retained = Vec::new();
 
-        self.player_map = retained.into_iter().collect();
+        for mut player in player_map.into_values() {
+            if player.status == PlayerStatus::Leave {
+                removed.push(player);
+            } else if player.status == PlayerStatus::Out {
+                if self.mode == GameMode::Mtt { // Just kick out this player in MTT mode
+                    removed.push(player);
+                } else if player.timeout < 3 { // Give player three hands timeout for deposit
+                    player.timeout += 1;
+                    retained.push(player);
+                } else {
+                    removed.push(player);
+                }
+            } else {
+                retained.push(player);
+            }
+        }
+
+        self.player_map = retained.into_iter().map(|p| (p.id, p)).collect();
 
         println!("Remove these players: {:?}", removed);
-        removed.into_iter().map(|(_, p)| p).collect()
+        removed.into_iter().collect()
     }
 
     // Make All eligible players Wait
@@ -708,7 +726,7 @@ impl Holdem {
 
         let removed_players = self.remove_leave_and_out_players();
         for player in removed_players {
-            effect.settle(player.id, player.chips, true)?;
+            effect.settle(player.id, player.chips + player.deposit, true)?;
         }
 
         if rake > 0 {
@@ -724,6 +742,16 @@ impl Holdem {
         self.next_game_start = effect.timestamp() + timeout;
         if self.mode != GameMode::Mtt {
             effect.wait_timeout(timeout);
+        }
+    }
+
+    pub fn fill_player_chips_with_deposits(&mut self) {
+        for player in self.player_map.values_mut() {
+            if player.chips < self.max_deposit && player.deposit > 0 {
+                let old_player_chips = player.chips;
+                player.chips = u64::min(player.chips + player.deposit, self.max_deposit);
+                player.deposit = player.deposit - player.chips + old_player_chips;
+            }
         }
     }
 
@@ -823,7 +851,7 @@ impl Holdem {
         let removed_players = self.remove_leave_and_out_players();
 
         for player in removed_players {
-            effect.settle(player.id, player.chips, true)?;
+            effect.settle(player.id, player.chips + player.deposit, true)?;
         }
 
         if rake > 0 {
@@ -1166,7 +1194,7 @@ impl Holdem {
 
             self.player_map.insert(
                 p.id,
-                Player::new_with_status(p.id, p.chips, pos, PlayerStatus::Fold),
+                Player::new_with_timeout_and_status(p.id, p.chips, pos, PlayerStatus::Fold),
             );
         }
         Ok(())
@@ -1174,6 +1202,7 @@ impl Holdem {
 
     pub fn internal_start_game(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         self.reset_state()?;
+        self.fill_player_chips_with_deposits();
 
         let next_btn = self.get_next_btn()?;
         println!("Game starts and next BTN: {}", next_btn);
@@ -1194,6 +1223,7 @@ impl GameHandler for Holdem {
         let HoldemAccount {
             sb,
             bb,
+            max_deposit,
             rake,
             rake_cap,
             ..
@@ -1204,6 +1234,7 @@ impl GameHandler for Holdem {
 
         Ok(Self {
             deck_random_id: 0,
+            max_deposit,
             sb,
             bb,
             min_raise: bb,
@@ -1337,10 +1368,14 @@ impl GameHandler for Holdem {
             Event::Deposit { deposits } => {
                 for d in deposits.into_iter() {
                     if let Some(p) = self.player_map.get_mut(&d.id()) {
-                        p.chips += d.balance();
-                        p.status = PlayerStatus::Init;
+                        if p.chips + p.deposit > 2 * self.max_deposit {
+                            effect.reject_deposit(&d)?;
+                        } else {
+                            p.deposit += d.balance();
+                            effect.accept_deposit(&d)?;
+                        }
                     } else {
-                        return Err(HandleError::InvalidDeposit);
+                        effect.reject_deposit(&d)?;
                     }
                 }
                 Ok(())
@@ -1366,7 +1401,7 @@ impl GameHandler for Holdem {
                     | HoldemStage::Showdown => {
                         let removed = self.player_map.remove_entry(&player_id);
                         if let Some((id, p)) = removed {
-                            effect.settle(id, p.chips, true)?;
+                            effect.settle(id, p.chips + p.deposit, true)?;
                             effect.checkpoint();
                             self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                             self.signal_game_end(effect)?;
@@ -1553,9 +1588,9 @@ mod tests {
 
     fn setup_players() -> BTreeMap<u64, Player> {
         let mut player_map = BTreeMap::new();
-        player_map.insert(1, Player::new_with_status(1, 0, 0, PlayerStatus::Leave));
-        player_map.insert(2, Player::new_with_status(2, 0, 0, PlayerStatus::Out));
-        player_map.insert(3, Player::new_with_status(3, 100, 0, PlayerStatus::Acting));
+        player_map.insert(1, Player::new_with_timeout_and_status(1, 0, 0, PlayerStatus::Leave));
+        player_map.insert(2, Player::new_with_timeout_and_status(2, 0, 0, PlayerStatus::Out));
+        player_map.insert(3, Player::new_with_timeout_and_status(3, 100, 0, PlayerStatus::Acting));
         player_map
     }
 

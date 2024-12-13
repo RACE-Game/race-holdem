@@ -24,19 +24,19 @@ const FRANK: u64 = 5;
 // ======================================================
 pub fn initial_two_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
-        (ALICE, Player::new(ALICE, 1000, 0u16, 0)),
-        (BOB, Player::new(BOB, 1000, 1u16, 0)),
+        (ALICE, Player::new_with_timeout(ALICE, 1000, 0u16, 0)),
+        (BOB, Player::new_with_timeout(BOB, 1000, 1u16, 0)),
     ])
 }
 
 pub fn initial_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
-        (ALICE, Player::new(ALICE, 1000, 0u16, 0)),
-        (BOB, Player::new(BOB, 1000, 1u16, 0)),
-        (CAROL, Player::new(CAROL, 1000, 2u16, 0)),
-        (DAVE, Player::new(DAVE, 1000, 3u16, 0)),
-        (EVA, Player::new(EVA, 1000, 4u16, 0)),
-        (FRANK, Player::new(FRANK, 1000, 5u16, 0)),
+        (ALICE, Player::new_with_timeout(ALICE, 1000, 0u16, 0)),
+        (BOB, Player::new_with_timeout(BOB, 1000, 1u16, 0)),
+        (CAROL, Player::new_with_timeout(CAROL, 1000, 2u16, 0)),
+        (DAVE, Player::new_with_timeout(DAVE, 1000, 3u16, 0)),
+        (EVA, Player::new_with_timeout(EVA, 1000, 4u16, 0)),
+        (FRANK, Player::new_with_timeout(FRANK, 1000, 5u16, 0)),
     ])
 }
 
@@ -44,27 +44,27 @@ pub fn gaming_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
         (
             ALICE,
-            Player::new_with_status(ALICE, 1000, 0usize, PlayerStatus::Acting),
+            Player::new_with_timeout_and_status(ALICE, 1000, 0usize, PlayerStatus::Acting),
         ),
         (
             BOB,
-            Player::new_with_status(BOB, 200, 1usize, PlayerStatus::Acted),
+            Player::new_with_timeout_and_status(BOB, 200, 1usize, PlayerStatus::Acted),
         ),
         (
             CAROL,
-            Player::new_with_status(CAROL, 0, 2usize, PlayerStatus::Allin),
+            Player::new_with_timeout_and_status(CAROL, 0, 2usize, PlayerStatus::Allin),
         ),
         (
             DAVE,
-            Player::new_with_status(DAVE, 780, 3usize, PlayerStatus::Acted),
+            Player::new_with_timeout_and_status(DAVE, 780, 3usize, PlayerStatus::Acted),
         ),
         (
             EVA,
-            Player::new_with_status(EVA, 650, 4usize, PlayerStatus::Acted),
+            Player::new_with_timeout_and_status(EVA, 650, 4usize, PlayerStatus::Acted),
         ),
         (
             FRANK,
-            Player::new_with_status(FRANK, 800, 5usize, PlayerStatus::Fold),
+            Player::new_with_timeout_and_status(FRANK, 800, 5usize, PlayerStatus::Fold),
         ),
     ])
 }

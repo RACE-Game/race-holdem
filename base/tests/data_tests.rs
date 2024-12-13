@@ -17,7 +17,7 @@ const CAROL: u64 = 2;
 
 #[test]
 fn test_borsh_player() {
-    let player = Player::new(ALICE, 1000, 1u16, 0);
+    let player = Player::new_with_timeout(ALICE, 1000, 1u16, 0);
     let player_ser = player.try_to_vec().unwrap();
     let player_de = Player::try_from_slice(&player_ser).unwrap();
     assert_eq!(player_de, player);
