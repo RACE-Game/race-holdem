@@ -301,6 +301,7 @@ impl GameHandler for Mtt {
                                 rank.status = PlayerRankStatus::Alive;
                                 effect.info(format!("Accept player deposit: {}", d.id()));
                                 effect.accept_deposit(&d)?;
+                                self.total_prize += d.balance();
                                 self.add_new_player(effect, player_id)?;
                                 self.update_alives();
                             } else {
