@@ -1,15 +1,19 @@
 mod account_data;
 mod player;
+mod errors;
 
 use std::collections::BTreeMap;
 
 use crate::account_data::LtMttAccountData;
 use crate::player::{Player, PlayerStatus, Ranking};
+use crate::errors::error_leave_not_allowed;
+
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
 use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
 use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
+use race_proc_macro::game_handler;
 
 type Millis = u64;
 type PlayerId = u64;
@@ -31,6 +35,7 @@ pub enum ClientEvent {
 
 impl CustomEvent for ClientEvent {}
 
+#[game_handler]
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
 pub struct LtMtt {
     entry_start_time: Millis,
@@ -47,9 +52,9 @@ pub struct LtMtt {
     tables: BTreeMap<u8, MttTableState>,
     table_assigns: BTreeMap<PlayerId, u8>,
     subgame_bundle: String,
+    prize_rules: Vec<u8>,
     // rake: u64,
     // blind_info: BlindInfo,
-    // prize_rules: Vec<u8>,
     // theme: Option<String>,
 }
 
@@ -130,7 +135,7 @@ impl LtMtt {
 
             LtMttStage::EntryClosed => {
                 self.stage = LtMttStage::Settled;
-                self.settle(effect)?;
+                self.do_settle(effect)?;
             }
 
             _ => {}
@@ -181,11 +186,6 @@ impl LtMtt {
         Ok(())
     }
 
-    fn settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
-        effect.settle(0, 0)?;
-        Ok(())
-    }
-
     fn do_sit_in(&mut self, effect: &mut Effect, player_id: PlayerId) -> HandleResult<()> {
         let table_id = self.find_table_sit_in();
 
@@ -197,13 +197,13 @@ impl LtMtt {
             let table_ref = self
                 .tables
                 .get_mut(&new_table_id)
-                .ok_or(errors::error_table_not_fonud)?;
+                .ok_or(errors::error_table_not_found())?;
 
-            let mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
+            let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
             table_ref.add_player(&mut mtt_table_player);
 
             effect.bridge_event(
-                new_table_id,
+                new_table_id as _,
                 HoldemBridgeEvent::Relocate {
                     players: vec![mtt_table_player],
                 },
@@ -214,13 +214,13 @@ impl LtMtt {
             let table_ref = self
                 .tables
                 .get_mut(&table_id)
-                .ok_or(errors::error_table_not_fonud)?;
+                .ok_or(errors::error_table_not_found())?;
 
-            let mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
+            let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
             table_ref.add_player(&mut mtt_table_player);
 
             effect.bridge_event(
-                table_id,
+                table_id as _,
                 HoldemBridgeEvent::Relocate {
                     players: vec![mtt_table_player],
                 },
@@ -228,6 +228,22 @@ impl LtMtt {
         }
 
         effect.checkpoint();
+        Ok(())
+    }
+
+    fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        let total_shares: u8 = self.prize_rules.iter().take(self.rankings.len()).sum();
+        let prize_share: u64 = self.total_prize / total_shares as u64;
+
+        for (i, ranking) in self.rankings.iter().enumerate() {
+            let player_id = ranking.player_id;
+
+            if let Some(rank) = self.prize_rules.get(i) {
+                let prize: u64 = prize_share * *rank as u64;
+                effect.settle(player_id, prize, false)?;
+            }
+        }
+
         Ok(())
     }
 
