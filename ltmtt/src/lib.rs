@@ -1,13 +1,12 @@
 mod account_data;
-mod player;
 mod errors;
+mod player;
 
 use std::collections::BTreeMap;
 
 use crate::account_data::LtMttAccountData;
-use crate::player::{Player, PlayerStatus, Ranking};
 use crate::errors::error_leave_not_allowed;
-
+use crate::player::{Player, PlayerStatus, Ranking};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
@@ -49,8 +48,8 @@ pub struct LtMtt {
     rankings: Vec<Ranking>,
     total_prize: u64,
     stage: LtMttStage,
-    tables: BTreeMap<u8, MttTableState>,
-    table_assigns: BTreeMap<PlayerId, u8>,
+    tables: BTreeMap<usize, MttTableState>,
+    table_assigns: BTreeMap<PlayerId, usize>,
     subgame_bundle: String,
     prize_rules: Vec<u8>,
     // rake: u64,
@@ -88,7 +87,7 @@ impl GameHandler for LtMtt {
             Event::GameStart => self.on_game_start(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
             Event::Join { players } => self.on_join(effect, players)?,
-            Event::Deposit { deposits } => self.on_deposit(deposits)?,
+            Event::Deposit { deposits } => self.on_deposit(effect, deposits)?,
             _ => (),
         }
 
@@ -98,12 +97,15 @@ impl GameHandler for LtMtt {
 
 impl LtMtt {
     fn on_ready(&self, effect: &mut Effect) -> HandleResult<()> {
-        if effect.timestamp() > self.entry_start_time
-            || self.entry_start_time > self.entry_close_time
-            || self.entry_close_time > self.settle_time
+        effect.info("!!!!!!!waefwagbesri;");
+
+        if
+        // effect.timestamp() > self.entry_start_time
+        self.entry_start_time > self.entry_close_time || self.entry_close_time > self.settle_time
         {
             effect.set_entry_lock(EntryLock::Closed);
         } else {
+            effect.info("!!!!!fasdfsafwaegnie;rn");
             effect.start_game();
         }
 
@@ -161,24 +163,20 @@ impl LtMtt {
         Ok(())
     }
 
-    fn on_deposit(&mut self, deposits: Vec<GameDeposit>) -> HandleResult<()> {
+    fn on_deposit(&mut self, effect: &mut Effect, deposits: Vec<GameDeposit>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for deposit in deposits {
-                self.total_prize += deposit.balance();
-
                 if let Some(rank) = self
                     .rankings
                     .iter_mut()
                     .find(|r| r.player_id == deposit.id())
                 {
+                    self.total_prize += deposit.balance();
                     rank.chips = self.start_chips;
                     rank.deposit_history.push(deposit.balance());
+                    effect.accept_deposit(&deposit)?;
                 } else {
-                    self.rankings.push(Ranking {
-                        player_id: deposit.id(),
-                        chips: self.start_chips,
-                        deposit_history: vec![deposit.balance()],
-                    })
+                    effect.reject_deposit(&deposit)?;
                 }
             }
         }
@@ -207,7 +205,7 @@ impl LtMtt {
                 HoldemBridgeEvent::Relocate {
                     players: vec![mtt_table_player],
                 },
-            );
+            )?;
         } else {
             self.table_assigns.insert(player_id, table_id);
 
@@ -224,7 +222,7 @@ impl LtMtt {
                 HoldemBridgeEvent::Relocate {
                     players: vec![mtt_table_player],
                 },
-            );
+            )?;
         }
 
         effect.checkpoint();
@@ -247,7 +245,7 @@ impl LtMtt {
         Ok(())
     }
 
-    fn find_table_sit_in(&self) -> u8 {
+    fn find_table_sit_in(&self) -> usize {
         let mut min = self.table_size;
 
         // After iteration, it will be the table with the least players,
@@ -262,7 +260,7 @@ impl LtMtt {
         })
     }
 
-    fn create_table(&mut self, effect: &mut Effect) -> HandleResult<u8> {
+    fn create_table(&mut self, effect: &mut Effect) -> HandleResult<usize> {
         let table_id = self.tables.iter().map(|(id, _)| *id).max().unwrap_or(0) + 1;
         let sb = 1000 as u64;
         let bb = 2000 as u64;
@@ -277,12 +275,7 @@ impl LtMtt {
             hand_id: 0,
         };
 
-        effect.launch_sub_game(
-            table_id as _,
-            self.subgame_bundle.clone(),
-            self.table_size as _,
-            &table,
-        )?;
+        effect.launch_sub_game(self.subgame_bundle.clone(), self.table_size as _, &table)?;
         self.tables.insert(table_id, table);
 
         Ok(table_id)

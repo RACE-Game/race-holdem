@@ -497,7 +497,7 @@ impl Mtt {
         if blind_rule.is_none() {
             blind_rule = self.blind_info.blind_rules.last();
         }
-        let blind_rule = blind_rule.ok_or(error_empty_blind_rules())?;
+        let blind_rule = blind_rule.ok_or(errors::error_empty_blind_rules())?;
         let sb = blind_rule.sb_x as u64 * self.blind_info.blind_base;
         let bb = blind_rule.bb_x as u64 * self.blind_info.blind_base;
         Ok((sb, bb))
