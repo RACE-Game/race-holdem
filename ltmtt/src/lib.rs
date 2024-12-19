@@ -1,11 +1,10 @@
-mod account_data;
 mod errors;
 mod player;
 
 use std::collections::BTreeMap;
+use std::vec;
 
-use crate::account_data::LtMttAccountData;
-use crate::errors::error_leave_not_allowed;
+// use crate::errors::error_leave_not_allowed;
 use crate::player::{Player, PlayerStatus, Ranking};
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -13,9 +12,6 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
 use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 use race_proc_macro::game_handler;
-
-type Millis = u64;
-type PlayerId = u64;
 
 #[derive(Default, PartialEq, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum LtMttStage {
@@ -32,24 +28,47 @@ pub enum ClientEvent {
     SitOut,
 }
 
+#[derive(Default, Debug, BorshSerialize, BorshDeserialize, Clone)]
+pub struct TicketRule {
+    times: Option<usize>,
+    amount: u64,
+    chips: u64,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize)]
+pub struct LtMttAccountData {
+    pub entry_open_time: u64,
+    pub entry_close_time: u64,
+    pub settle_time: u64,
+    pub table_size: u8,
+    pub ticket_rules: Vec<TicketRule>,
+    // blind_info: BlindInfo,
+    // prize_rules: Vec<u8>,
+    // theme: Option<String>, // optional NFT theme
+    // subgame_bundle: String,
+}
+
 impl CustomEvent for ClientEvent {}
 
 #[game_handler]
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
 pub struct LtMtt {
-    entry_start_time: Millis,
-    entry_close_time: Millis,
-    settle_time: Millis,
+    // time unit is millis
+    entry_open_time: u64,
+    entry_close_time: u64,
+    settle_time: u64,
+    // the maximum number is 9 players at the same time,
+    // but never check in ltmtt, it's the launcher's responsibility.
     table_size: u8,
-    ticket: u64,
-    start_chips: u64,
+    ticket_rules: Vec<TicketRule>,
+    /// belows are ltmtt self hold fields
     //
-    players: BTreeMap<PlayerId, Player>,
+    players: BTreeMap<u64, Player>,
     rankings: Vec<Ranking>,
     total_prize: u64,
     stage: LtMttStage,
     tables: BTreeMap<usize, MttTableState>,
-    table_assigns: BTreeMap<PlayerId, usize>,
+    table_assigns: BTreeMap<u64, usize>,
     subgame_bundle: String,
     prize_rules: Vec<u8>,
     // rake: u64,
@@ -60,21 +79,24 @@ pub struct LtMtt {
 impl GameHandler for LtMtt {
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
         let LtMttAccountData {
-            entry_start_time,
+            entry_open_time,
             entry_close_time,
             settle_time,
             table_size,
-            ticket,
-            start_chips,
+            ticket_rules,
         } = init_account.data()?;
 
+        // If params invalid, avoid create LtMtt game.
+        if entry_open_time > entry_close_time || entry_close_time > settle_time {
+            return Err(HandleError::MalformedGameAccountData);
+        }
+
         let state = Self {
-            entry_start_time,
+            entry_open_time,
             entry_close_time,
             settle_time,
             table_size,
-            ticket,
-            start_chips,
+            ticket_rules,
             ..Default::default()
         };
 
@@ -86,7 +108,9 @@ impl GameHandler for LtMtt {
             Event::Ready => self.on_ready(effect)?,
             Event::GameStart => self.on_game_start(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
+            // Only first register will receive this event.
             Event::Join { players } => self.on_join(effect, players)?,
+            // If player loss all chips, he can register again, then ltmtt will receive deposit event.
             Event::Deposit { deposits } => self.on_deposit(effect, deposits)?,
             _ => (),
         }
@@ -97,27 +121,17 @@ impl GameHandler for LtMtt {
 
 impl LtMtt {
     fn on_ready(&self, effect: &mut Effect) -> HandleResult<()> {
-        effect.info("!!!!!!!waefwagbesri;");
-
-        if
-        // effect.timestamp() > self.entry_start_time
-        self.entry_start_time > self.entry_close_time || self.entry_close_time > self.settle_time
-        {
-            effect.set_entry_lock(EntryLock::Closed);
-        } else {
-            effect.info("!!!!!fasdfsafwaegnie;rn");
-            effect.start_game();
-        }
+        effect.info("callback on_ready...");
+        effect.set_entry_lock(EntryLock::Closed);
+        effect.start_game();
 
         Ok(())
     }
 
+    // reset game state, swap secret
     fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
-        if self.entry_start_time > effect.timestamp() {
-            effect.wait_timeout(self.entry_start_time - effect.timestamp());
-        } else {
-            effect.set_entry_lock(EntryLock::Closed);
-        }
+        effect.info("callback on_game_start...");
+        effect.wait_timeout(self.entry_open_time - effect.timestamp());
 
         Ok(())
     }
@@ -125,23 +139,28 @@ impl LtMtt {
     fn on_waiting_timeout(&mut self, effect: &mut Effect) -> HandleResult<()> {
         match self.stage {
             LtMttStage::Init => {
-                self.stage = LtMttStage::EntryOpened;
+                effect.info("callback on_waiting_timeout: stage changed to EntryOpened.");
                 effect.wait_timeout(self.entry_close_time - effect.timestamp());
+                effect.set_entry_lock(EntryLock::Open);
+                self.stage = LtMttStage::EntryOpened;
             }
 
             LtMttStage::EntryOpened => {
-                self.stage = LtMttStage::EntryClosed;
-                effect.set_entry_lock(EntryLock::Closed);
+                effect.info("callback on_waiting_timeout: stage changed to EntryClosed.");
                 effect.wait_timeout(self.settle_time - effect.timestamp());
+                effect.set_entry_lock(EntryLock::Closed);
+                self.stage = LtMttStage::EntryClosed;
             }
 
             LtMttStage::EntryClosed => {
-                self.stage = LtMttStage::Settled;
+                effect.info("callback on_waiting_timeout: stage changed to Settled.");
                 self.do_settle(effect)?;
+                self.stage = LtMttStage::Settled;
             }
 
             _ => {}
         }
+
         Ok(())
     }
 
@@ -184,7 +203,7 @@ impl LtMtt {
         Ok(())
     }
 
-    fn do_sit_in(&mut self, effect: &mut Effect, player_id: PlayerId) -> HandleResult<()> {
+    fn do_sit_in(&mut self, effect: &mut Effect, player_id: u64) -> HandleResult<()> {
         let table_id = self.find_table_sit_in();
 
         if table_id == 0 {
