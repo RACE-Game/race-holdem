@@ -26,10 +26,16 @@ pub struct LtMttAccountData {
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct TicketRule {
-    // None represents any other time.  Start from 1 for first time.
+    // `None` in `deposit_times` means any other time.  `0` represents the first time.
     deposit_times: Option<usize>,
     deposit_amount: u64,
     chips: u64,
+}
+
+impl TicketRule {
+    fn is_match(&self, times: usize, amount: u64) -> bool {
+        self.deposit_times.map(|t| t == times).unwrap_or(true) && self.deposit_amount == amount
+    }
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
@@ -202,43 +208,32 @@ impl LtMtt {
     fn on_deposit(&mut self, effect: &mut Effect, deposits: Vec<GameDeposit>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for deposit in deposits {
-                let player = self
+                let Some(player) = self
                     .rankings
                     .iter_mut()
-                    .find(|p| p.player_id == deposit.id());
+                    .find(|p| p.player_id == deposit.id())
+                else {
+                    effect.reject_deposit(&deposit)?;
+                    continue;
+                };
 
-                match player {
-                    // Accept deposit if player first time register.
-                    Some(p) if p.chips == 0 && p.deposit_history.is_empty() => {
-                        if let Some(ticket) = self.ticket_rules.iter().find(|tr| {
-                            tr.deposit_times.eq(&Some(1)) && tr.deposit_amount == deposit.balance()
-                        }) {
-                            p.chips = ticket.chips;
-                            p.deposit_history.push(deposit.balance());
-                            effect.accept_deposit(&deposit)?;
-                        } else {
-                            effect.reject_deposit(&deposit)?;
-                        }
-                    }
-                    // Accept deposit if player loss all chips then register again.
-                    Some(p) if p.chips == 0 && !p.deposit_history.is_empty() => {
-                        if let Some(ticket) = self.ticket_rules.iter().find(|tr| {
-                            tr.deposit_times.is_none() && tr.deposit_amount == deposit.balance()
-                        }) {
-                            p.chips = ticket.chips;
-                            p.deposit_history.push(deposit.balance());
-                            effect.accept_deposit(&deposit)?;
-                        } else {
-                            effect.reject_deposit(&deposit)?;
-                        }
-                    }
-                    // Reject deposit if player has any chips.
-                    Some(_p) => {
-                        effect.reject_deposit(&deposit)?;
-                    }
-                    // This case only occurred when deposit comes earlier than join for the first time register.
-                    None => {}
+                let Some(ticket_rule) = self
+                    .ticket_rules
+                    .iter()
+                    .find(|tr| tr.is_match(player.deposit_history.len(), deposit.balance()))
+                else {
+                    effect.reject_deposit(&deposit)?;
+                    continue;
+                };
+
+                if player.chips != 0 {
+                    effect.reject_deposit(&deposit)?;
+                    continue;
                 }
+
+                player.chips = ticket_rule.chips;
+                player.deposit_history.push(deposit.balance());
+                effect.accept_deposit(&deposit)?;
             }
         } else {
             for deposit in deposits {
