@@ -1,17 +1,52 @@
 mod errors;
-mod player;
 
 use std::collections::BTreeMap;
 use std::vec;
 
 // use crate::errors::error_leave_not_allowed;
-use crate::player::{Player, PlayerStatus, Ranking};
-
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
 use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
 use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 use race_proc_macro::game_handler;
+
+#[derive(Default, BorshSerialize, BorshDeserialize)]
+pub struct LtMttAccountData {
+    // Time unit is millis
+    pub entry_open_time: u64,
+    pub entry_close_time: u64,
+    pub settle_time: u64,
+    // The maximum number is 9 players at the same time,
+    // but never check in ltmtt, it's the launcher's responsibility.
+    pub table_size: u8,
+    // First time buy: xUSDT -> yCHIPS
+    // rebuy: xUSDT -> zCHIPS
+    pub ticket_rules: Vec<TicketRule>,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct TicketRule {
+    // None represents any other time.  Start from 1 for first time.
+    deposit_times: Option<usize>,
+    deposit_amount: u64,
+    chips: u64,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
+pub enum LtMttPlayerStatus {
+    #[default]
+    SatIn,
+    SatOut,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
+pub struct LtMttPlayer {
+    player_id: u64,
+    position: u16,
+    status: LtMttPlayerStatus,
+    chips: u64,
+    deposit_history: Vec<u64>,
+}
 
 #[derive(Default, PartialEq, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum LtMttStage {
@@ -28,50 +63,24 @@ pub enum ClientEvent {
     SitOut,
 }
 
-#[derive(Default, Debug, BorshSerialize, BorshDeserialize, Clone)]
-pub struct TicketRule {
-    times: Option<usize>,
-    amount: u64,
-    chips: u64,
-}
-
-#[derive(Default, BorshSerialize, BorshDeserialize)]
-pub struct LtMttAccountData {
-    pub entry_open_time: u64,
-    pub entry_close_time: u64,
-    pub settle_time: u64,
-    pub table_size: u8,
-    pub ticket_rules: Vec<TicketRule>,
-    // blind_info: BlindInfo,
-    // prize_rules: Vec<u8>,
-    // theme: Option<String>, // optional NFT theme
-    // subgame_bundle: String,
-}
-
 impl CustomEvent for ClientEvent {}
 
 #[game_handler]
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
 pub struct LtMtt {
-    // time unit is millis
     entry_open_time: u64,
     entry_close_time: u64,
     settle_time: u64,
-    // the maximum number is 9 players at the same time,
-    // but never check in ltmtt, it's the launcher's responsibility.
     table_size: u8,
     ticket_rules: Vec<TicketRule>,
     /// belows are ltmtt self hold fields
-    //
-    players: BTreeMap<u64, Player>,
-    rankings: Vec<Ranking>,
-    total_prize: u64,
     stage: LtMttStage,
+    rankings: Vec<LtMttPlayer>,
+    total_prize: u64,
     tables: BTreeMap<usize, MttTableState>,
     table_assigns: BTreeMap<u64, usize>,
     subgame_bundle: String,
     prize_rules: Vec<u8>,
-    // rake: u64,
     // blind_info: BlindInfo,
     // theme: Option<String>,
 }
@@ -167,14 +176,22 @@ impl LtMtt {
     fn on_join(&mut self, effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for player in new_players {
-                self.players.insert(
-                    player.id(),
-                    Player {
-                        player_id: player.id(),
-                        position: player.position(),
-                        status: PlayerStatus::SatIn,
-                    },
-                );
+                // Don't push player into rankings vector again if already registered.
+                if self.rankings.iter().any(|p| p.player_id == player.id()) {
+                    continue;
+                }
+
+                let ltmtt_player = LtMttPlayer {
+                    player_id: player.id(),
+                    position: player.position(),
+                    status: LtMttPlayerStatus::SatIn,
+                    chips: 0,
+                    deposit_history: vec![],
+                };
+
+                self.rankings.push(ltmtt_player);
+                // TODO: MAYBE re-sort rankings due to chips changed.
+                // TODO: MAY rewrite sit in function.
                 self.do_sit_in(effect, player.id())?;
             }
         }
@@ -185,18 +202,47 @@ impl LtMtt {
     fn on_deposit(&mut self, effect: &mut Effect, deposits: Vec<GameDeposit>) -> HandleResult<()> {
         if self.stage == LtMttStage::EntryOpened {
             for deposit in deposits {
-                if let Some(rank) = self
+                let player = self
                     .rankings
                     .iter_mut()
-                    .find(|r| r.player_id == deposit.id())
-                {
-                    self.total_prize += deposit.balance();
-                    rank.chips = self.start_chips;
-                    rank.deposit_history.push(deposit.balance());
-                    effect.accept_deposit(&deposit)?;
-                } else {
-                    effect.reject_deposit(&deposit)?;
+                    .find(|p| p.player_id == deposit.id());
+
+                match player {
+                    // Accept deposit if player first time register.
+                    Some(p) if p.chips == 0 && p.deposit_history.is_empty() => {
+                        if let Some(ticket) = self.ticket_rules.iter().find(|tr| {
+                            tr.deposit_times.eq(&Some(1)) && tr.deposit_amount == deposit.balance()
+                        }) {
+                            p.chips = ticket.chips;
+                            p.deposit_history.push(deposit.balance());
+                            effect.accept_deposit(&deposit)?;
+                        } else {
+                            effect.reject_deposit(&deposit)?;
+                        }
+                    }
+                    // Accept deposit if player loss all chips then register again.
+                    Some(p) if p.chips == 0 && !p.deposit_history.is_empty() => {
+                        if let Some(ticket) = self.ticket_rules.iter().find(|tr| {
+                            tr.deposit_times.is_none() && tr.deposit_amount == deposit.balance()
+                        }) {
+                            p.chips = ticket.chips;
+                            p.deposit_history.push(deposit.balance());
+                            effect.accept_deposit(&deposit)?;
+                        } else {
+                            effect.reject_deposit(&deposit)?;
+                        }
+                    }
+                    // Reject deposit if player has any chips.
+                    Some(_p) => {
+                        effect.reject_deposit(&deposit)?;
+                    }
+                    // This case only occurred when deposit comes earlier than join for the first time register.
+                    None => {}
                 }
+            }
+        } else {
+            for deposit in deposits {
+                effect.reject_deposit(&deposit)?;
             }
         }
 
