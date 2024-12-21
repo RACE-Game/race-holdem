@@ -19,9 +19,11 @@ pub struct LtMttAccountData {
     // The maximum number is 9 players at the same time,
     // but never check in ltmtt, it's the launcher's responsibility.
     pub table_size: u8,
-    // First time buy: xUSDT -> yCHIPS
-    // rebuy: xUSDT -> zCHIPS
+    // First time register: xUSDT -> yCHIPS
+    // Register again: xUSDT -> zCHIPS
     pub ticket_rules: Vec<TicketRule>,
+    pub total_prize: u64,
+    pub prize_rules: Vec<u8>,
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -79,14 +81,14 @@ pub struct LtMtt {
     settle_time: u64,
     table_size: u8,
     ticket_rules: Vec<TicketRule>,
+    total_prize: u64,
+    prize_rules: Vec<u8>,
     /// belows are ltmtt self hold fields
     stage: LtMttStage,
     rankings: Vec<LtMttPlayer>,
-    total_prize: u64,
     tables: BTreeMap<usize, MttTableState>,
     table_assigns: BTreeMap<u64, usize>,
     subgame_bundle: String,
-    prize_rules: Vec<u8>,
     // blind_info: BlindInfo,
     // theme: Option<String>,
 }
@@ -99,6 +101,8 @@ impl GameHandler for LtMtt {
             settle_time,
             table_size,
             ticket_rules,
+            total_prize,
+            prize_rules,
         } = init_account.data()?;
 
         // If params invalid, avoid create LtMtt game.
@@ -112,6 +116,8 @@ impl GameHandler for LtMtt {
             settle_time,
             table_size,
             ticket_rules,
+            total_prize,
+            prize_rules,
             ..Default::default()
         };
 
