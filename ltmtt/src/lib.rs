@@ -23,7 +23,9 @@ pub struct LtMttAccountData {
     // Register again: xUSDT -> zCHIPS
     pub ticket_rules: Vec<TicketRule>,
     pub total_prize: u64,
-    pub prize_rules: Vec<u8>,
+    // pub blind_rules: Vec<u8>,
+    // pub prize_rules: Vec<u8>,
+    pub subgame_bundle: String,
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -38,6 +40,43 @@ impl TicketRule {
     fn is_match(&self, times: usize, amount: u64) -> bool {
         self.deposit_times.map(|t| t == times).unwrap_or(true) && self.deposit_amount == amount
     }
+}
+
+fn default_ticket_rules() -> Vec<TicketRule> {
+    vec![
+        TicketRule {deposit_times: Some(0), deposit_amount: 0, chips: 15_000},
+        TicketRule {deposit_times: Some(0), deposit_amount: 3_500_000, chips: 1_850_000},
+        TicketRule {deposit_times: Some(0), deposit_amount: 50_000_000, chips: 7_500_000},
+        TicketRule {deposit_times: None, deposit_amount: 500_000, chips: 150_000},
+        TicketRule {deposit_times: None, deposit_amount: 3_500_000, chips: 1_850_000},
+        TicketRule {deposit_times: None, deposit_amount: 50_000_000, chips: 7_500_000},
+    ]
+}
+
+// pub struct PrizeRules {}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct BlindRule {
+    // `None` represents no chips upper limit.
+    max_chips: Option<u64>,
+    sb: u64,
+    bb: u64,
+    ante: u64,
+}
+
+fn default_blind_rules() -> Vec<BlindRule> {
+    vec![
+        BlindRule {max_chips: Some(150_000), sb: 50, bb: 100, ante: 0},
+        BlindRule {max_chips: Some(300_000), sb: 100, bb: 200, ante: 0},
+        BlindRule {max_chips: Some(400_000), sb: 200, bb: 400, ante: 0},
+        BlindRule {max_chips: Some(1_000_000), sb: 500, bb: 1000, ante: 0},
+        BlindRule {max_chips: Some(2_000_000), sb: 1000, bb: 2000, ante: 0},
+        BlindRule {max_chips: Some(4_000_000), sb: 2000, bb: 4000, ante: 0},
+        BlindRule {max_chips: Some(8_000_000), sb: 4000, bb: 8000, ante: 0},
+        BlindRule {max_chips: Some(10_000_000), sb: 5000, bb: 10_000, ante: 0},
+        BlindRule {max_chips: Some(20_000_000), sb: 10_000, bb: 20_000, ante: 0},
+        BlindRule {max_chips: None, sb: 20_000, bb: 40_000, ante: 0},
+    ]
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
@@ -83,13 +122,13 @@ pub struct LtMtt {
     ticket_rules: Vec<TicketRule>,
     total_prize: u64,
     prize_rules: Vec<u8>,
+    blind_rules: Vec<BlindRule>,
+    subgame_bundle: String,
     /// belows are ltmtt self hold fields
     stage: LtMttStage,
     rankings: Vec<LtMttPlayer>,
     tables: BTreeMap<usize, MttTableState>,
     table_assigns: BTreeMap<u64, usize>,
-    subgame_bundle: String,
-    // blind_info: BlindInfo,
     // theme: Option<String>,
 }
 
@@ -100,15 +139,21 @@ impl GameHandler for LtMtt {
             entry_close_time,
             settle_time,
             table_size,
-            ticket_rules,
+            mut ticket_rules,
             total_prize,
-            prize_rules,
+            subgame_bundle,
         } = init_account.data()?;
+
+        if ticket_rules.is_empty() {
+            ticket_rules = default_ticket_rules();
+        }
 
         // If params invalid, avoid create LtMtt game.
         if entry_open_time > entry_close_time || entry_close_time > settle_time {
             return Err(HandleError::MalformedGameAccountData);
         }
+
+        let blind_rules = default_blind_rules();
 
         let state = Self {
             entry_open_time,
@@ -117,7 +162,8 @@ impl GameHandler for LtMtt {
             table_size,
             ticket_rules,
             total_prize,
-            prize_rules,
+            subgame_bundle,
+            blind_rules,
             ..Default::default()
         };
 
@@ -263,15 +309,15 @@ impl LtMtt {
                 .get_mut(&new_table_id)
                 .ok_or(errors::error_table_not_found())?;
 
-            let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
-            table_ref.add_player(&mut mtt_table_player);
+            // let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
+            // table_ref.add_player(&mut mtt_table_player);
 
-            effect.bridge_event(
-                new_table_id as _,
-                HoldemBridgeEvent::Relocate {
-                    players: vec![mtt_table_player],
-                },
-            )?;
+            // effect.bridge_event(
+            //     new_table_id as _,
+            //     HoldemBridgeEvent::Relocate {
+            //         players: vec![mtt_table_player],
+            //     },
+            // )?;
         } else {
             self.table_assigns.insert(player_id, table_id);
 
@@ -280,15 +326,15 @@ impl LtMtt {
                 .get_mut(&table_id)
                 .ok_or(errors::error_table_not_found())?;
 
-            let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
-            table_ref.add_player(&mut mtt_table_player);
+            // let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
+            // table_ref.add_player(&mut mtt_table_player);
 
-            effect.bridge_event(
-                table_id as _,
-                HoldemBridgeEvent::Relocate {
-                    players: vec![mtt_table_player],
-                },
-            )?;
+            // effect.bridge_event(
+            //     table_id as _,
+            //     HoldemBridgeEvent::Relocate {
+            //         players: vec![mtt_table_player],
+            //     },
+            // )?;
         }
 
         effect.checkpoint();
@@ -296,6 +342,10 @@ impl LtMtt {
     }
 
     fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        if self.prize_rules.is_empty() {
+            return Ok(());
+        }
+
         let total_shares: u8 = self.prize_rules.iter().take(self.rankings.len()).sum();
         let prize_share: u64 = self.total_prize / total_shares as u64;
 
@@ -350,6 +400,22 @@ impl LtMtt {
 
 #[cfg(test)]
 mod tests {
+    use borsh::BorshDeserialize;
+    use race_api::{effect::Effect, event::Event};
+    use super::*;
+
+    #[test]
+    fn test() {
+        let effect = [0, 0, 0, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 228, 0, 0, 0, 54, 191, 170, 244, 147, 1, 0, 0, 150, 169, 171, 244, 147, 1, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 9, 6, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 152, 58, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 240, 73, 2, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 16, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 116, 97, 114, 103, 101, 116, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 108, 116, 109, 116, 116, 116, 97, 98, 108, 101, 119, 97, 115, 109, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+        let event = [12];
+
+        let mut effect = Effect::try_from_slice(&effect).unwrap();
+        let event = Event::try_from_slice(&event).unwrap();
+
+        let mut ltmtt = effect.__handler_state::<LtMtt>();
+        ltmtt.handle_event(&mut effect, event).unwrap();
+    }
+
     // use std::time::SystemTime;
     // use super::*;
     // use race_test::prelude::*;
