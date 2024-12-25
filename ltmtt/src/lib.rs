@@ -44,12 +44,36 @@ impl TicketRule {
 
 fn default_ticket_rules() -> Vec<TicketRule> {
     vec![
-        TicketRule {deposit_times: Some(0), deposit_amount: 0, chips: 15_000},
-        TicketRule {deposit_times: Some(0), deposit_amount: 3_500_000, chips: 1_850_000},
-        TicketRule {deposit_times: Some(0), deposit_amount: 50_000_000, chips: 7_500_000},
-        TicketRule {deposit_times: None, deposit_amount: 500_000, chips: 150_000},
-        TicketRule {deposit_times: None, deposit_amount: 3_500_000, chips: 1_850_000},
-        TicketRule {deposit_times: None, deposit_amount: 50_000_000, chips: 7_500_000},
+        TicketRule {
+            deposit_times: Some(0),
+            deposit_amount: 0,
+            chips: 15_000,
+        },
+        TicketRule {
+            deposit_times: Some(0),
+            deposit_amount: 3_500_000,
+            chips: 1_850_000,
+        },
+        TicketRule {
+            deposit_times: Some(0),
+            deposit_amount: 50_000_000,
+            chips: 7_500_000,
+        },
+        TicketRule {
+            deposit_times: None,
+            deposit_amount: 500_000,
+            chips: 150_000,
+        },
+        TicketRule {
+            deposit_times: None,
+            deposit_amount: 3_500_000,
+            chips: 1_850_000,
+        },
+        TicketRule {
+            deposit_times: None,
+            deposit_amount: 50_000_000,
+            chips: 7_500_000,
+        },
     ]
 }
 
@@ -64,18 +88,77 @@ pub struct BlindRule {
     ante: u64,
 }
 
+fn match_blind_rule_by_chips(rules: &Vec<BlindRule>, chips: u64) -> &BlindRule {
+    // BlindRules MUST ensures sorted by max_chips asc, because the client can pass custom rules.
+    // Sort Vec<BlindRule> in init_state handler.
+    rules
+        .iter()
+        .find(|rule| chips <= rule.max_chips.unwrap_or(u64::max_value()))
+        .expect("BlindRules Error")
+}
+
 fn default_blind_rules() -> Vec<BlindRule> {
     vec![
-        BlindRule {max_chips: Some(150_000), sb: 50, bb: 100, ante: 0},
-        BlindRule {max_chips: Some(300_000), sb: 100, bb: 200, ante: 0},
-        BlindRule {max_chips: Some(400_000), sb: 200, bb: 400, ante: 0},
-        BlindRule {max_chips: Some(1_000_000), sb: 500, bb: 1000, ante: 0},
-        BlindRule {max_chips: Some(2_000_000), sb: 1000, bb: 2000, ante: 0},
-        BlindRule {max_chips: Some(4_000_000), sb: 2000, bb: 4000, ante: 0},
-        BlindRule {max_chips: Some(8_000_000), sb: 4000, bb: 8000, ante: 0},
-        BlindRule {max_chips: Some(10_000_000), sb: 5000, bb: 10_000, ante: 0},
-        BlindRule {max_chips: Some(20_000_000), sb: 10_000, bb: 20_000, ante: 0},
-        BlindRule {max_chips: None, sb: 20_000, bb: 40_000, ante: 0},
+        BlindRule {
+            max_chips: Some(150_000),
+            sb: 50,
+            bb: 100,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(300_000),
+            sb: 100,
+            bb: 200,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(400_000),
+            sb: 200,
+            bb: 400,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(1_000_000),
+            sb: 500,
+            bb: 1000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(2_000_000),
+            sb: 1000,
+            bb: 2000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(4_000_000),
+            sb: 2000,
+            bb: 4000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(8_000_000),
+            sb: 4000,
+            bb: 8000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(10_000_000),
+            sb: 5000,
+            bb: 10_000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(20_000_000),
+            sb: 10_000,
+            bb: 20_000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: None,
+            sb: 20_000,
+            bb: 40_000,
+            ante: 0,
+        },
     ]
 }
 
@@ -176,8 +259,10 @@ impl GameHandler for LtMtt {
             Event::GameStart => self.on_game_start(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
             // Only first register will receive this event.
+            // This event only add player to rankings board.
             Event::Join { players } => self.on_join(effect, players)?,
             // If player loss all chips, he can register again, then ltmtt will receive deposit event.
+            // If deposit succeed, sit in to a table.
             Event::Deposit { deposits } => self.on_deposit(effect, deposits)?,
             _ => (),
         }
@@ -250,7 +335,7 @@ impl LtMtt {
                 self.rankings.push(ltmtt_player);
                 // TODO: MAYBE re-sort rankings due to chips changed.
                 // TODO: MAY rewrite sit in function.
-                self.do_sit_in(effect, player.id())?;
+                // self.do_sit_in(effect, player.id())?;
             }
         }
 
@@ -286,6 +371,7 @@ impl LtMtt {
                 player.chips = ticket_rule.chips;
                 player.deposit_history.push(deposit.balance());
                 effect.accept_deposit(&deposit)?;
+                self.do_sit_in(effect, &player)?;
             }
         } else {
             for deposit in deposits {
@@ -296,46 +382,21 @@ impl LtMtt {
         Ok(())
     }
 
-    fn do_sit_in(&mut self, effect: &mut Effect, player_id: u64) -> HandleResult<()> {
-        let table_id = self.find_table_sit_in();
+    fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
+        let mut mtt_table_player = MttTablePlayer::new(player.player_id, player.chips, 0);
+        let table_id = self.find_or_create_table(effect, player)?;
+        let table_ref = self
+            .tables
+            .get_mut(&table_id)
+            .ok_or(errors::error_table_not_found())?;
 
-        if table_id == 0 {
-            // no availiable table found
-            let new_table_id = self.create_table(effect)?;
-            self.table_assigns.insert(player_id, new_table_id);
-
-            let table_ref = self
-                .tables
-                .get_mut(&new_table_id)
-                .ok_or(errors::error_table_not_found())?;
-
-            // let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
-            // table_ref.add_player(&mut mtt_table_player);
-
-            // effect.bridge_event(
-            //     new_table_id as _,
-            //     HoldemBridgeEvent::Relocate {
-            //         players: vec![mtt_table_player],
-            //     },
-            // )?;
-        } else {
-            self.table_assigns.insert(player_id, table_id);
-
-            let table_ref = self
-                .tables
-                .get_mut(&table_id)
-                .ok_or(errors::error_table_not_found())?;
-
-            // let mut mtt_table_player = MttTablePlayer::new(player_id, self.start_chips, 0);
-            // table_ref.add_player(&mut mtt_table_player);
-
-            // effect.bridge_event(
-            //     table_id as _,
-            //     HoldemBridgeEvent::Relocate {
-            //         players: vec![mtt_table_player],
-            //     },
-            // )?;
-        }
+        table_ref.add_player(&mut mtt_table_player);
+        effect.bridge_event(
+            table_id,
+            HoldemBridgeEvent::Relocate {
+                players: vec![mtt_table_player],
+            },
+        )?;
 
         effect.checkpoint();
         Ok(())
@@ -361,25 +422,39 @@ impl LtMtt {
         Ok(())
     }
 
-    fn find_table_sit_in(&self) -> usize {
-        let mut min = self.table_size;
+    fn find_or_create_table(
+        &mut self,
+        effect: &mut Effect,
+        player: &LtMttPlayer,
+    ) -> HandleResult<usize> {
+        // Sort tables, order by sb asc, players_num asc
+        // Traverse sorted_tables, the first one is the best table fit current player.
+        let mut sorted_tables: Vec<_> = self.tables.iter().collect();
+        sorted_tables.sort_by(|(_, a), (_, b)| {
+            a.sb.cmp(&b.sb)
+                .then_with(|| a.players.len().cmp(&b.players.len()))
+        });
 
-        // After iteration, it will be the table with the least players,
-        // or 0 represents no table or all tables are full.
-        self.tables.iter().fold(0, |table_id, (id, table)| {
-            if (table.players.len() as u8) < min {
-                min = table.players.len() as u8;
-                *id
-            } else {
-                table_id
-            }
-        })
+        let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player.chips);
+
+        if let Some((&id, _)) = sorted_tables.iter().find(|(_id, table)| {
+            matched_blind_rule.sb <= table.sb && table.players.len() < self.table_size as _
+        }) {
+            Ok(id)
+        } else {
+            let table_id = self.create_table(effect, matched_blind_rule.clone())?;
+            Ok(table_id)
+        }
     }
 
-    fn create_table(&mut self, effect: &mut Effect) -> HandleResult<usize> {
+    fn create_table(&mut self, effect: &mut Effect, blind_rule: BlindRule) -> HandleResult<usize> {
         let table_id = self.tables.iter().map(|(id, _)| *id).max().unwrap_or(0) + 1;
-        let sb = 1000 as u64;
-        let bb = 2000 as u64;
+        let BlindRule {
+            max_chips,
+            sb,
+            bb,
+            ante,
+        } = blind_rule;
 
         let table = MttTableState {
             table_id,
@@ -400,13 +475,28 @@ impl LtMtt {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use borsh::BorshDeserialize;
     use race_api::{effect::Effect, event::Event};
-    use super::*;
 
     #[test]
     fn test() {
-        let effect = [0, 0, 0, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 228, 0, 0, 0, 54, 191, 170, 244, 147, 1, 0, 0, 150, 169, 171, 244, 147, 1, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 9, 6, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 152, 58, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0, 0, 240, 73, 2, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 16, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 116, 97, 114, 103, 101, 116, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 108, 116, 109, 116, 116, 116, 97, 98, 108, 101, 119, 97, 115, 109, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0];
+        let effect = [
+            0, 0, 0, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 228, 0, 0, 0, 54, 191, 170, 244, 147, 1, 0, 0, 150, 169,
+            171, 244, 147, 1, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 9, 6, 0, 0, 0, 1, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 152, 58, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+            128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0,
+            0, 240, 73, 2, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0,
+            0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 16, 39, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 114, 97, 99, 101, 104, 111, 108, 100, 101,
+            109, 116, 97, 114, 103, 101, 116, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 108,
+            116, 109, 116, 116, 116, 97, 98, 108, 101, 119, 97, 115, 109, 2, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+        ];
         let event = [12];
 
         let mut effect = Effect::try_from_slice(&effect).unwrap();
