@@ -6,7 +6,10 @@ use std::vec;
 // use crate::errors::error_leave_not_allowed;
 use borsh::{BorshDeserialize, BorshSerialize};
 // use race_api::engine::GameHandler;
-use race_api::{prelude::*, types::EntryLock, types::GameDeposit};
+use race_api::{
+    prelude::*,
+    types::{EntryLock, GameDeposit},
+};
 use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 use race_proc_macro::game_handler;
 
@@ -162,14 +165,14 @@ fn default_blind_rules() -> Vec<BlindRule> {
     ]
 }
 
-#[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub enum LtMttPlayerStatus {
     #[default]
     SatIn,
     SatOut,
 }
 
-#[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct LtMttPlayer {
     player_id: u64,
     position: u16,
@@ -263,7 +266,16 @@ impl GameHandler for LtMtt {
             Event::Join { players } => self.on_join(effect, players)?,
             // If player loss all chips, he can register again, then ltmtt will receive deposit event.
             // If deposit succeed, sit in to a table.
-            Event::Deposit { deposits } => self.on_deposit(effect, deposits)?,
+            Event::Deposit { deposits } => {
+                for deposit in deposits {
+                    if let Some(player) = self.on_deposit(effect, &deposit)? {
+                        self.do_sit_in(effect, &player)?;
+                    } else {
+                        ()
+                    }
+                }
+            }
+
             _ => (),
         }
 
@@ -316,7 +328,8 @@ impl LtMtt {
         Ok(())
     }
 
-    fn on_join(&mut self, effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
+    fn on_join(&mut self, _effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
+        // There's no need to re-sort rankings because new joined user is the last, its stable ranking.
         if self.stage == LtMttStage::EntryOpened {
             for player in new_players {
                 // Don't push player into rankings vector again if already registered.
@@ -333,53 +346,45 @@ impl LtMtt {
                 };
 
                 self.rankings.push(ltmtt_player);
-                // TODO: MAYBE re-sort rankings due to chips changed.
-                // TODO: MAY rewrite sit in function.
-                // self.do_sit_in(effect, player.id())?;
             }
         }
 
         Ok(())
     }
 
-    fn on_deposit(&mut self, effect: &mut Effect, deposits: Vec<GameDeposit>) -> HandleResult<()> {
+    fn on_deposit(
+        &mut self,
+        effect: &mut Effect,
+        deposit: &GameDeposit,
+    ) -> HandleResult<Option<LtMttPlayer>> {
         if self.stage == LtMttStage::EntryOpened {
-            for deposit in deposits {
-                let Some(player) = self
-                    .rankings
-                    .iter_mut()
-                    .find(|p| p.player_id == deposit.id())
-                else {
-                    effect.reject_deposit(&deposit)?;
-                    continue;
-                };
-
-                let Some(ticket_rule) = self
-                    .ticket_rules
-                    .iter()
-                    .find(|tr| tr.is_match(player.deposit_history.len(), deposit.balance()))
-                else {
-                    effect.reject_deposit(&deposit)?;
-                    continue;
-                };
-
-                if player.chips != 0 {
-                    effect.reject_deposit(&deposit)?;
-                    continue;
-                }
-
-                player.chips = ticket_rule.chips;
-                player.deposit_history.push(deposit.balance());
-                effect.accept_deposit(&deposit)?;
-                self.do_sit_in(effect, &player)?;
-            }
-        } else {
-            for deposit in deposits {
+            let Some(player) = self
+                .rankings
+                .iter_mut()
+                .find(|p| p.player_id == deposit.id())
+            else {
                 effect.reject_deposit(&deposit)?;
-            }
-        }
+                return Ok(None);
+            };
 
-        Ok(())
+            let Some(ticket_rule) = self
+                .ticket_rules
+                .iter()
+                .find(|tr| tr.is_match(player.deposit_history.len(), deposit.balance()))
+            else {
+                effect.reject_deposit(&deposit)?;
+                return Ok(None);
+            };
+
+            player.chips = ticket_rule.chips;
+            player.deposit_history.push(deposit.balance());
+            effect.accept_deposit(&deposit)?;
+
+            Ok(Some(player.clone()))
+        } else {
+            effect.reject_deposit(&deposit)?;
+            return Ok(None);
+        }
     }
 
     fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
@@ -399,7 +404,13 @@ impl LtMtt {
         )?;
 
         effect.checkpoint();
+
         Ok(())
+    }
+
+    #[allow(unused)]
+    fn find_player_by_id(&self, player_id: u64) -> Option<&LtMttPlayer> {
+        self.rankings.iter().find(|p| p.player_id == player_id)
     }
 
     fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
@@ -450,10 +461,10 @@ impl LtMtt {
     fn create_table(&mut self, effect: &mut Effect, blind_rule: BlindRule) -> HandleResult<usize> {
         let table_id = self.tables.iter().map(|(id, _)| *id).max().unwrap_or(0) + 1;
         let BlindRule {
-            max_chips,
+            max_chips: _,
             sb,
             bb,
-            ante,
+            ante: _,
         } = blind_rule;
 
         let table = MttTableState {
