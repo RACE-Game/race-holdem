@@ -363,6 +363,7 @@ impl LtMtt {
                 .iter_mut()
                 .find(|p| p.player_id == deposit.id())
             else {
+                effect.info(format!("on_deposit: Not found user {} in rankings.", deposit.id()));
                 effect.reject_deposit(&deposit)?;
                 return Ok(None);
             };
@@ -372,16 +373,23 @@ impl LtMtt {
                 .iter()
                 .find(|tr| tr.is_match(player.deposit_history.len(), deposit.balance()))
             else {
+                effect.info(format!(
+                    "on_deposit: Not found matched TicketRule for {} deposit: {}.",
+                    deposit.id(),
+                    deposit.balance()
+                ));
                 effect.reject_deposit(&deposit)?;
                 return Ok(None);
             };
 
             player.chips = ticket_rule.chips;
             player.deposit_history.push(deposit.balance());
+            effect.info(format!("on_deposit: User {} deposit {}.", deposit.id(), deposit.balance()));
             effect.accept_deposit(&deposit)?;
 
             Ok(Some(player.clone()))
         } else {
+            effect.info(format!("on_deposit: Stage not satisfied user {}.", deposit.id()));
             effect.reject_deposit(&deposit)?;
             return Ok(None);
         }
@@ -403,6 +411,7 @@ impl LtMtt {
             },
         )?;
 
+        effect.info(format!("do_sit_in: user {} sit in table {}.", player.player_id, table_id));
         effect.checkpoint();
 
         Ok(())
