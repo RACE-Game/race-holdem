@@ -10,7 +10,8 @@ use race_api::{
     prelude::*,
     types::{EntryLock, GameDeposit},
 };
-use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
+
+use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState};
 use race_proc_macro::game_handler;
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
@@ -276,6 +277,17 @@ impl GameHandler for LtMtt {
                 }
             }
 
+            Event::Bridge { raw, .. } => {
+                let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
+
+                match bridge_event {
+                    game_result @ HoldemBridgeEvent::GameResult { .. } => {
+                        self.on_game_result(effect, game_result)?
+                    }
+                    _ => return Err(errors::error_invalid_bridge_event()),
+                }
+            }
+
             _ => (),
         }
 
@@ -363,7 +375,10 @@ impl LtMtt {
                 .iter_mut()
                 .find(|p| p.player_id == deposit.id())
             else {
-                effect.info(format!("on_deposit: Not found user {} in rankings.", deposit.id()));
+                effect.info(format!(
+                    "on_deposit: Not found user {} in rankings.",
+                    deposit.id()
+                ));
                 effect.reject_deposit(&deposit)?;
                 return Ok(None);
             };
@@ -384,14 +399,53 @@ impl LtMtt {
 
             player.chips = ticket_rule.chips;
             player.deposit_history.push(deposit.balance());
-            effect.info(format!("on_deposit: User {} deposit {}.", deposit.id(), deposit.balance()));
+            effect.info(format!(
+                "on_deposit: User {} deposit {}.",
+                deposit.id(),
+                deposit.balance()
+            ));
             effect.accept_deposit(&deposit)?;
 
             Ok(Some(player.clone()))
         } else {
-            effect.info(format!("on_deposit: Stage not satisfied user {}.", deposit.id()));
+            effect.info(format!(
+                "on_deposit: Stage not satisfied user {}.",
+                deposit.id()
+            ));
             effect.reject_deposit(&deposit)?;
             return Ok(None);
+        }
+    }
+
+    fn on_game_result(
+        &mut self,
+        effect: &mut Effect,
+        game_result: HoldemBridgeEvent,
+    ) -> HandleResult<()> {
+        if let HoldemBridgeEvent::GameResult {
+            hand_id: _,
+            table_id,
+            chips_change,
+            table,
+        } = game_result
+        {
+            effect.info(format!("on_game_result: table_id: {}", table_id));
+            self.tables.insert(table_id, table);
+            self.apply_chips_change(chips_change)?;
+            let new_table = self.tables.get(&table_id).expect("error_table_not_found");
+            effect.bridge_event(
+                table_id,
+                HoldemBridgeEvent::StartGame {
+                    sb: new_table.sb,
+                    bb: new_table.bb,
+                    moved_players: vec![],
+                },
+            )?;
+            effect.checkpoint();
+
+            Ok(())
+        } else {
+            Ok(())
         }
     }
 
@@ -411,15 +465,37 @@ impl LtMtt {
             },
         )?;
 
-        effect.info(format!("do_sit_in: user {} sit in table {}.", player.player_id, table_id));
+        effect.info(format!(
+            "do_sit_in: user {} sit in table {}.",
+            player.player_id, table_id
+        ));
         effect.checkpoint();
 
         Ok(())
     }
 
-    #[allow(unused)]
-    fn find_player_by_id(&self, player_id: u64) -> Option<&LtMttPlayer> {
-        self.rankings.iter().find(|p| p.player_id == player_id)
+    fn apply_chips_change(&mut self, chips_change: BTreeMap<u64, ChipsChange>) -> HandleResult<()> {
+        for (player_id, change) in chips_change.into_iter() {
+            let player = self
+                .rankings
+                .iter_mut()
+                .find(|p| p.player_id == player_id)
+                .ok_or(errors::error_player_not_found())?;
+
+            match change {
+                ChipsChange::Add(amount) => {
+                    player.chips += amount;
+                }
+                ChipsChange::Sub(amount) => {
+                    player.chips -= amount;
+                    if player.chips <= 0 {
+                        player.status = LtMttPlayerStatus::SatOut;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
@@ -440,6 +516,11 @@ impl LtMtt {
         }
 
         Ok(())
+    }
+
+    #[allow(unused)]
+    fn find_player_by_id(&self, player_id: u64) -> Option<&LtMttPlayer> {
+        self.rankings.iter().find(|p| p.player_id == player_id)
     }
 
     fn find_or_create_table(
