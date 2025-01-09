@@ -1,4 +1,4 @@
-release-all: (release "cash") (release "mtt-table") (release "mtt")
+release-all: (release "cash") (release "mtt-table") (release "mtt") (release "ltmtt")
 
 debug-all: (debug "cash") (debug "mtt-table") (debug "mtt")
 

@@ -1,0 +1,662 @@
+mod errors;
+
+use std::collections::BTreeMap;
+use std::vec;
+
+// use crate::errors::error_leave_not_allowed;
+use borsh::{BorshDeserialize, BorshSerialize};
+// use race_api::engine::GameHandler;
+use race_api::{
+    prelude::*,
+    types::{EntryLock, GameDeposit},
+};
+
+use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState};
+use race_proc_macro::game_handler;
+
+#[derive(Default, BorshSerialize, BorshDeserialize)]
+pub struct LtMttAccountData {
+    // Time unit is millis
+    pub entry_open_time: u64,
+    pub entry_close_time: u64,
+    pub settle_time: u64,
+    // The maximum number is 9 players at the same time,
+    // but never check in ltmtt, it's the launcher's responsibility.
+    pub table_size: u8,
+    // First time register: xUSDT -> yCHIPS
+    // Register again: xUSDT -> zCHIPS
+    pub ticket_rules: Vec<TicketRule>,
+    pub total_prize: u64,
+    // pub blind_rules: Vec<u8>,
+    // pub prize_rules: Vec<u8>,
+    pub subgame_bundle: String,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct TicketRule {
+    // `None` in `deposit_times` means any other time.  `0` represents the first time.
+    deposit_times: Option<usize>,
+    deposit_amount: u64,
+    chips: u64,
+}
+
+impl TicketRule {
+    fn is_match(&self, times: usize, amount: u64) -> bool {
+        self.deposit_times.map(|t| t == times).unwrap_or(true) && self.deposit_amount == amount
+    }
+}
+
+fn default_ticket_rules() -> Vec<TicketRule> {
+    vec![
+        TicketRule {
+            deposit_times: Some(0),
+            deposit_amount: 0,
+            chips: 15_000,
+        },
+        TicketRule {
+            deposit_times: Some(0),
+            deposit_amount: 3_500_000,
+            chips: 1_850_000,
+        },
+        TicketRule {
+            deposit_times: Some(0),
+            deposit_amount: 50_000_000,
+            chips: 7_500_000,
+        },
+        TicketRule {
+            deposit_times: None,
+            deposit_amount: 500_000,
+            chips: 150_000,
+        },
+        TicketRule {
+            deposit_times: None,
+            deposit_amount: 3_500_000,
+            chips: 1_850_000,
+        },
+        TicketRule {
+            deposit_times: None,
+            deposit_amount: 50_000_000,
+            chips: 7_500_000,
+        },
+    ]
+}
+
+// pub struct PrizeRules {}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct BlindRule {
+    // `None` represents no chips upper limit.
+    max_chips: Option<u64>,
+    sb: u64,
+    bb: u64,
+    ante: u64,
+}
+
+fn match_blind_rule_by_chips(rules: &Vec<BlindRule>, chips: u64) -> &BlindRule {
+    // BlindRules MUST ensures sorted by max_chips asc, because the client can pass custom rules.
+    // Sort Vec<BlindRule> in init_state handler.
+    rules
+        .iter()
+        .find(|rule| chips <= rule.max_chips.unwrap_or(u64::max_value()))
+        .expect("BlindRules Error")
+}
+
+fn default_blind_rules() -> Vec<BlindRule> {
+    vec![
+        BlindRule {
+            max_chips: Some(150_000),
+            sb: 50,
+            bb: 100,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(300_000),
+            sb: 100,
+            bb: 200,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(400_000),
+            sb: 200,
+            bb: 400,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(1_000_000),
+            sb: 500,
+            bb: 1000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(2_000_000),
+            sb: 1000,
+            bb: 2000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(4_000_000),
+            sb: 2000,
+            bb: 4000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(8_000_000),
+            sb: 4000,
+            bb: 8000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(10_000_000),
+            sb: 5000,
+            bb: 10_000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: Some(20_000_000),
+            sb: 10_000,
+            bb: 20_000,
+            ante: 0,
+        },
+        BlindRule {
+            max_chips: None,
+            sb: 20_000,
+            bb: 40_000,
+            ante: 0,
+        },
+    ]
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub enum LtMttPlayerStatus {
+    #[default]
+    SatIn,
+    SatOut,
+}
+
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct LtMttPlayer {
+    player_id: u64,
+    position: u16,
+    status: LtMttPlayerStatus,
+    chips: u64,
+    deposit_history: Vec<u64>,
+}
+
+#[derive(Default, PartialEq, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
+pub enum LtMttStage {
+    #[default]
+    Init,
+    EntryOpened,
+    EntryClosed,
+    Settled,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone)]
+pub enum ClientEvent {
+    SitIn,
+    SitOut,
+}
+
+impl CustomEvent for ClientEvent {}
+
+#[game_handler]
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug)]
+pub struct LtMtt {
+    entry_open_time: u64,
+    entry_close_time: u64,
+    settle_time: u64,
+    table_size: u8,
+    ticket_rules: Vec<TicketRule>,
+    total_prize: u64,
+    prize_rules: Vec<u8>,
+    blind_rules: Vec<BlindRule>,
+    subgame_bundle: String,
+    /// belows are ltmtt self hold fields
+    stage: LtMttStage,
+    rankings: Vec<LtMttPlayer>,
+    tables: BTreeMap<usize, MttTableState>,
+    table_assigns: BTreeMap<u64, usize>,
+    // theme: Option<String>,
+}
+
+impl GameHandler for LtMtt {
+    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
+        let LtMttAccountData {
+            entry_open_time,
+            entry_close_time,
+            settle_time,
+            table_size,
+            mut ticket_rules,
+            total_prize,
+            subgame_bundle,
+        } = init_account.data()?;
+
+        if ticket_rules.is_empty() {
+            ticket_rules = default_ticket_rules();
+        }
+
+        // If params invalid, avoid create LtMtt game.
+        if entry_open_time > entry_close_time || entry_close_time > settle_time {
+            return Err(HandleError::MalformedGameAccountData);
+        }
+
+        let blind_rules = default_blind_rules();
+
+        let state = Self {
+            entry_open_time,
+            entry_close_time,
+            settle_time,
+            table_size,
+            ticket_rules,
+            total_prize,
+            subgame_bundle,
+            blind_rules,
+            ..Default::default()
+        };
+
+        Ok(state)
+    }
+
+    fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
+        match event {
+            Event::Ready => self.on_ready(effect)?,
+            Event::GameStart => self.on_game_start(effect)?,
+            Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
+            // Only first register will receive this event.
+            // This event only add player to rankings board.
+            Event::Join { players } => self.on_join(effect, players)?,
+            // If player loss all chips, he can register again, then ltmtt will receive deposit event.
+            // If deposit succeed, sit in to a table.
+            Event::Deposit { deposits } => {
+                for deposit in deposits {
+                    if let Some(player) = self.on_deposit(effect, &deposit)? {
+                        self.do_sit_in(effect, &player)?;
+                    } else {
+                        ()
+                    }
+                }
+            }
+
+            Event::Bridge { raw, .. } => {
+                let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
+
+                match bridge_event {
+                    game_result @ HoldemBridgeEvent::GameResult { .. } => {
+                        self.on_game_result(effect, game_result)?
+                    }
+                    _ => return Err(errors::error_invalid_bridge_event()),
+                }
+            }
+
+            _ => (),
+        }
+
+        Ok(())
+    }
+}
+
+impl LtMtt {
+    fn on_ready(&self, effect: &mut Effect) -> HandleResult<()> {
+        effect.info("callback on_ready...");
+        effect.set_entry_lock(EntryLock::Closed);
+        effect.start_game();
+
+        Ok(())
+    }
+
+    // reset game state, swap secret
+    fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        effect.info("callback on_game_start...");
+        effect.wait_timeout(self.entry_open_time - effect.timestamp());
+
+        Ok(())
+    }
+
+    fn on_waiting_timeout(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        match self.stage {
+            LtMttStage::Init => {
+                effect.info("callback on_waiting_timeout: stage changed to EntryOpened.");
+                effect.wait_timeout(self.entry_close_time - effect.timestamp());
+                effect.set_entry_lock(EntryLock::Open);
+                self.stage = LtMttStage::EntryOpened;
+            }
+
+            LtMttStage::EntryOpened => {
+                effect.info("callback on_waiting_timeout: stage changed to EntryClosed.");
+                effect.wait_timeout(self.settle_time - effect.timestamp());
+                effect.set_entry_lock(EntryLock::Closed);
+                self.stage = LtMttStage::EntryClosed;
+            }
+
+            LtMttStage::EntryClosed => {
+                effect.info("callback on_waiting_timeout: stage changed to Settled.");
+                self.do_settle(effect)?;
+                self.stage = LtMttStage::Settled;
+            }
+
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn on_join(&mut self, _effect: &mut Effect, new_players: Vec<GamePlayer>) -> HandleResult<()> {
+        // There's no need to re-sort rankings because new joined user is the last, its stable ranking.
+        if self.stage == LtMttStage::EntryOpened {
+            for player in new_players {
+                // Don't push player into rankings vector again if already registered.
+                if self.rankings.iter().any(|p| p.player_id == player.id()) {
+                    continue;
+                }
+
+                let ltmtt_player = LtMttPlayer {
+                    player_id: player.id(),
+                    position: player.position(),
+                    status: LtMttPlayerStatus::SatIn,
+                    chips: 0,
+                    deposit_history: vec![],
+                };
+
+                self.rankings.push(ltmtt_player);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn on_deposit(
+        &mut self,
+        effect: &mut Effect,
+        deposit: &GameDeposit,
+    ) -> HandleResult<Option<LtMttPlayer>> {
+        if self.stage == LtMttStage::EntryOpened {
+            let Some(player) = self
+                .rankings
+                .iter_mut()
+                .find(|p| p.player_id == deposit.id())
+            else {
+                effect.info(format!(
+                    "on_deposit: Not found user {} in rankings.",
+                    deposit.id()
+                ));
+                effect.reject_deposit(&deposit)?;
+                return Ok(None);
+            };
+
+            let Some(ticket_rule) = self
+                .ticket_rules
+                .iter()
+                .find(|tr| tr.is_match(player.deposit_history.len(), deposit.balance()))
+            else {
+                effect.info(format!(
+                    "on_deposit: Not found matched TicketRule for {} deposit: {}.",
+                    deposit.id(),
+                    deposit.balance()
+                ));
+                effect.reject_deposit(&deposit)?;
+                return Ok(None);
+            };
+
+            player.chips = ticket_rule.chips;
+            player.deposit_history.push(deposit.balance());
+            effect.info(format!(
+                "on_deposit: User {} deposit {}.",
+                deposit.id(),
+                deposit.balance()
+            ));
+            effect.accept_deposit(&deposit)?;
+
+            Ok(Some(player.clone()))
+        } else {
+            effect.info(format!(
+                "on_deposit: Stage not satisfied user {}.",
+                deposit.id()
+            ));
+            effect.reject_deposit(&deposit)?;
+            return Ok(None);
+        }
+    }
+
+    fn on_game_result(
+        &mut self,
+        effect: &mut Effect,
+        game_result: HoldemBridgeEvent,
+    ) -> HandleResult<()> {
+        if let HoldemBridgeEvent::GameResult {
+            hand_id: _,
+            table_id,
+            chips_change,
+            table,
+        } = game_result
+        {
+            effect.info(format!("on_game_result: table_id: {}", table_id));
+            self.tables.insert(table_id, table);
+            self.apply_chips_change(chips_change)?;
+            let new_table = self.tables.get(&table_id).expect("error_table_not_found");
+            effect.bridge_event(
+                table_id,
+                HoldemBridgeEvent::StartGame {
+                    sb: new_table.sb,
+                    bb: new_table.bb,
+                    moved_players: vec![],
+                },
+            )?;
+            effect.checkpoint();
+
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
+        let mut mtt_table_player = MttTablePlayer::new(player.player_id, player.chips, 0);
+        let table_id = self.find_or_create_table(effect, player)?;
+        let table_ref = self
+            .tables
+            .get_mut(&table_id)
+            .ok_or(errors::error_table_not_found())?;
+
+        table_ref.add_player(&mut mtt_table_player);
+        effect.bridge_event(
+            table_id,
+            HoldemBridgeEvent::Relocate {
+                players: vec![mtt_table_player],
+            },
+        )?;
+
+        effect.info(format!(
+            "do_sit_in: user {} sit in table {}.",
+            player.player_id, table_id
+        ));
+        effect.checkpoint();
+
+        Ok(())
+    }
+
+    fn apply_chips_change(&mut self, chips_change: BTreeMap<u64, ChipsChange>) -> HandleResult<()> {
+        for (player_id, change) in chips_change.into_iter() {
+            let player = self
+                .rankings
+                .iter_mut()
+                .find(|p| p.player_id == player_id)
+                .ok_or(errors::error_player_not_found())?;
+
+            match change {
+                ChipsChange::Add(amount) => {
+                    player.chips += amount;
+                }
+                ChipsChange::Sub(amount) => {
+                    player.chips -= amount;
+                    if player.chips <= 0 {
+                        player.status = LtMttPlayerStatus::SatOut;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        if self.prize_rules.is_empty() {
+            return Ok(());
+        }
+
+        let total_shares: u8 = self.prize_rules.iter().take(self.rankings.len()).sum();
+        let prize_share: u64 = self.total_prize / total_shares as u64;
+
+        for (i, ranking) in self.rankings.iter().enumerate() {
+            let player_id = ranking.player_id;
+
+            if let Some(rank) = self.prize_rules.get(i) {
+                let prize: u64 = prize_share * *rank as u64;
+                effect.settle(player_id, prize, false)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[allow(unused)]
+    fn find_player_by_id(&self, player_id: u64) -> Option<&LtMttPlayer> {
+        self.rankings.iter().find(|p| p.player_id == player_id)
+    }
+
+    fn find_or_create_table(
+        &mut self,
+        effect: &mut Effect,
+        player: &LtMttPlayer,
+    ) -> HandleResult<usize> {
+        // Sort tables, order by sb asc, players_num asc
+        // Traverse sorted_tables, the first one is the best table fit current player.
+        let mut sorted_tables: Vec<_> = self.tables.iter().collect();
+        sorted_tables.sort_by(|(_, a), (_, b)| {
+            a.sb.cmp(&b.sb)
+                .then_with(|| a.players.len().cmp(&b.players.len()))
+        });
+
+        let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player.chips);
+
+        if let Some((&id, _)) = sorted_tables.iter().find(|(_id, table)| {
+            matched_blind_rule.sb <= table.sb && table.players.len() < self.table_size as _
+        }) {
+            Ok(id)
+        } else {
+            let table_id = self.create_table(effect, matched_blind_rule.clone())?;
+            Ok(table_id)
+        }
+    }
+
+    fn create_table(&mut self, effect: &mut Effect, blind_rule: BlindRule) -> HandleResult<usize> {
+        let table_id = self.tables.iter().map(|(id, _)| *id).max().unwrap_or(0) + 1;
+        let BlindRule {
+            max_chips: _,
+            sb,
+            bb,
+            ante: _,
+        } = blind_rule;
+
+        let table = MttTableState {
+            table_id,
+            btn: 0,
+            sb,
+            bb,
+            players: Vec::new(),
+            next_game_start: 0,
+            hand_id: 0,
+        };
+
+        effect.launch_sub_game(self.subgame_bundle.clone(), self.table_size as _, &table)?;
+        self.tables.insert(table_id, table);
+
+        Ok(table_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use borsh::BorshDeserialize;
+    use race_api::{effect::Effect, event::Event};
+
+    #[test]
+    fn test() {
+        let effect = [
+            0, 0, 0, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 228, 0, 0, 0, 54, 191, 170, 244, 147, 1, 0, 0, 150, 169,
+            171, 244, 147, 1, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 9, 6, 0, 0, 0, 1, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 152, 58, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+            128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0,
+            0, 240, 73, 2, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0,
+            0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 16, 39, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 114, 97, 99, 101, 104, 111, 108, 100, 101,
+            109, 116, 97, 114, 103, 101, 116, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 108,
+            116, 109, 116, 116, 116, 97, 98, 108, 101, 119, 97, 115, 109, 2, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let event = [12];
+
+        let mut effect = Effect::try_from_slice(&effect).unwrap();
+        let event = Event::try_from_slice(&event).unwrap();
+
+        let mut ltmtt = effect.__handler_state::<LtMtt>();
+        ltmtt.handle_event(&mut effect, event).unwrap();
+    }
+
+    // use std::time::SystemTime;
+    // use super::*;
+    // use race_test::prelude::*;
+
+    // #[test]
+    // fn test_join() -> anyhow::Result<()> {
+    //     let mut state = LtMtt::default();
+    //     let mut effect = Effect::default();
+    //     let event = Event::Join {
+    //         players: vec![GamePlayer::new(1, 100)],
+    //     };
+    //     state.handle_event(&mut effect, event)?;
+    //     assert_eq!(state.rankings.len(), 1);
+    //     assert_eq!(effect.wait_timeout, Some(5000));
+
+    //     Ok(())
+    // }
+
+    // #[test]
+    // fn test_with_account() -> anyhow::Result<()> {
+    //     let mut transactor = TestClient::transactor("server");
+    //     let mut alice = TestClient::player("Alice");
+    //     // let mut bob = TestClient::player("Bob");
+    //     // alice.custom_event(custom_event::Game::Ready);
+    //     let ts = SystemTime::now()
+    //         .duration_since(SystemTime::UNIX_EPOCH)?
+    //         .as_millis() as u64;
+
+    //     let (mut context, _) = TestContextBuilder::default()
+    //         .set_transactor(&mut transactor)
+    //         .with_data(LtMttAccountData {
+    //             start_time: ts,
+    //             end_time: ts + 60 * 60 * 1000,
+    //             table_size: 2,
+    //             start_chips: 100,
+    //             prize_rules: vec![100, 50, 30],
+    //             theme: None,
+    //             subgame_bundle: "subgame".to_string(),
+    //         })
+    //         .with_max_players(10)
+    //         .build_with_init_state::<LtMtt>()?;
+
+    //     let event = context.join(&mut alice, 100);
+    //     context.handle_event(&event)?;
+
+    //     {
+    //         let state = context.state();
+    //         assert_eq!(state.rankings.len(), 1);
+    //     }
+
+    //     Ok(())
+    // }
+}
