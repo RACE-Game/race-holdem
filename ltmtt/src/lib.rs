@@ -307,7 +307,7 @@ impl LtMtt {
     // reset game state, swap secret
     fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_game_start...");
-        effect.wait_timeout(self.entry_open_time - effect.timestamp());
+        effect.wait_timeout(self.entry_open_time.saturating_sub(effect.timestamp()));
 
         Ok(())
     }
@@ -316,14 +316,14 @@ impl LtMtt {
         match self.stage {
             LtMttStage::Init => {
                 effect.info("callback on_waiting_timeout: stage changed to EntryOpened.");
-                effect.wait_timeout(self.entry_close_time - effect.timestamp());
+                effect.wait_timeout(self.entry_close_time.saturating_sub(effect.timestamp()));
                 effect.set_entry_lock(EntryLock::Open);
                 self.stage = LtMttStage::EntryOpened;
             }
 
             LtMttStage::EntryOpened => {
                 effect.info("callback on_waiting_timeout: stage changed to EntryClosed.");
-                effect.wait_timeout(self.settle_time - effect.timestamp());
+                effect.wait_timeout(self.settle_time.saturating_sub(effect.timestamp()));
                 effect.set_entry_lock(EntryLock::Closed);
                 self.stage = LtMttStage::EntryClosed;
             }
