@@ -287,6 +287,9 @@ impl GameHandler for LtMtt {
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
             }
+            Event::SubGameReady { .. } => {
+                effect.checkpoint();
+            }
 
             _ => (),
         }
