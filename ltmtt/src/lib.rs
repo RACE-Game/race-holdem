@@ -1,6 +1,6 @@
 mod errors;
 
-use std::collections::BTreeMap;
+use std::{cmp::Reverse, collections::BTreeMap};
 use std::vec;
 
 // use crate::errors::error_leave_not_allowed;
@@ -271,6 +271,7 @@ impl GameHandler for LtMtt {
                 for deposit in deposits {
                     if let Some(player) = self.on_deposit(effect, &deposit)? {
                         self.do_sit_in(effect, &player)?;
+                        self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
                     } else {
                         ()
                     }
@@ -282,7 +283,8 @@ impl GameHandler for LtMtt {
 
                 match bridge_event {
                     game_result @ HoldemBridgeEvent::GameResult { .. } => {
-                        self.on_game_result(effect, game_result)?
+                        self.on_game_result(effect, game_result)?;
+                        self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
                     }
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
