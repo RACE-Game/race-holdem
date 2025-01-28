@@ -463,6 +463,8 @@ impl LtMtt {
             .ok_or(errors::error_table_not_found())?;
 
         table_ref.add_player(&mut mtt_table_player);
+        self.table_assigns.insert(player.player_id, table_id);
+        
         effect.bridge_event(
             table_id,
             HoldemBridgeEvent::Relocate {
