@@ -289,8 +289,21 @@ impl GameHandler for LtMtt {
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
             }
+
             Event::SubGameReady { .. } => {
                 effect.checkpoint();
+            }
+
+            Event::Custom { sender, raw } => {
+                let event: ClientEvent = ClientEvent::try_parse(&raw)?;
+
+                match event {
+                    ClientEvent::SitIn => {
+                        let player = self.find_player_by_id(sender);
+                        self.do_sit_in(effect, &player)?;
+                    }
+                    _ => (),
+                }
             }
 
             _ => (),
@@ -464,7 +477,7 @@ impl LtMtt {
 
         table_ref.add_player(&mut mtt_table_player);
         self.table_assigns.insert(player.player_id, table_id);
-        
+
         effect.bridge_event(
             table_id,
             HoldemBridgeEvent::Relocate {
@@ -525,9 +538,8 @@ impl LtMtt {
         Ok(())
     }
 
-    #[allow(unused)]
-    fn find_player_by_id(&self, player_id: u64) -> Option<&LtMttPlayer> {
-        self.rankings.iter().find(|p| p.player_id == player_id)
+    fn find_player_by_id(&self, player_id: u64) -> LtMttPlayer {
+        self.rankings.iter().find(|p| p.player_id == player_id).unwrap().clone()
     }
 
     fn find_or_create_table(
