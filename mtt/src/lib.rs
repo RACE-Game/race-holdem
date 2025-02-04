@@ -172,9 +172,15 @@ pub struct Mtt {
     subgame_bundle: String,
     winners: Vec<MttWinner>,
     launched_table_ids: Vec<GameId>,
+    player_deposits: Vec<PlayerBalance>,
 }
 
+
 impl GameHandler for Mtt {
+    fn balances(&self) -> Vec<PlayerBalance> {
+        self.player_deposits.clone()
+    }
+
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
         let MttAccountData {
             start_time,
@@ -832,7 +838,7 @@ impl Mtt {
                     player_id: id,
                     prize,
                 });
-                effect.settle(id, prize, false)?;
+                effect.withdraw(id, prize);
             }
         }
 

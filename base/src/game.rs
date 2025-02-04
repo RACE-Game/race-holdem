@@ -726,7 +726,8 @@ impl Holdem {
 
         let removed_players = self.remove_leave_and_out_players();
         for player in removed_players {
-            effect.settle(player.id, player.chips + player.deposit, true)?;
+            effect.withdraw(player.id, player.chips + player.deposit);
+            effect.eject(player.id);
         }
 
         if rake > 0 {
@@ -851,7 +852,8 @@ impl Holdem {
         let removed_players = self.remove_leave_and_out_players();
 
         for player in removed_players {
-            effect.settle(player.id, player.chips + player.deposit, true)?;
+            effect.withdraw(player.id, player.chips + player.deposit);
+            effect.eject(player.id);
         }
 
         if rake > 0 {
@@ -1219,6 +1221,11 @@ impl Holdem {
 }
 
 impl GameHandler for Holdem {
+
+    fn balances(&self) -> Vec<PlayerBalance> {
+        self.player_map.values().map(|p| PlayerBalance::new(p.id, p.chips + p.deposit)).collect()
+    }
+
     fn init_state(init_account: InitAccount) -> Result<Self, HandleError> {
         let HoldemAccount {
             sb,
@@ -1401,7 +1408,8 @@ impl GameHandler for Holdem {
                     | HoldemStage::Showdown => {
                         let removed = self.player_map.remove_entry(&player_id);
                         if let Some((id, p)) = removed {
-                            effect.settle(id, p.chips + p.deposit, true)?;
+                            effect.withdraw(id, p.chips + p.deposit);
+                            effect.eject(id);
                             effect.checkpoint();
                             self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                             self.signal_game_end(effect)?;

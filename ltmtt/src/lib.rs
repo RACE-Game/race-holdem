@@ -531,7 +531,7 @@ impl LtMtt {
 
             if let Some(rank) = self.prize_rules.get(i) {
                 let prize: u64 = prize_share * *rank as u64;
-                effect.settle(player_id, prize, false)?;
+                effect.withdraw(player_id, prize);
             }
         }
 

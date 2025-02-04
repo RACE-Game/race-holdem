@@ -21,6 +21,10 @@ pub struct MttTable {
 }
 
 impl GameHandler for MttTable {
+    fn balances(&self) -> Vec<PlayerBalance> {
+        self.holdem.balances()
+    }
+
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
         let MttTableState {
             sb,
