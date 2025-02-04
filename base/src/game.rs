@@ -731,7 +731,7 @@ impl Holdem {
         }
 
         if rake > 0 {
-            effect.transfer(0, rake);
+            effect.transfer(rake);
         }
 
         self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
@@ -857,7 +857,7 @@ impl Holdem {
         }
 
         if rake > 0 {
-            effect.transfer(0, rake);
+            effect.transfer(rake);
         }
 
         effect.checkpoint();

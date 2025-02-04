@@ -220,6 +220,11 @@ pub struct LtMtt {
 }
 
 impl GameHandler for LtMtt {
+
+    fn balances(&self) -> Vec<PlayerBalance> {
+        vec![]
+    }
+
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
         let LtMttAccountData {
             entry_open_time,
