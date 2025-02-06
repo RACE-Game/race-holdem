@@ -1,7 +1,7 @@
 mod errors;
 
-use std::{cmp::Reverse, collections::BTreeMap};
 use std::vec;
+use std::{cmp::Reverse, collections::BTreeMap};
 
 // use crate::errors::error_leave_not_allowed;
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -217,12 +217,20 @@ pub struct LtMtt {
     tables: BTreeMap<usize, MttTableState>,
     table_assigns: BTreeMap<u64, usize>,
     // theme: Option<String>,
+    player_balances: BTreeMap<u64, u64>,
 }
 
 impl GameHandler for LtMtt {
-
     fn balances(&self) -> Vec<PlayerBalance> {
-        vec![]
+        // self.player_balances
+        //     .iter()
+        //     .map(|(player_id, balance)| PlayerBalance { player_id, balance });
+        let sum = self.player_balances.values().sum();
+
+        vec![PlayerBalance {
+            player_id: 0,
+            balance: sum,
+        }]
     }
 
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
@@ -246,6 +254,7 @@ impl GameHandler for LtMtt {
         }
 
         let blind_rules = default_blind_rules();
+        let player_balances = BTreeMap::from([(0, 0)]);
 
         let state = Self {
             entry_open_time,
@@ -256,6 +265,7 @@ impl GameHandler for LtMtt {
             total_prize,
             subgame_bundle,
             blind_rules,
+            player_balances,
             ..Default::default()
         };
 
@@ -422,6 +432,8 @@ impl LtMtt {
 
             player.chips = ticket_rule.chips;
             player.deposit_history.push(deposit.balance());
+            self.player_balances.insert(deposit.id(), deposit.balance());
+
             effect.info(format!(
                 "on_deposit: User {} deposit {}.",
                 deposit.id(),
@@ -525,6 +537,7 @@ impl LtMtt {
 
     fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if self.prize_rules.is_empty() {
+            self.player_balances.insert(0, 0);
             return Ok(());
         }
 
@@ -540,11 +553,17 @@ impl LtMtt {
             }
         }
 
+        self.player_balances.insert(0, 0);
+
         Ok(())
     }
 
     fn find_player_by_id(&self, player_id: u64) -> LtMttPlayer {
-        self.rankings.iter().find(|p| p.player_id == player_id).unwrap().clone()
+        self.rankings
+            .iter()
+            .find(|p| p.player_id == player_id)
+            .unwrap()
+            .clone()
     }
 
     fn find_or_create_table(
