@@ -483,7 +483,7 @@ impl LtMtt {
                 HoldemBridgeEvent::StartGame {
                     sb: new_table.sb,
                     bb: new_table.bb,
-                    moved_players: moved_players,
+                    moved_players,
                 },
             )?;
             effect.checkpoint();
