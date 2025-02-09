@@ -36,7 +36,7 @@ mod errors;
 use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
-use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState};
+use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState};
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
 
@@ -432,6 +432,7 @@ impl Mtt {
                     r.id,
                     r.chips,
                     (j / num_of_tables) as usize, // player's table position
+                    MttTablePlayerStatus::SitIn,
                 ));
                 self.table_assigns.insert(r.id, table_id as _);
                 j += num_of_tables;
@@ -780,7 +781,7 @@ impl Mtt {
             return Err(errors::error_player_id_not_found())?;
         };
 
-        let mut player = MttTablePlayer::new(rank.id, rank.chips, 0);
+        let mut player = MttTablePlayer::new(rank.id, rank.chips, 0, MttTablePlayerStatus::SitIn);
 
         for (table_id, table) in self.tables.iter_mut() {
             if table.players.len() < self.table_size as usize {
