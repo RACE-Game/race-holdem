@@ -11,7 +11,9 @@ use race_api::{
     types::{EntryLock, GameDeposit},
 };
 
-use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableState};
+use race_holdem_mtt_base::{
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState,
+};
 use race_proc_macro::game_handler;
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
@@ -465,15 +467,23 @@ impl LtMtt {
         } = game_result
         {
             effect.info(format!("on_game_result: table_id: {}", table_id));
+            let moved_players = table
+                .players
+                .iter()
+                .filter(|p| p.player_status == MttTablePlayerStatus::SitOut)
+                .map(|p| p.id)
+                .collect();
+
             self.tables.insert(table_id, table);
             self.apply_chips_change(chips_change)?;
             let new_table = self.tables.get(&table_id).expect("error_table_not_found");
+
             effect.bridge_event(
                 table_id,
                 HoldemBridgeEvent::StartGame {
                     sb: new_table.sb,
                     bb: new_table.bb,
-                    moved_players: vec![],
+                    moved_players: moved_players,
                 },
             )?;
             effect.checkpoint();
@@ -485,7 +495,12 @@ impl LtMtt {
     }
 
     fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
-        let mut mtt_table_player = MttTablePlayer::new(player.player_id, player.chips, 0);
+        let mut mtt_table_player = MttTablePlayer::new(
+            player.player_id,
+            player.chips,
+            0,
+            MttTablePlayerStatus::SitIn,
+        );
         let table_id = self.find_or_create_table(effect, player)?;
         let table_ref = self
             .tables
