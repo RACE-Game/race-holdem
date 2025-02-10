@@ -70,6 +70,7 @@ pub struct Showdown {
 
 #[derive(Default, Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct HandHistory {
+    pub valid: bool,
     pub board: Vec<String>,
     pub blinds: Vec<BlindBet>,
     // actions for each street

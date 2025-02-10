@@ -16,6 +16,7 @@ use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdo
 // Holdem: the game state
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
 pub struct Holdem {
+    pub hand_id: usize,
     pub deck_random_id: RandomId,
     pub max_deposit: u64,
     pub sb: u64,
@@ -721,8 +722,8 @@ impl Holdem {
         let rake = self.take_rake_from_prize()?;
         let _ = self.update_chips_map()?;
         self.apply_prize()?;
-
         self.mark_out_players();
+        self.hand_history.valid = true;
 
         let removed_players = self.remove_leave_and_out_players();
         for player in removed_players {
@@ -847,6 +848,7 @@ impl Holdem {
         let rake = self.take_rake_from_prize()?;
         let _ = self.update_chips_map()?;
         self.apply_prize()?;
+        self.hand_history.valid = true;
 
         self.mark_out_players();
         let removed_players = self.remove_leave_and_out_players();
@@ -1215,6 +1217,7 @@ impl Holdem {
             let rnd_spec = RandomSpec::deck_of_cards();
             self.deck_random_id = effect.init_random_state(rnd_spec);
         }
+        self.hand_id += 1;
 
         Ok(())
     }

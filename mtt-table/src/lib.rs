@@ -18,7 +18,6 @@ pub type PlayerId = u64;
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default, Clone)]
 pub struct MttTable {
     pub table_id: GameId,
-    pub hand_id: usize,
     pub holdem: Holdem,
 }
 
@@ -59,7 +58,6 @@ impl GameHandler for MttTable {
 
         Ok(Self {
             table_id,
-            hand_id: 0,
             holdem,
         })
     }
@@ -100,7 +98,7 @@ impl GameHandler for MttTable {
                     let mtt_table_state = MttTableState {
                         table_id: self.table_id,
                         btn: self.holdem.btn,
-                        hand_id: self.hand_id,
+                        hand_id: self.holdem.hand_id,
                         sb: self.holdem.sb,
                         bb: self.holdem.bb,
                         next_game_start: self.holdem.next_game_start,
@@ -122,7 +120,7 @@ impl GameHandler for MttTable {
                         })
                         .collect();
                     let evt = HoldemBridgeEvent::GameResult {
-                        hand_id: self.hand_id,
+                        hand_id: self.holdem.hand_id,
                         table: mtt_table_state,
                         chips_change,
                         table_id: self.table_id,
