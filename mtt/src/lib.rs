@@ -36,7 +36,9 @@ mod errors;
 use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
-use race_holdem_mtt_base::{ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState};
+use race_holdem_mtt_base::{
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState,
+};
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
 
@@ -72,13 +74,6 @@ impl PlayerRank {
             position,
         }
     }
-}
-
-#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
-pub struct PlayerRankCheckpoint {
-    id: u64,
-    chips: u64,
-    table_id: GameId,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
@@ -154,7 +149,8 @@ pub struct MttWinner {
 pub struct Mtt {
     start_time: u64,
     entry_close_time: u64,
-    is_final_table: bool,
+    // When all players are prize-eligible.
+    in_the_money: bool,
     alives: usize, // The number of alive players
     stage: MttStage,
     table_assigns: BTreeMap<u64, GameId>,
@@ -172,13 +168,21 @@ pub struct Mtt {
     subgame_bundle: String,
     winners: Vec<MttWinner>,
     launched_table_ids: Vec<GameId>,
-    player_deposits: Vec<PlayerBalance>,
+    // We use this to save the distributed prizes.
+    // For example:
+    // If the minimum prize for the top 10 is 100,
+    // and 11 players are reduced to 10, each will be guaranteed a prize of 100.
+    // The structure is a mapping from player_id to its guranteed prize.
+    // The special player_id 0 stands for undistributed.
+    player_balances: BTreeMap<u64, u64>,
 }
-
 
 impl GameHandler for Mtt {
     fn balances(&self) -> Vec<PlayerBalance> {
-        self.player_deposits.clone()
+        self.player_balances
+            .iter()
+            .map(|(player_id, balance)| PlayerBalance::new(*player_id, *balance))
+            .collect()
     }
 
     fn init_state(init_account: InitAccount) -> HandleResult<Self> {
@@ -258,7 +262,7 @@ impl GameHandler for Mtt {
                     }
                 }
                 MttStage::Playing => {
-                    if !self.is_final_table && effect.timestamp() <= self.entry_close_time {
+                    if !self.in_the_money && effect.timestamp() <= self.entry_close_time {
                         for p in players {
                             self.ranks.push(PlayerRank {
                                 id: p.id(),
@@ -285,7 +289,7 @@ impl GameHandler for Mtt {
                 // For any case that the player is not in the game,
                 // the deposit should be rejected.
 
-                if self.is_final_table {
+                if self.in_the_money {
                     for d in deposits {
                         effect.warn(format!(
                             "Reject player deposit: {} (Final Table Stage)",
@@ -310,6 +314,7 @@ impl GameHandler for Mtt {
                                 self.total_prize += d.balance();
                                 self.add_new_player(effect, player_id)?;
                                 self.update_alives();
+                                self.deposit_balance(d.balance());
                             } else {
                                 effect.warn(format!(
                                     "Reject player deposit: {} (Player Has Chips)",
@@ -413,7 +418,11 @@ impl Mtt {
             == 1
     }
 
-    fn launch_table(&mut self, effect: &mut Effect, table: MttTableState) -> Result<(), HandleError> {
+    fn launch_table(
+        &mut self,
+        effect: &mut Effect,
+        table: MttTableState,
+    ) -> Result<(), HandleError> {
         effect.launch_sub_game(self.subgame_bundle.clone(), self.table_size as _, &table)?;
         self.tables.insert(table.table_id, table);
         Ok(())
@@ -451,7 +460,7 @@ impl Mtt {
             self.launch_table(effect, table)?;
         }
 
-        self.maybe_set_final_table();
+        self.maybe_set_in_the_money();
 
         Ok(())
     }
@@ -751,7 +760,7 @@ impl Mtt {
             }
         }
 
-        self.maybe_set_final_table();
+        self.maybe_set_in_the_money();
 
         Ok(())
     }
@@ -760,9 +769,9 @@ impl Mtt {
         effect.set_entry_lock(EntryLock::Closed);
     }
 
-    fn maybe_set_final_table(&mut self) {
-        if self.tables.len() == 1 {
-            self.is_final_table = true;
+    fn maybe_set_in_the_money(&mut self) {
+        if self.alives <= self.prize_rules.len() {
+            self.in_the_money = true;
         }
     }
 
@@ -830,6 +839,8 @@ impl Mtt {
         let total_shares: u8 = self.prize_rules.iter().take(self.ranks.len()).sum();
         let prize_share: u64 = self.total_prize / total_shares as u64;
 
+        self.player_balances.insert(0, 0);
+
         // Get eligible ids for prizes
         for (i, rank) in self.ranks.iter().enumerate() {
             let id = rank.id;
@@ -849,6 +860,17 @@ impl Mtt {
 
     pub fn get_rank(&self, id: u64) -> Option<&PlayerRank> {
         self.ranks.iter().find(|r| r.id == id)
+    }
+
+    pub fn deposit_balance(&mut self, amount: u64) {
+        match self.player_balances.entry(0) {
+            Entry::Occupied(mut e) => {
+                e.insert(e.get() + amount);
+            }
+            Entry::Vacant(e) => {
+                e.insert(amount);
+            }
+        }
     }
 }
 
@@ -892,7 +914,7 @@ mod tests {
                     position: rank_id as u16 % table_size as u16,
                 });
 
-                let player = MttTablePlayer::new(rank_id, start_chips, i);
+                let player = MttTablePlayer::new(rank_id, start_chips, i, MttTablePlayerStatus::SitIn);
                 table_state.players.push(player);
                 mtt.table_assigns.insert(rank_id, table_id);
                 rank_id += 1;
@@ -956,9 +978,9 @@ mod tests {
                     MttTableState {
                         table_id: 1,
                         players: vec![
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(2, 10000, 1),
-                            MttTablePlayer::new(3, 10000, 2),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(2, 10000, 1, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(3, 10000, 2, MttTablePlayerStatus::SitIn),
                         ],
                         ..Default::default()
                     },
@@ -968,8 +990,8 @@ mod tests {
                     MttTableState {
                         table_id: 2,
                         players: vec![
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(2, 10000, 1),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(2, 10000, 1, MttTablePlayerStatus::SitIn),
                         ],
                         ..Default::default()
                     },
@@ -979,10 +1001,10 @@ mod tests {
                     MttTableState {
                         table_id: 3,
                         players: vec![
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(2, 10000, 1),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(2, 10000, 1, MttTablePlayerStatus::SitIn),
                         ],
                         ..Default::default()
                     },
@@ -992,8 +1014,8 @@ mod tests {
                     MttTableState {
                         table_id: 4,
                         players: vec![
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(2, 10000, 1),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(2, 10000, 1, MttTablePlayerStatus::SitIn),
                         ],
                         ..Default::default()
                     },
@@ -1003,10 +1025,10 @@ mod tests {
                     MttTableState {
                         table_id: 5,
                         players: vec![
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(1, 10000, 0),
-                            MttTablePlayer::new(2, 10000, 1),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(2, 10000, 1, MttTablePlayerStatus::SitIn),
                         ],
                         ..Default::default()
                     },
@@ -1053,7 +1075,7 @@ mod tests {
             table: MttTableState {
                 hand_id: 1,
                 table_id: 3,
-                players: vec![MttTablePlayer::new(8, 20000, 1)],
+                players: vec![MttTablePlayer::new(8, 20000, 1, MttTablePlayerStatus::SitIn)],
                 next_game_start: 0,
                 ..Default::default()
             },
@@ -1088,7 +1110,7 @@ mod tests {
             table: MttTableState {
                 hand_id: 1,
                 table_id: 2,
-                players: vec![MttTablePlayer::new(8, 20000, 1)],
+                players: vec![MttTablePlayer::new(8, 20000, 1, MttTablePlayerStatus::SitIn)],
                 next_game_start: 0,
                 ..Default::default()
             },
@@ -1122,9 +1144,9 @@ mod tests {
                 hand_id: 1,
                 table_id: 2,
                 players: vec![
-                    MttTablePlayer::new(4, 10000, 0),
-                    MttTablePlayer::new(5, 10000, 1),
-                    MttTablePlayer::new(6, 10000, 2),
+                    MttTablePlayer::new(4, 10000, 0, MttTablePlayerStatus::SitIn),
+                    MttTablePlayer::new(5, 10000, 1, MttTablePlayerStatus::SitIn),
+                    MttTablePlayer::new(6, 10000, 2, MttTablePlayerStatus::SitIn),
                 ],
                 ..Default::default()
             },
@@ -1147,7 +1169,7 @@ mod tests {
                 (
                     3,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer::new(4, 10000, 1),],
+                        players: vec![MttTablePlayer::new(4, 10000, 1, MttTablePlayerStatus::SitIn),],
                     },
                 ),
                 (
@@ -1180,8 +1202,8 @@ mod tests {
                 hand_id: 1,
                 table_id: 1,
                 players: vec![
-                    MttTablePlayer::new(0, 20000, 0),
-                    MttTablePlayer::new(3, 10000, 2),
+                    MttTablePlayer::new(0, 20000, 0, MttTablePlayerStatus::SitIn),
+                    MttTablePlayer::new(3, 10000, 2, MttTablePlayerStatus::SitIn),
                 ],
                 ..Default::default()
             },
@@ -1207,8 +1229,8 @@ mod tests {
                     3,
                     HoldemBridgeEvent::Relocate {
                         players: vec![
-                            MttTablePlayer::new(3, 10000, 1),
-                            MttTablePlayer::new(0, 20000, 2),
+                            MttTablePlayer::new(3, 10000, 1, MttTablePlayerStatus::SitIn),
+                            MttTablePlayer::new(0, 20000, 2, MttTablePlayerStatus::SitIn),
                         ],
                     }
                 )
@@ -1233,7 +1255,7 @@ mod tests {
             table: MttTableState {
                 hand_id: 1,
                 table_id: 1,
-                players: vec![MttTablePlayer::new(1, 20000, 0)],
+                players: vec![MttTablePlayer::new(1, 20000, 0, MttTablePlayerStatus::SitIn)],
                 ..Default::default()
             },
         };
@@ -1257,7 +1279,7 @@ mod tests {
                 (
                     2,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer::new(1, 20000, 2),],
+                        players: vec![MttTablePlayer::new(1, 20000, 2, MttTablePlayerStatus::SitIn),],
                     }
                 )
             ]
@@ -1278,9 +1300,9 @@ mod tests {
                 hand_id: 1,
                 table_id: 1,
                 players: vec![
-                    MttTablePlayer::new(1, 10000, 0),
-                    MttTablePlayer::new(2, 10000, 1),
-                    MttTablePlayer::new(3, 10000, 2),
+                    MttTablePlayer::new(1, 10000, 0, MttTablePlayerStatus::SitIn),
+                    MttTablePlayer::new(2, 10000, 1, MttTablePlayerStatus::SitIn),
+                    MttTablePlayer::new(3, 10000, 2, MttTablePlayerStatus::SitIn),
                 ],
                 ..Default::default()
             },
@@ -1300,7 +1322,7 @@ mod tests {
                 (
                     2,
                     HoldemBridgeEvent::Relocate {
-                        players: vec![MttTablePlayer::new(1, 10000, 1)],
+                        players: vec![MttTablePlayer::new(1, 10000, 1, MttTablePlayerStatus::SitIn)],
                     }
                 ),
                 (
