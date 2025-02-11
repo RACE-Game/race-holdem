@@ -217,6 +217,8 @@ pub enum GameEvent {
     Call,
     Fold,
     Raise(u64),
+    // SitIn,
+    SitOut,
 }
 
 impl CustomEvent for GameEvent {}

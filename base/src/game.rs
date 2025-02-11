@@ -3,7 +3,7 @@ use race_api::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::take;
 
-use crate::errors;
+use crate::errors::{self, second_hole_card_error};
 use crate::essential::{
     ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage,
     InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP,
@@ -70,9 +70,11 @@ impl Holdem {
             if player.status == PlayerStatus::Leave {
                 removed.push(player);
             } else if player.status == PlayerStatus::Out {
-                if self.mode == GameMode::Mtt { // Just kick out this player in MTT mode
+                if self.mode == GameMode::Mtt {
+                    // Just kick out this player in MTT mode
                     removed.push(player);
-                } else if player.timeout < 3 { // Give player three hands timeout for deposit
+                } else if player.timeout < 3 {
+                    // Give player three hands timeout for deposit
                     player.timeout += 1;
                     retained.push(player);
                 } else {
@@ -341,9 +343,9 @@ impl Holdem {
                 matches!(
                     p.status,
                     PlayerStatus::Wait
-                    | PlayerStatus::Allin
-                    | PlayerStatus::Acted
-                    | PlayerStatus::Acting
+                        | PlayerStatus::Allin
+                        | PlayerStatus::Acted
+                        | PlayerStatus::Acting
                 )
             })
             .map(|p| p.id)
@@ -460,9 +462,9 @@ impl Holdem {
                 matches!(
                     p.status,
                     PlayerStatus::Acted
-                    | PlayerStatus::Allin
-                    | PlayerStatus::Acting
-                    | PlayerStatus::Wait
+                        | PlayerStatus::Allin
+                        | PlayerStatus::Acting
+                        | PlayerStatus::Wait
                 )
             })
             .count()
@@ -1031,7 +1033,7 @@ impl Holdem {
                 }
 
                 // When bet amount is less than 1BB, only allin is allowed.
-                if self.bb > amount && player.chips != amount{
+                if self.bb > amount && player.chips != amount {
                     return Err(errors::bet_amonut_is_too_small());
                 }
 
@@ -1092,6 +1094,8 @@ impl Holdem {
                 self.street_bet = new_street_bet;
                 self.min_raise = new_min_raise;
             }
+
+            _ => {}
         }
 
         // Save action to hand history
@@ -1099,6 +1103,71 @@ impl Holdem {
         self.hand_history
             .add_action(street, PlayerAction::new(sender, event))?;
         self.next_state(effect)?;
+        Ok(())
+    }
+
+    fn handle_player_leave(
+        &mut self,
+        effect: &mut Effect,
+        player_id: u64,
+    ) -> Result<(), HandleError> {
+        match self.stage {
+            // If current stage is not playing, the player can
+            // leave with a settlement instantly.
+            HoldemStage::Init
+            | HoldemStage::Settle
+            | HoldemStage::Runner
+            | HoldemStage::Showdown => {
+                let removed = self.player_map.remove_entry(&player_id);
+                if let Some((id, p)) = removed {
+                    effect.withdraw(id, p.chips + p.deposit);
+                    effect.eject(id);
+                    effect.checkpoint();
+                    self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
+                    self.signal_game_end(effect)?;
+                } else {
+                    return Err(HandleError::InvalidPlayer)?;
+                }
+            }
+
+            // If current stage is playing, the player will be
+            // marked as `Leave`.  There are 3 cases to
+            // handle:
+            //
+            // 1. The leaving player is the
+            // second last player, so the remaining player
+            // just wins.
+            //
+            // 2. The leaving player is in acting.  In such
+            // case, we just fold this player and do next
+            // state calculation.
+            //
+            // 3. The leaving player is not the acting player,
+            // and the game can continue.
+            HoldemStage::Play | HoldemStage::ShareKey => {
+                let unfolded_cnt = self.count_unfolded_players();
+                if self.stage == HoldemStage::Play
+                    && !self.is_acting_player(player_id)
+                    && unfolded_cnt > 1
+                {
+                    println!("Game continues as the leaving player not acting");
+                } else if self.is_acting_player(player_id) {
+                    // TODO: fold the `Leave' player?
+                    self.next_state(effect)?;
+                } else if unfolded_cnt == 1 {
+                    let winner = self
+                        .player_map
+                        .values()
+                        .find(|p| p.id() != player_id)
+                        .map(|p| p.id())
+                        .ok_or(errors::single_winner_missing())?;
+                    self.single_player_win(effect, winner)?;
+                    self.stage = HoldemStage::Settle;
+                    self.signal_game_end(effect)?;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1177,7 +1246,10 @@ impl Holdem {
     }
 
     pub fn position_occupied(&self, position: usize) -> bool {
-        self.player_map.iter().find(|(_, ref p)| p.position == position).is_some()
+        self.player_map
+            .iter()
+            .find(|(_, ref p)| p.position == position)
+            .is_some()
     }
 
     pub fn internal_add_players(
@@ -1224,9 +1296,11 @@ impl Holdem {
 }
 
 impl GameHandler for Holdem {
-
     fn balances(&self) -> Vec<PlayerBalance> {
-        self.player_map.values().map(|p| PlayerBalance::new(p.id, p.chips + p.deposit)).collect()
+        self.player_map
+            .values()
+            .map(|p| PlayerBalance::new(p.id, p.chips + p.deposit))
+            .collect()
     }
 
     fn init_state(init_account: InitAccount) -> Result<Self, HandleError> {
@@ -1269,7 +1343,16 @@ impl GameHandler for Holdem {
                 self.reset_player_timeout(sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
                 println!("Player action event: {:?}, sender: {:?}", event, sender);
-                self.handle_custom_event(effect, event, sender)?;
+
+                match event {
+                    GameEvent::SitOut => {
+                        self.set_player_status(sender, PlayerStatus::Out)?;
+                        let _ = self.handle_player_leave(effect, sender);
+                    }
+
+                    _ => self.handle_custom_event(effect, event, sender)?,
+                }
+
                 Ok(())
             }
 
@@ -1344,7 +1427,6 @@ impl GameHandler for Holdem {
             }
 
             Event::Join { players } => {
-
                 effect.info("A player joined!");
 
                 self.display.clear();
@@ -1401,63 +1483,7 @@ impl GameHandler for Holdem {
                 self.display.clear();
                 println!("Player {} decides to leave game", player_id);
                 self.set_player_status(player_id, PlayerStatus::Leave)?;
-
-                match self.stage {
-                    // If current stage is not playing, the player can
-                    // leave with a settlement instantly.
-                    HoldemStage::Init
-                    | HoldemStage::Settle
-                    | HoldemStage::Runner
-                    | HoldemStage::Showdown => {
-                        let removed = self.player_map.remove_entry(&player_id);
-                        if let Some((id, p)) = removed {
-                            effect.withdraw(id, p.chips + p.deposit);
-                            effect.eject(id);
-                            effect.checkpoint();
-                            self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
-                            self.signal_game_end(effect)?;
-                        } else {
-                            return Err(HandleError::InvalidPlayer)?;
-                        }
-                    }
-
-                    // If current stage is playing, the player will be
-                    // marked as `Leave`.  There are 3 cases to
-                    // handle:
-                    //
-                    // 1. The leaving player is the
-                    // second last player, so the remaining player
-                    // just wins.
-                    //
-                    // 2. The leaving player is in acting.  In such
-                    // case, we just fold this player and do next
-                    // state calculation.
-                    //
-                    // 3. The leaving player is not the acting player,
-                    // and the game can continue.
-                    HoldemStage::Play | HoldemStage::ShareKey => {
-                        let unfolded_cnt = self.count_unfolded_players();
-                        if self.stage == HoldemStage::Play
-                            && !self.is_acting_player(player_id)
-                            && unfolded_cnt > 1
-                        {
-                            println!("Game continues as the leaving player not acting");
-                        } else if self.is_acting_player(player_id) {
-                            // TODO: fold the `Leave' player?
-                            self.next_state(effect)?;
-                        } else if unfolded_cnt == 1 {
-                            let winner = self
-                                .player_map
-                                .values()
-                                .find(|p| p.id() != player_id)
-                                .map(|p| p.id())
-                                .ok_or(errors::single_winner_missing())?;
-                            self.single_player_win(effect, winner)?;
-                            self.stage = HoldemStage::Settle;
-                            self.signal_game_end(effect)?;
-                        }
-                    }
-                }
+                let _ = self.handle_player_leave(effect, player_id);
 
                 Ok(())
             }
@@ -1592,16 +1618,24 @@ impl GameHandler for Holdem {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn setup_players() -> BTreeMap<u64, Player> {
         let mut player_map = BTreeMap::new();
-        player_map.insert(1, Player::new_with_timeout_and_status(1, 0, 0, PlayerStatus::Leave));
-        player_map.insert(2, Player::new_with_timeout_and_status(2, 0, 0, PlayerStatus::Out));
-        player_map.insert(3, Player::new_with_timeout_and_status(3, 100, 0, PlayerStatus::Acting));
+        player_map.insert(
+            1,
+            Player::new_with_timeout_and_status(1, 0, 0, PlayerStatus::Leave),
+        );
+        player_map.insert(
+            2,
+            Player::new_with_timeout_and_status(2, 0, 0, PlayerStatus::Out),
+        );
+        player_map.insert(
+            3,
+            Player::new_with_timeout_and_status(3, 100, 0, PlayerStatus::Acting),
+        );
         player_map
     }
 
@@ -1614,8 +1648,12 @@ mod tests {
         let removed = holdem.remove_leave_and_out_players();
 
         assert_eq!(removed.len(), 2);
-        assert!(removed.iter().any(|p| p.id == 1 && p.status == PlayerStatus::Leave));
-        assert!(removed.iter().any(|p| p.id == 2 && p.status == PlayerStatus::Out));
+        assert!(removed
+            .iter()
+            .any(|p| p.id == 1 && p.status == PlayerStatus::Leave));
+        assert!(removed
+            .iter()
+            .any(|p| p.id == 2 && p.status == PlayerStatus::Out));
         assert_eq!(holdem.player_map.len(), 1);
         assert!(holdem.player_map.contains_key(&3));
     }
