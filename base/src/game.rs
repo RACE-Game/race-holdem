@@ -3,7 +3,7 @@ use race_api::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::take;
 
-use crate::errors::{self, second_hole_card_error};
+use crate::errors;
 use crate::essential::{
     ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage,
     InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP,
