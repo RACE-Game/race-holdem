@@ -467,12 +467,32 @@ impl LtMtt {
         } = game_result
         {
             effect.info(format!("on_game_result: table_id: {}", table_id));
-            let moved_players = table
+            let old_table_player_ids: Vec<_> = self
+                .tables
+                .get(&table_id)
+                .unwrap()
                 .players
+                .clone()
                 .iter()
-                .filter(|p| p.player_status == MttTablePlayerStatus::SitOut)
                 .map(|p| p.id)
                 .collect();
+            let new_table_player_ids: Vec<_> = table.players.clone().iter().map(|p| p.id).collect();
+
+            let moved_player_ids: Vec<_> = old_table_player_ids
+                .iter()
+                .filter(|&p| !new_table_player_ids.contains(p))
+                .collect();
+
+            for player_id in moved_player_ids {
+                // Remove player from table_assigns
+                self.table_assigns.remove(player_id);
+                // Set ltmttplayerstatus to sitout
+                for ranking in self.rankings.iter_mut() {
+                    if ranking.player_id == *player_id {
+                        ranking.status = LtMttPlayerStatus::SatOut;
+                    }
+                }
+            }
 
             self.tables.insert(table_id, table);
             self.apply_chips_change(chips_change)?;
@@ -483,7 +503,7 @@ impl LtMtt {
                 HoldemBridgeEvent::StartGame {
                     sb: new_table.sb,
                     bb: new_table.bb,
-                    moved_players,
+                    moved_players: vec![],
                 },
             )?;
             effect.checkpoint();
