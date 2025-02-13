@@ -286,8 +286,8 @@ impl GameHandler for LtMtt {
             // If deposit succeed, sit in to a table.
             Event::Deposit { deposits } => {
                 for deposit in deposits {
-                    if let Some(player) = self.on_deposit(effect, &deposit)? {
-                        self.do_sit_in(effect, &player)?;
+                    if let Some(_player) = self.on_deposit(effect, &deposit)? {
+                        // self.do_sit_in(effect, &player)?;
                         self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
                     } else {
                         ()
@@ -316,9 +316,11 @@ impl GameHandler for LtMtt {
 
                 match event {
                     ClientEvent::SitIn => {
+                        effect.info("Client event sitin received.");
                         let player = self.find_player_by_id(sender);
                         self.do_sit_in(effect, &player)?;
                     }
+
                     _ => (),
                 }
             }
@@ -515,13 +517,19 @@ impl LtMtt {
     }
 
     fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
+        let table_id;
         let mut mtt_table_player = MttTablePlayer::new(
             player.player_id,
             player.chips,
             0,
             MttTablePlayerStatus::SitIn,
         );
-        let table_id = self.find_or_create_table(effect, player)?;
+
+        table_id = match self.table_assigns.get(&player.player_id) {
+            Some(exist_table_id) => *exist_table_id,
+            None => self.find_or_create_table(effect, player)?,
+        };
+
         let table_ref = self
             .tables
             .get_mut(&table_id)
