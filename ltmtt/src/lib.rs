@@ -535,23 +535,26 @@ impl LtMtt {
             .get_mut(&table_id)
             .ok_or(errors::error_table_not_found())?;
 
-        table_ref.add_player(&mut mtt_table_player);
-        self.table_assigns.insert(player.player_id, table_id);
+        if table_ref.add_player(&mut mtt_table_player) {
+            self.table_assigns.insert(player.player_id, table_id);
 
-        effect.bridge_event(
-            table_id,
-            HoldemBridgeEvent::Relocate {
-                players: vec![mtt_table_player],
-            },
-        )?;
+            effect.bridge_event(
+                table_id,
+                HoldemBridgeEvent::Relocate {
+                    players: vec![mtt_table_player],
+                },
+            )?;
 
-        effect.info(format!(
-            "do_sit_in: user {} sit in table {}.",
-            player.player_id, table_id
-        ));
-        effect.checkpoint();
+            effect.info(format!(
+                "do_sit_in: user {} sit in table {}.",
+                player.player_id, table_id
+            ));
+            effect.checkpoint();
 
-        Ok(())
+            Ok(())
+        } else {
+            Err(errors::error_player_already_on_table())
+        }
     }
 
     fn apply_chips_change(&mut self, chips_change: BTreeMap<u64, ChipsChange>) -> HandleResult<()> {

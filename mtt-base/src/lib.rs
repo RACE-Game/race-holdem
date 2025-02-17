@@ -46,11 +46,12 @@ pub struct MttTableState {
 }
 
 impl MttTableState {
-    pub fn add_player(&mut self, player: &mut MttTablePlayer) {
+    /// If player already on table, returns false represents add failed.
+    pub fn add_player(&mut self, player: &mut MttTablePlayer) -> bool {
         let exists = self.players.iter().any(|p| p.id == player.id);
 
         if exists {
-            return;
+            return false;
         } else {
             let mut table_position = 0;
             for i in 0.. {
@@ -73,6 +74,8 @@ impl MttTableState {
             });
             // Update relocated player's table position as well
             player.table_position = table_position;
+
+            return true;
         }
     }
 }
