@@ -19,7 +19,12 @@ pub struct MttTablePlayer {
 }
 
 impl MttTablePlayer {
-    pub fn new(id: u64, chips: u64, table_position: usize, player_status: MttTablePlayerStatus) -> Self {
+    pub fn new(
+        id: u64,
+        chips: u64,
+        table_position: usize,
+        player_status: MttTablePlayerStatus,
+    ) -> Self {
         Self {
             id,
             chips,
@@ -42,26 +47,33 @@ pub struct MttTableState {
 
 impl MttTableState {
     pub fn add_player(&mut self, player: &mut MttTablePlayer) {
-        let mut table_position = 0;
-        for i in 0.. {
-            if self
-                .players
-                .iter()
-                .find(|p| p.table_position == i)
-                .is_none()
-            {
-                table_position = i;
-                break;
+        let exists = self.players.iter().any(|p| p.id == player.id);
+
+        if exists {
+            return;
+        } else {
+            let mut table_position = 0;
+            for i in 0.. {
+                if self
+                    .players
+                    .iter()
+                    .find(|p| p.table_position == i)
+                    .is_none()
+                {
+                    table_position = i;
+                    break;
+                }
             }
+
+            self.players.push(MttTablePlayer {
+                id: player.id,
+                chips: player.chips,
+                player_status: player.player_status.clone(),
+                table_position,
+            });
+            // Update relocated player's table position as well
+            player.table_position = table_position;
         }
-        self.players.push(MttTablePlayer {
-            id: player.id,
-            chips: player.chips,
-            player_status: player.player_status.clone(),
-            table_position,
-        });
-        // Update relocated player's table position as well
-        player.table_position = table_position;
     }
 }
 
