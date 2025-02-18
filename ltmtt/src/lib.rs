@@ -344,8 +344,12 @@ impl LtMtt {
     // reset game state, swap secret
     fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_game_start...");
-        effect.wait_timeout(self.entry_open_time.saturating_sub(effect.timestamp()));
 
+        for blind_rule in self.blind_rules.clone() {
+            let _ = self.create_table(effect, blind_rule);
+        }
+
+        effect.wait_timeout(self.entry_open_time.saturating_sub(effect.timestamp()));
         Ok(())
     }
 
@@ -537,6 +541,7 @@ impl LtMtt {
 
         if table_ref.add_player(&mut mtt_table_player) {
             self.table_assigns.insert(player.player_id, table_id);
+            let _ = self.create_table_if_target_table_not_enough(effect, table_id);
 
             effect.bridge_event(
                 table_id,
@@ -635,6 +640,29 @@ impl LtMtt {
             let table_id = self.create_table(effect, matched_blind_rule.clone())?;
             Ok(table_id)
         }
+    }
+
+    /// Ensure each blind rule's table has one more empty table.
+    fn create_table_if_target_table_not_enough(
+        &mut self,
+        effect: &mut Effect,
+        table_id: usize,
+    ) -> HandleResult<()> {
+        let table = self.tables.get(&table_id).unwrap();
+        let target_tables: Vec<&MttTableState> =
+            self.tables.values().filter(|t| t.sb == table.sb).collect();
+
+        if !target_tables.iter().any(|t| t.players.len() == 0) {
+            let fake_blind_rule = BlindRule {
+                max_chips: Some(0),
+                sb: table.sb,
+                bb: table.bb,
+                ante: 0,
+            };
+            let _ = self.create_table(effect, fake_blind_rule);
+        }
+
+        Ok(())
     }
 
     fn create_table(&mut self, effect: &mut Effect, blind_rule: BlindRule) -> HandleResult<usize> {
