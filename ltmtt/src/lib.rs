@@ -520,6 +520,8 @@ impl LtMtt {
         }
     }
 
+    fn level_up(&mut self) -> () {}
+
     fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
         let table_id;
         let mut mtt_table_player = MttTablePlayer::new(
@@ -529,9 +531,11 @@ impl LtMtt {
             MttTablePlayerStatus::SitIn,
         );
 
+        // Sit into lowest sb/bb table directly.
+        // Move player to higher sb/bb table if satisfy condition when `game_result`.
         table_id = match self.table_assigns.get(&player.player_id) {
             Some(exist_table_id) => *exist_table_id,
-            None => self.find_or_create_table(effect, player)?,
+            None => self.find_table_to_sit(player),
         };
 
         let table_ref = self
@@ -560,6 +564,26 @@ impl LtMtt {
         } else {
             Err(errors::error_player_already_on_table())
         }
+    }
+
+    fn find_table_to_sit(&mut self, player: &LtMttPlayer) -> usize {
+        let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player.chips);
+        let mut sorted_tables: Vec<_> = self
+            .tables
+            .iter()
+            .filter(|(_, t)| {
+                matched_blind_rule.sb <= t.sb && self.table_size as usize > t.players.len()
+            })
+            .collect();
+
+        // sb/bb asc, player_num desc
+        sorted_tables.sort_by(|(_, a), (_, b)| {
+            a.sb.cmp(&b.sb)
+                .then_with(|| b.players.len().cmp(&a.players.len()))
+        });
+
+        let (&id, _) = sorted_tables.first().unwrap();
+        return id;
     }
 
     fn apply_chips_change(&mut self, chips_change: BTreeMap<u64, ChipsChange>) -> HandleResult<()> {
@@ -617,6 +641,7 @@ impl LtMtt {
             .clone()
     }
 
+    #[allow(unused)]
     fn find_or_create_table(
         &mut self,
         effect: &mut Effect,
