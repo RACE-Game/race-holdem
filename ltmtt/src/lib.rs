@@ -502,25 +502,74 @@ impl LtMtt {
 
             self.tables.insert(table_id, table);
             self.apply_chips_change(chips_change)?;
-            let new_table = self.tables.get(&table_id).expect("error_table_not_found");
+            self.level_up(effect, table_id)?;
 
-            effect.bridge_event(
-                table_id,
-                HoldemBridgeEvent::StartGame {
-                    sb: new_table.sb,
-                    bb: new_table.bb,
-                    moved_players: vec![],
-                },
-            )?;
             effect.checkpoint();
-
             Ok(())
         } else {
             Ok(())
         }
     }
 
-    fn level_up(&mut self) -> () {}
+    fn level_up(&mut self, effect: &mut Effect, table_id: usize) -> HandleResult<()> {
+        let table = self.tables.get(&table_id).unwrap();
+        let cur_blind_rule = self
+            .blind_rules
+            .iter()
+            .find(|br| br.sb == table.sb)
+            .unwrap();
+
+        if let Some(max_chips) = cur_blind_rule.max_chips {
+            let mut level_up_players: Vec<MttTablePlayer> = vec![];
+            for player in table.players.clone() {
+                if player.chips > max_chips {
+                    level_up_players.push(player);
+                }
+            }
+
+            // to moved player num >= 2
+            // origin table player num >= 2, or eq 0 after moved.
+            if level_up_players.len() >= 2
+                && (table.players.len() == level_up_players.len()
+                    || (table.players.len() - level_up_players.len()) >= 2)
+            {
+                // origin table
+                let level_up_player_ids: Vec<u64> = level_up_players.iter().map(|p| p.id).collect();
+                effect.bridge_event(
+                    table_id,
+                    HoldemBridgeEvent::StartGame {
+                        sb: table.sb,
+                        bb: table.bb,
+                        moved_players: level_up_player_ids,
+                    },
+                )?;
+
+                // up level table
+                let next_blind_rule = self.blind_rules.iter().find(|br| table.sb < br.sb).unwrap();
+                let next_max_chips = next_blind_rule.max_chips.unwrap_or(u64::max_value());
+                let to_sit_table_id = self.find_table_to_sit(next_max_chips);
+                effect.bridge_event(
+                    to_sit_table_id,
+                    HoldemBridgeEvent::Relocate {
+                        players: level_up_players,
+                    },
+                )?;
+
+                return Ok(());
+            }
+        }
+
+        effect.bridge_event(
+            table_id,
+            HoldemBridgeEvent::StartGame {
+                sb: table.sb,
+                bb: table.bb,
+                moved_players: vec![],
+            },
+        )?;
+
+        return Ok(());
+    }
 
     fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
         let table_id;
@@ -535,7 +584,7 @@ impl LtMtt {
         // Move player to higher sb/bb table if satisfy condition when `game_result`.
         table_id = match self.table_assigns.get(&player.player_id) {
             Some(exist_table_id) => *exist_table_id,
-            None => self.find_table_to_sit(player),
+            None => self.find_table_to_sit(player.chips),
         };
 
         let table_ref = self
@@ -566,8 +615,8 @@ impl LtMtt {
         }
     }
 
-    fn find_table_to_sit(&mut self, player: &LtMttPlayer) -> usize {
-        let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player.chips);
+    fn find_table_to_sit(&mut self, player_chips: u64) -> usize {
+        let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player_chips);
         let mut sorted_tables: Vec<_> = self
             .tables
             .iter()
