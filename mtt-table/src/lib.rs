@@ -150,7 +150,6 @@ impl MttTable {
                     .holdem
                     .next_game_start
                     .saturating_sub(effect.timestamp());
-                self.holdem.reset_state()?;
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
                 for id in moved_players {
