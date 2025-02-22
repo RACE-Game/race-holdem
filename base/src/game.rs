@@ -415,10 +415,12 @@ impl Holdem {
         }
 
         println!("Pots after collecting bets: {:?}", self.pots);
-        self.display.push(Display::CollectBets {
-            old_pots,
-            bet_map: self.bet_map.clone(),
-        });
+        if !self.bet_map.is_empty() {
+            self.display.push(Display::CollectBets {
+                old_pots,
+                bet_map: self.bet_map.clone(),
+            });
+        }
         self.bet_map.clear();
         Ok(())
     }
