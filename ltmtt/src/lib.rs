@@ -318,7 +318,13 @@ impl GameHandler for LtMtt {
                     ClientEvent::SitIn => {
                         effect.info("Client event sitin received.");
                         let player = self.find_player_by_id(sender);
-                        self.do_sit_in(effect, &player)?;
+                        // Sit into lowest sb/bb table directly.
+                        // Move player to higher sb/bb table if satisfy condition when `game_result`.
+                        let table_id = match self.table_assigns.get(&player.player_id) {
+                            Some(exist_table_id) => *exist_table_id,
+                            None => self.find_table_to_sit(player.chips),
+                        };
+                        self.do_sit_in(effect, table_id, &player)?;
                     }
 
                     _ => (),
@@ -540,13 +546,14 @@ impl LtMtt {
                     HoldemBridgeEvent::StartGame {
                         sb: table.sb,
                         bb: table.bb,
-                        moved_players: level_up_player_ids,
+                        moved_players: level_up_player_ids.clone(),
                     },
                 )?;
 
                 // up level table
                 let next_blind_rule = self.blind_rules.iter().find(|br| table.sb < br.sb).unwrap();
                 let next_max_chips = next_blind_rule.max_chips.unwrap_or(u64::max_value());
+                // capacity is needed
                 let to_sit_table_id = self.find_table_to_sit(next_max_chips);
                 effect.bridge_event(
                     to_sit_table_id,
@@ -571,8 +578,12 @@ impl LtMtt {
         return Ok(());
     }
 
-    fn do_sit_in(&mut self, effect: &mut Effect, player: &LtMttPlayer) -> HandleResult<()> {
-        let table_id;
+    fn do_sit_in(
+        &mut self,
+        effect: &mut Effect,
+        table_id: usize,
+        player: &LtMttPlayer,
+    ) -> HandleResult<()> {
         let mut mtt_table_player = MttTablePlayer::new(
             player.player_id,
             player.chips,
@@ -580,19 +591,16 @@ impl LtMtt {
             MttTablePlayerStatus::SitIn,
         );
 
-        // Sit into lowest sb/bb table directly.
-        // Move player to higher sb/bb table if satisfy condition when `game_result`.
-        table_id = match self.table_assigns.get(&player.player_id) {
-            Some(exist_table_id) => *exist_table_id,
-            None => self.find_table_to_sit(player.chips),
-        };
-
         let table_ref = self
             .tables
             .get_mut(&table_id)
             .ok_or(errors::error_table_not_found())?;
 
-        if table_ref.add_player(&mut mtt_table_player) {
+        if table_ref.players.len() >= self.table_size as usize {
+            Err(errors::error_table_is_full())
+        } else if !table_ref.add_player(&mut mtt_table_player) {
+            Err(errors::error_player_already_on_table())
+        } else {
             self.table_assigns.insert(player.player_id, table_id);
             let _ = self.create_table_if_target_table_not_enough(effect, table_id);
 
@@ -604,14 +612,12 @@ impl LtMtt {
             )?;
 
             effect.info(format!(
-                "do_sit_in: user {} sit in table {}.",
+                "ltmtt do_sit_in: user[{}] sit in table[{}].",
                 player.player_id, table_id
             ));
-            effect.checkpoint();
 
+            effect.checkpoint();
             Ok(())
-        } else {
-            Err(errors::error_player_already_on_table())
         }
     }
 

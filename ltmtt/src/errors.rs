@@ -1,9 +1,10 @@
 use race_holdem_base::custom_err;
 
 custom_err!(error_player_not_found);
-custom_err!(error_player_already_on_table);
 custom_err!(error_table_not_found);
 custom_err!(error_table_is_empty);
+custom_err!(error_table_is_full);
+custom_err!(error_player_already_on_table);
 custom_err!(error_empty_blind_rules);
 custom_err!(error_player_id_not_found);
 custom_err!(error_invalid_bridge_event);
