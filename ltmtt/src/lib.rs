@@ -601,6 +601,8 @@ impl LtMtt {
         for (player_id, chips) in players {
             let mtt_table_player =
                 MttTablePlayer::new(player_id, chips, 0, MttTablePlayerStatus::SitIn);
+            let ranking = self.rankings.iter_mut().find(|rank| rank.player_id == player_id).unwrap();
+            ranking.status = LtMttPlayerStatus::SatIn;
             mtt_table_players.push(mtt_table_player);
         }
 
