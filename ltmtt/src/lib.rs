@@ -557,14 +557,12 @@ impl LtMtt {
                 // capacity is needed
                 let to_sit_table_id =
                     self.find_table_to_sit(level_up_players.len(), next_max_chips);
+                let relocate_players: BTreeMap<u64, u64> = level_up_players
+                    .into_iter()
+                    .map(|p| (p.id, p.chips))
+                    .collect();
 
-                effect.bridge_event(
-                    to_sit_table_id,
-                    HoldemBridgeEvent::Relocate {
-                        players: level_up_players,
-                    },
-                )?;
-
+                self.do_sit_in(effect, to_sit_table_id, relocate_players)?;
                 return Ok(());
             }
         }
@@ -599,34 +597,38 @@ impl LtMtt {
             .get_mut(&table_id)
             .ok_or(errors::error_table_not_found())?;
 
-        for (player_id, chips) in players.into_iter() {
-            let mut mtt_table_player =
+        let mut mtt_table_players = vec![];
+        for (player_id, chips) in players {
+            let mtt_table_player =
                 MttTablePlayer::new(player_id, chips, 0, MttTablePlayerStatus::SitIn);
+            mtt_table_players.push(mtt_table_player);
+        }
 
+        for mut mtt_player in mtt_table_players.clone() {
             if table_ref.players.len() >= self.table_size as usize {
                 return Err(errors::error_table_is_full());
-            } else if !table_ref.add_player(&mut mtt_table_player) {
+            } else if !table_ref.add_player(&mut mtt_player) {
                 return Err(errors::error_player_already_on_table());
             } else {
-                self.table_assigns.insert(player_id, table_id);
-
-                effect.bridge_event(
-                    table_id,
-                    HoldemBridgeEvent::Relocate {
-                        players: vec![mtt_table_player],
-                    },
-                )?;
-
+                self.table_assigns.insert(mtt_player.id, table_id);
                 effect.info(format!(
                     "ltmtt do_sit_in: user[{}] sit in table[{}].",
-                    player_id, table_id
+                    mtt_player.id, table_id
                 ));
-
-                effect.checkpoint();
             }
         }
+
+        effect.bridge_event(
+            table_id,
+            HoldemBridgeEvent::Relocate {
+                players: mtt_table_players,
+            },
+        )?;
+
         // Ensure there's always an empty table for each level.
-        let _ = self.create_table_if_target_table_not_enough(effect, table_id);
+        self.create_table_if_target_table_not_enough(effect, table_id)?;
+        effect.checkpoint();
+
         Ok(())
     }
 
@@ -679,6 +681,7 @@ impl LtMtt {
                     player.chips -= amount;
                     if player.chips <= 0 {
                         player.status = LtMttPlayerStatus::SatOut;
+                        self.table_assigns.remove(&player.player_id);
                     }
                 }
             }
