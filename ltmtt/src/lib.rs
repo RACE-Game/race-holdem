@@ -606,10 +606,10 @@ impl LtMtt {
             mtt_table_players.push(mtt_table_player);
         }
 
-        for mut mtt_player in mtt_table_players.clone() {
+        for mtt_player in mtt_table_players.iter_mut() {
             if table_ref.players.len() >= self.table_size as usize {
                 return Err(errors::error_table_is_full());
-            } else if !table_ref.add_player(&mut mtt_player) {
+            } else if !table_ref.add_player(mtt_player) {
                 return Err(errors::error_player_already_on_table());
             } else {
                 self.table_assigns.insert(mtt_player.id, table_id);
