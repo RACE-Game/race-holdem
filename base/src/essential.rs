@@ -234,7 +234,6 @@ pub struct AwardPot {
 pub struct PlayerResult {
     pub id: u64,
     pub chips: u64,
-    pub prize: Option<u64>,
     pub status: PlayerStatus,
     pub position: usize,
 }
@@ -250,10 +249,8 @@ pub enum Display {
         old_pots: Vec<Pot>,
         bet_map: BTreeMap<u64, u64>,
     },
-    AwardPots {
-        pots: Vec<AwardPot>,
-    },
     GameResult {
+        award_pots: Vec<AwardPot>,
         player_map: BTreeMap<u64, PlayerResult>,
-    },
+    }
 }

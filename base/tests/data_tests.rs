@@ -82,18 +82,6 @@ fn test_borsh_display() {
                 "c6".to_string(),
             ],
         },
-        Display::AwardPots {
-            pots: vec![
-                AwardPot {
-                    winners: vec![ALICE, BOB],
-                    amount: 200,
-                },
-                AwardPot {
-                    winners: vec![BOB],
-                    amount: 40,
-                },
-            ],
-        },
         Display::GameResult {
             player_map: BTreeMap::from([
                 (

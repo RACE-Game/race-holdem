@@ -66,27 +66,17 @@ impl Holdem {
         let mut removed = Vec::new();
         let mut retained = Vec::new();
 
-        for mut player in player_map.into_values() {
+        for player in player_map.into_values() {
             if player.status == PlayerStatus::Leave {
                 removed.push(player);
             } else if player.status == PlayerStatus::Out {
-                if self.mode == GameMode::Mtt {
-                    // Just kick out this player in MTT mode
-                    removed.push(player);
-                } else if player.timeout < 3 {
-                    // Give player three hands timeout for deposit
-                    player.timeout += 1;
-                    retained.push(player);
-                } else {
-                    removed.push(player);
-                }
+                removed.push(player);
             } else {
                 retained.push(player);
             }
         }
 
         self.player_map = retained.into_iter().map(|p| (p.id, p)).collect();
-
         println!("Remove these players: {:?}", removed);
         removed.into_iter().collect()
     }
@@ -615,7 +605,11 @@ impl Holdem {
 
     /// winner_sets:
     /// examples: [[alice, bob], [charlie, dave]] can be used to represent Royal flush: alice, bob > Flush: charlie, dave
-    pub fn assign_winners(&mut self, winner_sets: Vec<Vec<u64>>) -> Result<(), HandleError> {
+    /// Return award pots.
+    pub fn assign_winners(
+        &mut self,
+        winner_sets: Vec<Vec<u64>>,
+    ) -> Result<Vec<AwardPot>, HandleError> {
         for pot in self.pots.iter_mut() {
             for winner_set in winner_sets.iter() {
                 let real_winners: Vec<u64> = winner_set
@@ -643,14 +637,22 @@ impl Holdem {
                 AwardPot { winners, amount }
             })
             .collect();
-        self.display.push(Display::AwardPots { pots: award_pots });
 
-        Ok(())
+        Ok(award_pots)
+    }
+
+    fn create_game_result_display(&mut self, award_pots: Vec<AwardPot>, player_result_map: BTreeMap<u64, PlayerResult>) {
+        self.display.push(Display::GameResult {
+            award_pots,
+            player_map: player_result_map,
+        });
     }
 
     /// Update the map that records players chips change (increased or decreased)
     /// Used for settlement
-    pub fn update_chips_map(&mut self) -> Result<BTreeMap<u64, i64>, HandleError> {
+    pub fn update_player_chips(
+        &mut self,
+    ) -> Result<BTreeMap<u64, PlayerResult>, HandleError> {
         // The i64 change for each player.  The amount = total pots
         // earned - total bet.  This map will be returned for furture
         // calculation.
@@ -661,7 +663,7 @@ impl Holdem {
         // the amount before the settlement, the `prize` is the sum of
         // pots earned during the settlement.  This map will be added
         // to display.
-        let mut result_player_map = BTreeMap::<u64, PlayerResult>::new();
+        let mut player_result_map = BTreeMap::<u64, PlayerResult>::new();
 
         self.winners = Vec::<u64>::with_capacity(self.player_map.len());
 
@@ -686,33 +688,19 @@ impl Holdem {
         println!("Chips map after awarding: {:?}", chips_change_map);
 
         for (id, player) in self.player_map.iter() {
-            let prize = if let Some(p) = self.prize_map.get(id).copied() {
-                if p == 0 {
-                    None
-                } else {
-                    Some(p)
-                }
-            } else {
-                None
-            };
-
             let result = PlayerResult {
                 id: *id,
                 position: player.position,
                 status: player.status,
                 chips: player.chips,
-                prize,
             };
 
-            result_player_map.insert(*id, result);
+            player_result_map.insert(*id, result);
         }
 
-        self.display.push(Display::GameResult {
-            player_map: result_player_map,
-        });
 
         self.hand_history.set_chips_change(&chips_change_map);
-        Ok(chips_change_map)
+        Ok(player_result_map)
     }
 
     pub fn single_player_win(
@@ -721,10 +709,11 @@ impl Holdem {
         winner: u64,
     ) -> Result<(), HandleError> {
         self.collect_bets()?;
-        self.assign_winners(vec![vec![winner]])?;
+        let award_pots = self.assign_winners(vec![vec![winner]])?;
         self.calc_prize()?;
         let rake = self.take_rake_from_prize()?;
-        let _ = self.update_chips_map()?;
+        let player_result_map = self.update_player_chips()?;
+        self.create_game_result_display(award_pots, player_result_map);
         self.apply_prize()?;
         self.mark_out_players();
         self.hand_history.valid = true;
@@ -847,10 +836,11 @@ impl Holdem {
 
         println!("Player rankings in order: {:?}", winners);
 
-        self.assign_winners(winners)?;
+        let award_pots = self.assign_winners(winners)?;
         self.calc_prize()?;
         let rake = self.take_rake_from_prize()?;
-        let _ = self.update_chips_map()?;
+        let player_result_map = self.update_player_chips()?;
+        self.create_game_result_display(award_pots, player_result_map);
         self.apply_prize()?;
         self.hand_history.valid = true;
 
@@ -1015,8 +1005,6 @@ impl Holdem {
         event: GameEvent,
         sender: u64,
     ) -> Result<(), HandleError> {
-        self.display.clear();
-
         let Some(player) = self.player_map.get(&sender) else {
             return Err(HandleError::InvalidPlayer);
         };
@@ -1286,7 +1274,14 @@ impl Holdem {
         println!("Game starts and next BTN: {}", next_btn);
         self.btn = next_btn;
 
-        if self.player_map.len() >= 2 {
+        // Only start game when there are at least two available player
+        if self
+            .player_map
+            .iter()
+            .filter(|p| !matches!(p.1.status, PlayerStatus::Out | PlayerStatus::Leave))
+            .count()
+            >= 2
+        {
             // Prepare randomness (shuffling cards)
             let rnd_spec = RandomSpec::deck_of_cards();
             self.deck_random_id = effect.init_random_state(rnd_spec);
@@ -1338,10 +1333,10 @@ impl GameHandler for Holdem {
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
+        self.display.clear();
         match event {
             // Handle holdem specific (custom) events
             Event::Custom { sender, raw } => {
-                self.display.clear();
                 self.reset_player_timeout(sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
                 println!("Player action event: {:?}, sender: {:?}", event, sender);
@@ -1359,8 +1354,6 @@ impl GameHandler for Holdem {
             }
 
             Event::ActionTimeout { player_id } => {
-                self.display.clear();
-
                 if !self.is_acting_player(player_id) {
                     return Err(errors::not_the_acting_player());
                 }
@@ -1431,8 +1424,6 @@ impl GameHandler for Holdem {
             Event::Join { players } => {
                 effect.info("A player joined!");
 
-                self.display.clear();
-
                 for p in players.into_iter() {
                     let player = Player::init(p.id(), 0, p.position());
                     self.player_map.insert(p.id(), player);
@@ -1482,7 +1473,6 @@ impl GameHandler for Holdem {
 
             Event::Leave { player_id } => {
                 // TODO: Leaving is not allowed in SNG game
-                self.display.clear();
                 println!("Player {} decides to leave game", player_id);
                 self.set_player_status(player_id, PlayerStatus::Leave)?;
                 let _ = self.handle_player_leave(effect, player_id);
@@ -1491,10 +1481,9 @@ impl GameHandler for Holdem {
             }
 
             Event::RandomnessReady { .. } => {
-                self.display.clear();
                 // Cards are dealt to players but remain invisible to them
                 for (idx, (id, player)) in self.player_map.iter().enumerate() {
-                    if player.status != PlayerStatus::Init {
+                    if matches!(player.status, PlayerStatus::Wait) {
                         effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
                         self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
                     }
@@ -1505,7 +1494,6 @@ impl GameHandler for Holdem {
 
             Event::SecretsReady { .. } => match self.stage {
                 HoldemStage::ShareKey => {
-                    self.display.clear();
                     let players_cnt = self.count_ingame_players() * 2;
                     let board_prev_cnt = self.board.len();
                     self.stage = HoldemStage::Play;
@@ -1573,7 +1561,6 @@ impl GameHandler for Holdem {
 
                 // Shuffling deck
                 HoldemStage::Init => {
-                    self.display.clear();
                     match self.street {
                         Street::Init => {
                             self.street = Street::Preflop;
@@ -1589,7 +1576,6 @@ impl GameHandler for Holdem {
 
                 // Ending, comparing cards
                 HoldemStage::Runner => {
-                    self.display.clear();
                     let prev_board_cnt = self.board.len();
                     self.update_board(effect)?;
                     self.display.push(Display::DealBoard {
@@ -1604,7 +1590,6 @@ impl GameHandler for Holdem {
 
                 // Ending, comparing cards
                 HoldemStage::Showdown => {
-                    self.display.clear();
                     self.settle(effect)?;
                     self.wait_timeout(effect, WAIT_TIMEOUT_SHOWDOWN);
                     Ok(())
