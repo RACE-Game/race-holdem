@@ -28,7 +28,7 @@ pub struct LtMttAccountData {
     // First time register: xUSDT -> yCHIPS
     // Register again: xUSDT -> zCHIPS
     pub ticket_rules: Vec<TicketRule>,
-    pub total_prize: u64,
+    pub rake: u16,
     // pub blind_rules: Vec<u8>,
     // pub prize_rules: Vec<u8>,
     pub subgame_bundle: String,
@@ -211,6 +211,7 @@ pub struct LtMtt {
     ticket_rules: Vec<TicketRule>,
     total_prize: u64,
     prize_rules: Vec<u8>,
+    rake: u16,
     blind_rules: Vec<BlindRule>,
     subgame_bundle: String,
     /// belows are ltmtt self hold fields
@@ -242,8 +243,9 @@ impl GameHandler for LtMtt {
             settle_time,
             table_size,
             mut ticket_rules,
-            total_prize,
+            rake,
             subgame_bundle,
+            ..
         } = init_account.data()?;
 
         if ticket_rules.is_empty() {
@@ -264,7 +266,7 @@ impl GameHandler for LtMtt {
             settle_time,
             table_size,
             ticket_rules,
-            total_prize,
+            rake,
             subgame_bundle,
             blind_rules,
             player_balances,
@@ -448,6 +450,10 @@ impl LtMtt {
             player.chips = ticket_rule.chips;
             player.deposit_history.push(deposit.balance());
             self.player_balances.insert(deposit.id(), deposit.balance());
+
+            let rake = deposit.balance() * 10 / 1000;
+            effect.transfer(rake);
+            self.total_prize += deposit.balance() - rake;
 
             effect.info(format!(
                 "on_deposit: User {} deposit {}.",
