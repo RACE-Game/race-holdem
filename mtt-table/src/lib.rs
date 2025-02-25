@@ -67,6 +67,7 @@ impl GameHandler for MttTable {
             Event::Bridge {
                 dest_game_id, raw, ..
             } => {
+                self.holdem.display.clear();
                 if dest_game_id == self.table_id as _ {
                     let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
                     self.handle_bridge_event(effect, bridge_event)?;
