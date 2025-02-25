@@ -525,47 +525,71 @@ impl LtMtt {
     }
 
     fn level_up(&mut self, effect: &mut Effect, table_id: usize) -> HandleResult<()> {
-        let table = self.tables.get(&table_id).unwrap();
+        let origin_table = self.tables.get_mut(&table_id).unwrap();
         let cur_blind_rule = self
             .blind_rules
             .iter()
-            .find(|br| br.sb == table.sb)
+            .find(|br| br.sb == origin_table.sb)
             .unwrap();
 
         if let Some(max_chips) = cur_blind_rule.max_chips {
-            let mut level_up_players: Vec<MttTablePlayer> = vec![];
-            for player in table.players.clone() {
+            let mut level_up_player_ids: Vec<u64> = vec![];
+            for player in origin_table.players.iter() {
                 if player.chips > max_chips {
-                    level_up_players.push(player);
+                    level_up_player_ids.push(player.id);
                 }
             }
+            let origin_player_num = origin_table.players.len();
+            let level_up_player_num = level_up_player_ids.len();
 
             // to moved player num >= 2
             // origin table player num >= 2, or eq 0 after moved.
-            if level_up_players.len() >= 2
-                && (table.players.len() == level_up_players.len()
-                    || (table.players.len() - level_up_players.len()) >= 2)
+            if level_up_player_ids.len() >= 2
+                && (origin_player_num == level_up_player_num
+                    || (origin_player_num - level_up_player_num) >= 2)
             {
                 // origin table
-                let level_up_player_ids: Vec<u64> = level_up_players.iter().map(|p| p.id).collect();
+                for &up_player_id in level_up_player_ids.iter() {
+                    self.table_assigns.remove(&up_player_id);
+
+                    let mut origin_new_players = vec![];
+                    for p in origin_table.players.iter() {
+                        if p.id != up_player_id {
+                            origin_new_players.push(p.clone());
+                        }
+                    }
+                    origin_table.players = origin_new_players;
+                }
+
                 effect.bridge_event(
                     table_id,
                     HoldemBridgeEvent::StartGame {
-                        sb: table.sb,
-                        bb: table.bb,
+                        sb: origin_table.sb,
+                        bb: origin_table.bb,
                         moved_players: level_up_player_ids.clone(),
                     },
                 )?;
 
                 // up level table
-                let next_blind_rule = self.blind_rules.iter().find(|br| table.sb < br.sb).unwrap();
+                let next_blind_rule = self
+                    .blind_rules
+                    .iter()
+                    .find(|br| origin_table.sb < br.sb)
+                    .unwrap();
                 let next_max_chips = next_blind_rule.max_chips.unwrap_or(u64::max_value());
-                // capacity is needed
-                let to_sit_table_id =
-                    self.find_table_to_sit(level_up_players.len(), next_max_chips);
-                let relocate_players: BTreeMap<u64, u64> = level_up_players
+                let to_sit_table_id = self.find_table_to_sit(level_up_player_num, next_max_chips);
+                let relocate_players: BTreeMap<u64, u64> = level_up_player_ids
                     .into_iter()
-                    .map(|p| (p.id, p.chips))
+                    .map(|pid| {
+                        (
+                            pid,
+                            self.rankings
+                                .iter()
+                                .find(|r| r.player_id == pid)
+                                .unwrap()
+                                .chips,
+                        )
+                    })
                     .collect();
 
                 self.do_sit_in(effect, to_sit_table_id, relocate_players)?;
@@ -576,8 +600,8 @@ impl LtMtt {
         effect.bridge_event(
             table_id,
             HoldemBridgeEvent::StartGame {
-                sb: table.sb,
-                bb: table.bb,
+                sb: origin_table.sb,
+                bb: origin_table.bb,
                 moved_players: vec![],
             },
         )?;
@@ -607,7 +631,11 @@ impl LtMtt {
         for (player_id, chips) in players {
             let mtt_table_player =
                 MttTablePlayer::new(player_id, chips, 0, MttTablePlayerStatus::SitIn);
-            let ranking = self.rankings.iter_mut().find(|rank| rank.player_id == player_id).unwrap();
+            let ranking = self
+                .rankings
+                .iter_mut()
+                .find(|rank| rank.player_id == player_id)
+                .unwrap();
             ranking.status = LtMttPlayerStatus::SatIn;
             mtt_table_players.push(mtt_table_player);
         }
