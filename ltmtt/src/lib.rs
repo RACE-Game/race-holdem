@@ -515,7 +515,7 @@ impl LtMtt {
             }
 
             self.tables.insert(table_id, table);
-            self.apply_chips_change(chips_change)?;
+            self.apply_chips_change(effect, chips_change)?;
             self.level_up(effect, table_id)?;
 
             effect.checkpoint();
@@ -702,7 +702,11 @@ impl LtMtt {
         return id;
     }
 
-    fn apply_chips_change(&mut self, chips_change: BTreeMap<u64, ChipsChange>) -> HandleResult<()> {
+    fn apply_chips_change(
+        &mut self,
+        effect: &mut Effect,
+        chips_change: BTreeMap<u64, ChipsChange>,
+    ) -> HandleResult<()> {
         for (player_id, change) in chips_change.into_iter() {
             let player = self
                 .rankings
@@ -712,9 +716,17 @@ impl LtMtt {
 
             match change {
                 ChipsChange::Add(amount) => {
+                    effect.info(format!(
+                        "chips_changes: Player[{}] chips: {} add {}",
+                        player_id, player.chips, amount
+                    ));
                     player.chips += amount;
                 }
                 ChipsChange::Sub(amount) => {
+                    effect.info(format!(
+                        "chips_changes: Player[{}] chips: {} sub {}",
+                        player_id, player.chips, amount
+                    ));
                     player.chips -= amount;
                     if player.chips <= 0 {
                         player.status = LtMttPlayerStatus::SatOut;
