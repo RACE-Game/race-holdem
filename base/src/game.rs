@@ -1542,10 +1542,12 @@ impl GameHandler for Holdem {
                             let card_index = players_cnt + 4;
                             if let Some(card) = decryption.get(&card_index) {
                                 self.board.push(card.clone());
-                                self.display.push(Display::DealBoard {
-                                    prev: board_prev_cnt,
-                                    board: self.board.clone(),
-                                });
+                                if board_prev_cnt != 5 {
+                                    self.display.push(Display::DealBoard {
+                                        prev: board_prev_cnt,
+                                        board: self.board.clone(),
+                                    });
+                                }
                             } else {
                                 return Err(errors::river_card_error());
                             }
@@ -1578,10 +1580,12 @@ impl GameHandler for Holdem {
                 HoldemStage::Runner => {
                     let prev_board_cnt = self.board.len();
                     self.update_board(effect)?;
-                    self.display.push(Display::DealBoard {
-                        prev: prev_board_cnt,
-                        board: self.board.clone(),
-                    });
+                    if prev_board_cnt != 5 {
+                        self.display.push(Display::DealBoard {
+                            prev: prev_board_cnt,
+                            board: self.board.clone(),
+                        });
+                    }
                     self.settle(effect)?;
 
                     self.wait_timeout(effect, WAIT_TIMEOUT_RUNNER);
