@@ -22,15 +22,14 @@ pub struct LtMttAccountData {
     pub entry_open_time: u64,
     pub entry_close_time: u64,
     pub settle_time: u64,
-    // The maximum number is 9 players at the same time,
-    // but never check in ltmtt, it's the launcher's responsibility.
+    // Players on table, but never check in ltmtt, it's the launcher's responsibility.
     pub table_size: u8,
     // First time register: xUSDT -> yCHIPS
     // Register again: xUSDT -> zCHIPS
     pub ticket_rules: Vec<TicketRule>,
     pub rake: u16,
     // pub blind_rules: Vec<u8>,
-    // pub prize_rules: Vec<u8>,
+    pub prize_rules: Vec<u8>,
     pub subgame_bundle: String,
 }
 
@@ -244,6 +243,7 @@ impl GameHandler for LtMtt {
             table_size,
             mut ticket_rules,
             rake,
+            prize_rules,
             subgame_bundle,
             ..
         } = init_account.data()?;
@@ -267,6 +267,7 @@ impl GameHandler for LtMtt {
             table_size,
             ticket_rules,
             rake,
+            prize_rules,
             subgame_bundle,
             blind_rules,
             player_balances,
@@ -727,24 +728,24 @@ impl LtMtt {
     }
 
     fn do_settle(&mut self, effect: &mut Effect) -> HandleResult<()> {
-        if self.prize_rules.is_empty() {
-            self.player_balances.insert(0, 0);
+        // if no any player join in.
+        if self.rankings.is_empty() {
             return Ok(());
         }
 
         let total_shares: u8 = self.prize_rules.iter().take(self.rankings.len()).sum();
         let prize_share: u64 = self.total_prize / total_shares as u64;
+        self.player_balances.insert(0, 0);
 
         for (i, ranking) in self.rankings.iter().enumerate() {
             let player_id = ranking.player_id;
 
-            if let Some(rank) = self.prize_rules.get(i) {
-                let prize: u64 = prize_share * *rank as u64;
+            if let Some(rule) = self.prize_rules.get(i) {
+                let prize: u64 = prize_share * *rule as u64;
+                effect.info(format!("do_settle: Player[{}] win {}.", player_id, prize,));
                 effect.withdraw(player_id, prize);
             }
         }
-
-        self.player_balances.insert(0, 0);
 
         Ok(())
     }
