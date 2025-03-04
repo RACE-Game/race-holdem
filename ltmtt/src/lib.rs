@@ -356,14 +356,7 @@ impl LtMtt {
 
     fn on_ready(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_ready...");
-        if self.stage == LtMttStage::Init {
-            effect.start_game();
-        } else {
-            if let Some(timeout) = self.calc_timeout_should_send(effect) {
-                effect.wait_timeout(timeout);
-            }
-        }
-
+        effect.start_game();
         Ok(())
     }
 
