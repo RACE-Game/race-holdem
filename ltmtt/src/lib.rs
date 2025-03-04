@@ -356,8 +356,6 @@ impl LtMtt {
 
     fn on_ready(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_ready...");
-        // effect.set_entry_lock(EntryLock::Closed);
-
         if self.stage == LtMttStage::Init {
             effect.start_game();
         } else {
@@ -372,7 +370,6 @@ impl LtMtt {
     // Reset game state, swap secret
     fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_game_start...");
-
         // Implicit the stage is LtMttStage::Init
         if let Some(timeout) = self.calc_timeout_should_send(effect) {
             effect.wait_timeout(timeout);
@@ -385,9 +382,13 @@ impl LtMtt {
         match self.stage {
             LtMttStage::Init => {
                 effect.info("callback on_waiting_timeout: stage changed to EntryOpened.");
-                for blind_rule in self.blind_rules.clone() {
-                    let _ = self.create_table(effect, blind_rule);
+                // Prepare tables if empty, for recovering condition
+                if self.tables.is_empty() {
+                    for blind_rule in self.blind_rules.clone() {
+                        let _ = self.create_table(effect, blind_rule);
+                    }
                 }
+
                 effect.set_entry_lock(EntryLock::Open);
                 self.stage = LtMttStage::EntryOpened;
 
