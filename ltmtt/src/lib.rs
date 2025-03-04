@@ -478,11 +478,13 @@ impl LtMtt {
 
             player.chips = ticket_rule.chips;
             player.deposit_history.push(deposit.balance());
-            self.player_balances.insert(deposit.id(), deposit.balance());
+
 
             let rake = deposit.balance() * 10 / 1000;
+            let prize = deposit.balance() - rake;
+            self.total_prize += prize;
+            self.player_balances.insert(deposit.id(), prize);
             effect.transfer(rake);
-            self.total_prize += deposit.balance() - rake;
 
             effect.info(format!(
                 "on_deposit: User {} deposit {}.",
