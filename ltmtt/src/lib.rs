@@ -343,15 +343,33 @@ impl GameHandler for LtMtt {
 }
 
 impl LtMtt {
-    fn on_ready(&self, effect: &mut Effect) -> HandleResult<()> {
+    fn calc_timeout_should_send(&self, effect: &mut Effect) -> Option<u64> {
+        match self.stage {
+            LtMttStage::Init => Some(self.entry_open_time.saturating_sub(effect.timestamp())),
+            LtMttStage::EntryOpened => {
+                Some(self.entry_close_time.saturating_sub(effect.timestamp()))
+            }
+            LtMttStage::EntryClosed => Some(self.settle_time.saturating_sub(effect.timestamp())),
+            LtMttStage::Settled => None,
+        }
+    }
+
+    fn on_ready(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_ready...");
         effect.set_entry_lock(EntryLock::Closed);
-        effect.start_game();
+
+        if self.stage == LtMttStage::Init {
+            effect.start_game();
+        } else {
+            if let Some(timeout) = self.calc_timeout_should_send(effect) {
+                effect.wait_timeout(timeout);
+            }
+        }
 
         Ok(())
     }
 
-    // reset game state, swap secret
+    // Reset game state, swap secret
     fn on_game_start(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_game_start...");
 
@@ -359,7 +377,11 @@ impl LtMtt {
             let _ = self.create_table(effect, blind_rule);
         }
 
-        effect.wait_timeout(self.entry_open_time.saturating_sub(effect.timestamp()));
+        // Implicit the stage is LtMttStage::Init
+        if let Some(timeout) = self.calc_timeout_should_send(effect) {
+            effect.wait_timeout(timeout);
+        }
+
         Ok(())
     }
 
@@ -367,16 +389,22 @@ impl LtMtt {
         match self.stage {
             LtMttStage::Init => {
                 effect.info("callback on_waiting_timeout: stage changed to EntryOpened.");
-                effect.wait_timeout(self.entry_close_time.saturating_sub(effect.timestamp()));
                 effect.set_entry_lock(EntryLock::Open);
                 self.stage = LtMttStage::EntryOpened;
+
+                if let Some(timeout) = self.calc_timeout_should_send(effect) {
+                    effect.wait_timeout(timeout);
+                }
             }
 
             LtMttStage::EntryOpened => {
                 effect.info("callback on_waiting_timeout: stage changed to EntryClosed.");
-                effect.wait_timeout(self.settle_time.saturating_sub(effect.timestamp()));
                 effect.set_entry_lock(EntryLock::Closed);
                 self.stage = LtMttStage::EntryClosed;
+
+                if let Some(timeout) = self.calc_timeout_should_send(effect) {
+                    effect.wait_timeout(timeout);
+                }
             }
 
             LtMttStage::EntryClosed => {
