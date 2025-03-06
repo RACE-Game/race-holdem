@@ -589,7 +589,7 @@ impl LtMtt {
                     HoldemBridgeEvent::StartGame {
                         sb: origin_table.sb,
                         bb: origin_table.bb,
-                        moved_players: level_up_player_ids.clone(),
+                        sitout_players: level_up_player_ids.clone(),
                     },
                 )?;
 
@@ -625,7 +625,7 @@ impl LtMtt {
             HoldemBridgeEvent::StartGame {
                 sb: origin_table.sb,
                 bb: origin_table.bb,
-                moved_players: vec![],
+                sitout_players: vec![],
             },
         )?;
 

@@ -53,8 +53,9 @@ pub enum MttStage {
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
 pub enum PlayerRankStatus {
     #[default]
-    Alive,
-    Out,
+    Reseat,                     // The player has been resitting from one table to another
+    Play,                       // The player is sitting on a table and playing
+    Out,                        // The player has no chips
 }
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
@@ -134,6 +135,7 @@ pub struct MttAccountData {
     start_chips: u64,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
+    min_players: u16,
     theme: Option<String>, // optional NFT theme
     subgame_bundle: String,
 }
@@ -175,6 +177,9 @@ pub struct Mtt {
     // The structure is a mapping from player_id to its guranteed prize.
     // The special player_id 0 stands for undistributed.
     player_balances: BTreeMap<u64, u64>,
+    // The minimal number of player to start this game.
+    // When there are fewer players, we cancel the game.
+    min_players: u16,
 }
 
 impl GameHandler for Mtt {
@@ -194,6 +199,7 @@ impl GameHandler for Mtt {
             start_chips,
             mut blind_info,
             prize_rules,
+            min_players,
             theme,
             subgame_bundle,
         } = init_account.data()?;
@@ -208,6 +214,7 @@ impl GameHandler for Mtt {
             blind_info,
             prize_rules,
             ticket,
+            min_players,
             theme,
             subgame_bundle,
             ..Default::default()
@@ -256,7 +263,7 @@ impl GameHandler for Mtt {
                         self.ranks.push(PlayerRank {
                             id: p.id(),
                             chips: 0,
-                            status: PlayerRankStatus::Out,
+                            status: PlayerRankStatus::Reseat, // By default, the player is not sitted
                             position: p.position(),
                         });
                     }
@@ -267,7 +274,7 @@ impl GameHandler for Mtt {
                             self.ranks.push(PlayerRank {
                                 id: p.id(),
                                 chips: 0,
-                                status: PlayerRankStatus::Out,
+                                status: PlayerRankStatus::Reseat,
                                 position: p.position(),
                             });
                         }
@@ -308,11 +315,11 @@ impl GameHandler for Mtt {
                         if let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) {
                             if rank.chips == 0 {
                                 rank.chips = self.start_chips;
-                                rank.status = PlayerRankStatus::Alive;
+                                rank.status = PlayerRankStatus::Reseat;
                                 effect.info(format!("Accept player deposit: {}", d.id()));
                                 effect.accept_deposit(&d)?;
                                 self.total_prize += d.balance();
-                                self.add_new_player(effect, player_id)?;
+                                self.sit_player(effect, player_id)?;
                                 self.update_alives();
                                 self.deposit_balance(d.balance());
                             } else {
@@ -374,12 +381,28 @@ impl GameHandler for Mtt {
                         self.maybe_set_entry_close(effect);
                         effect.checkpoint();
                     }
+
+                    HoldemBridgeEvent::SitResult {
+                        table_id,
+                        sitin_players,
+                        sitout_players
+                    } => {
+                        for pid in sitin_players {
+                            self.table_assigns.insert(pid, table_id);
+                        }
+                        for pid in sitout_players {
+                            self.table_assigns.remove(&pid);
+                        }
+                    }
+
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
             }
 
-            Event::SubGameReady { game_id } => {
+            Event::SubGameReady { game_id, init_data, .. } => {
+                let table = MttTableState::try_from_slice(&init_data)?;
                 self.launched_table_ids.push(game_id);
+                self.tables.insert(table.table_id, table);
                 effect.checkpoint();
             }
 
@@ -413,7 +436,7 @@ impl Mtt {
     fn has_winner(&self) -> bool {
         self.ranks
             .iter()
-            .filter(|r| r.status == PlayerRankStatus::Alive)
+            .filter(|r| matches!(r.status, PlayerRankStatus::Play | PlayerRankStatus::Reseat))
             .count()
             == 1
     }
@@ -498,7 +521,7 @@ impl Mtt {
         self.alives = self
             .ranks
             .iter()
-            .filter(|r| r.status == PlayerRankStatus::Alive)
+            .filter(|r| r.status != PlayerRankStatus::Out)
             .count();
     }
 
@@ -644,7 +667,7 @@ impl Mtt {
                 .and_modify(|v| *v = to_table_id);
         }
 
-        let moved_players = players.iter().map(|p| p.id).collect();
+        let sitout_players = players.iter().map(|p| p.id).collect();
 
         effect.bridge_event(
             to_table_id as _,
@@ -658,7 +681,7 @@ impl Mtt {
             HoldemBridgeEvent::StartGame {
                 sb,
                 bb,
-                moved_players,
+                sitout_players,
             },
         )?;
 
@@ -695,7 +718,7 @@ impl Mtt {
                     HoldemBridgeEvent::StartGame {
                         sb,
                         bb,
-                        moved_players: Vec::with_capacity(0),
+                        sitout_players: Vec::with_capacity(0),
                     },
                 )?;
             }
@@ -754,7 +777,7 @@ impl Mtt {
                     HoldemBridgeEvent::StartGame {
                         sb,
                         bb,
-                        moved_players: Vec::with_capacity(0),
+                        sitout_players: Vec::with_capacity(0),
                     },
                 )?;
             }
@@ -779,7 +802,7 @@ impl Mtt {
     ///
     /// NB: The game will launch tables when receiving GameStart
     /// event, so this function is No-op in Init stage.
-    fn add_new_player(&mut self, effect: &mut Effect, player_id: u64) -> HandleResult<()> {
+    fn sit_player(&mut self, effect: &mut Effect, player_id: u64) -> HandleResult<()> {
         if self.stage == MttStage::Init {
             return Ok(());
         }
@@ -790,12 +813,11 @@ impl Mtt {
             return Err(errors::error_player_id_not_found())?;
         };
 
-        let mut player = MttTablePlayer::new(rank.id, rank.chips, 0, MttTablePlayerStatus::SitIn);
 
         for (table_id, table) in self.tables.iter_mut() {
             if table.players.len() < self.table_size as usize {
-                self.table_assigns.insert(player_id, *table_id);
-                table.add_player(&mut player);
+                let position = table.find_position();
+                let player = MttTablePlayer::new(rank.id, rank.chips, position, MttTablePlayerStatus::SitIn);
 
                 effect.bridge_event(
                     *table_id,
@@ -811,6 +833,7 @@ impl Mtt {
         // Table is full, create a new table with this player.
         effect.info("Create a table for new player");
 
+        let player = MttTablePlayer::new(rank.id, rank.chips, 0, MttTablePlayerStatus::SitIn);
         let players = vec![player];
 
         let table_id = effect.next_sub_game_id();
@@ -824,7 +847,6 @@ impl Mtt {
             hand_id: 0,
         };
 
-        self.table_assigns.insert(player_id, table_id);
         self.launch_table(effect, table)?;
         Ok(())
     }

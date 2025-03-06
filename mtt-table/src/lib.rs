@@ -145,7 +145,7 @@ impl MttTable {
             HoldemBridgeEvent::StartGame {
                 sb,
                 bb,
-                moved_players,
+                sitout_players,
             } => {
                 let timeout = self
                     .holdem
@@ -153,14 +153,19 @@ impl MttTable {
                     .saturating_sub(effect.timestamp());
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
-                for id in moved_players {
-                    match self.holdem.player_map.entry(id) {
+                for id in sitout_players.iter() {
+                    match self.holdem.player_map.entry(*id) {
                         Entry::Vacant(_) => return Err(errors::invalid_player_in_start_game()),
                         Entry::Occupied(e) => {
                             e.remove();
                         }
                     }
                 }
+                effect.bridge_event(0, HoldemBridgeEvent::SitResult {
+                    table_id: self.table_id,
+                    sitin_players: vec![],
+                    sitout_players
+                })?;
                 effect.wait_timeout(timeout);
             }
             // Add players from other tables
@@ -200,7 +205,13 @@ impl MttTable {
                 }
             }
             HoldemBridgeEvent::CloseTable => {
+                let sitout_players = self.holdem.player_map.keys().map(|x| *x).collect();
                 self.holdem.player_map.clear();
+                effect.bridge_event(0, HoldemBridgeEvent::SitResult {
+                    table_id: self.table_id,
+                    sitin_players: vec![],
+                    sitout_players
+                })?;
                 effect.checkpoint();
             }
             _ => return Err(errors::internal_invalid_bridge_event()),

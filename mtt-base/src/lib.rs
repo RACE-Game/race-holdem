@@ -46,6 +46,23 @@ pub struct MttTableState {
 }
 
 impl MttTableState {
+
+    pub fn find_position(&self) -> usize {
+        let mut table_position = 0;
+        for i in 0.. {
+            if self
+                .players
+                .iter()
+                .find(|p| p.table_position == i)
+                .is_none()
+                {
+                    table_position = i;
+                    break;
+                }
+        }
+        return table_position;
+    }
+
     /// If player already on table, returns false represents add failed.
     pub fn add_player(&mut self, player: &mut MttTablePlayer) -> bool {
         let exists = self.players.iter().any(|p| p.id == player.id);
@@ -84,24 +101,37 @@ impl MttTableState {
 /// through such events to the mtt handler.  Also see [`race_api::event::Event::Bridge`].
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub enum HoldemBridgeEvent {
+    /// This event is sent by master game.
     /// Start game with specified SB and BB.
     /// The `moved_players` indicates those should be removed before next hand.
     StartGame {
         sb: u64,
         bb: u64,
-        moved_players: Vec<u64>,
+        sitout_players: Vec<u64>,
     },
+    /// This event is sent by master game.
     /// Add players to current game.
     Relocate { players: Vec<MttTablePlayer> },
+    /// This event is sent by master game.
     /// Close table, all players should be removed from this game.
     /// Additionally, the game can be closed.
     CloseTable,
+    /// This event is sent by sub game.
     /// A game result report from table.
     GameResult {
         hand_id: usize,
         table_id: GameId,
         chips_change: BTreeMap<u64, ChipsChange>,
         table: MttTableState,
+    },
+    /// This event is sent by sub game.
+    /// Represent result of relocate which contains the player id of succeed and failed movements.
+    SitResult {
+        table_id: GameId,
+        // These players have been sitted in successfully.
+        sitin_players: Vec<u64>,
+        // These players failed to get sitted in, hence they are sitted out.
+        sitout_players: Vec<u64>,
     },
 }
 
