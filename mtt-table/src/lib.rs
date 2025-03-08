@@ -8,7 +8,8 @@ use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin, MttTableState
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin,
+    MttTableState,
 };
 use race_proc_macro::game_handler;
 
@@ -56,10 +57,7 @@ impl GameHandler for MttTable {
             ..Default::default()
         };
 
-        Ok(Self {
-            table_id,
-            holdem,
-        })
+        Ok(Self { table_id, holdem })
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
@@ -161,34 +159,47 @@ impl MttTable {
                         }
                     }
                 }
-                effect.bridge_event(0, HoldemBridgeEvent::SitResult {
-                    table_id: self.table_id,
-                    sitin_players: vec![],
-                    sitout_players
-                })?;
+                effect.bridge_event(
+                    0,
+                    HoldemBridgeEvent::SitResult {
+                        table_id: self.table_id,
+                        sitin_players: vec![],
+                        sitout_players,
+                    },
+                )?;
                 effect.wait_timeout(timeout);
             }
             // Add players from other tables
             HoldemBridgeEvent::SitinPlayers { sitins } => {
+                let mut sitout_players = vec![];
+                let mut sitin_players = vec![];
                 for sitin in sitins.into_iter() {
-                    let MttTableSitin {
-                        id,
-                        chips,
-                    } = sitin;
-                    if self.holdem.
-                    if self.holdem.position_occupied(table_position) {
-                        return Err(errors::duplicated_position_in_relocate());
+                    let MttTableSitin { id, chips } = sitin;
+
+                    if let Some(position) = self.holdem.find_position() {
+                        sitin_players.push(sitin.id);
+                        match self.holdem.player_map.entry(id) {
+                            Entry::Vacant(e) => e.insert(Player::new_with_timeout_and_status(
+                                id,
+                                chips,
+                                position as usize,
+                                PlayerStatus::Init,
+                            )),
+                            Entry::Occupied(_) => {
+                                return Err(errors::duplicated_player_in_relocate())
+                            }
+                        };
+                    } else {
+                        sitout_players.push(sitin.id);
                     }
-                    match self.holdem.player_map.entry(id) {
-                        Entry::Vacant(e) => e.insert(Player::new_with_timeout_and_status(
-                            id,
-                            chips,
-                            table_position as _,
-                            PlayerStatus::Init,
-                        )),
-                        Entry::Occupied(_) => return Err(errors::duplicated_player_in_relocate()),
-                    };
                 }
+
+                effect.bridge_event(0, HoldemBridgeEvent::SitResult {
+                    table_id: self.table_id,
+                    sitin_players,
+                    sitout_players,
+                })?;
+
                 if matches!(
                     self.holdem.stage,
                     HoldemStage::Init
@@ -206,11 +217,14 @@ impl MttTable {
             HoldemBridgeEvent::CloseTable => {
                 let sitout_players = self.holdem.player_map.keys().map(|x| *x).collect();
                 self.holdem.player_map.clear();
-                effect.bridge_event(0, HoldemBridgeEvent::SitResult {
-                    table_id: self.table_id,
-                    sitin_players: vec![],
-                    sitout_players
-                })?;
+                effect.bridge_event(
+                    0,
+                    HoldemBridgeEvent::SitResult {
+                        table_id: self.table_id,
+                        sitin_players: vec![],
+                        sitout_players,
+                    },
+                )?;
                 effect.checkpoint();
             }
             _ => return Err(errors::internal_invalid_bridge_event()),
