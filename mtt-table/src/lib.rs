@@ -8,7 +8,7 @@ use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin, MttTableState
 };
 use race_proc_macro::game_handler;
 
@@ -169,14 +169,13 @@ impl MttTable {
                 effect.wait_timeout(timeout);
             }
             // Add players from other tables
-            HoldemBridgeEvent::Relocate { players } => {
-                for mtt_player in players.into_iter() {
-                    let MttTablePlayer {
+            HoldemBridgeEvent::SitinPlayers { sitins } => {
+                for sitin in sitins.into_iter() {
+                    let MttTableSitin {
                         id,
                         chips,
-                        table_position,
-                        player_status: _,
-                    } = mtt_player;
+                    } = sitin;
+                    if self.holdem.
                     if self.holdem.position_occupied(table_position) {
                         return Err(errors::duplicated_position_in_relocate());
                     }

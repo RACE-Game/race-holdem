@@ -37,7 +37,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin, MttTableState
 };
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -392,6 +392,7 @@ impl GameHandler for Mtt {
                         }
                         for pid in sitout_players {
                             self.table_assigns.remove(&pid);
+                            self.sit_player(effect, pid)?;
                         }
                     }
 
@@ -569,74 +570,14 @@ impl Mtt {
         Ok((table_with_least_players.1, table_with_most_players.1))
     }
 
-    /// Close the table with `close_table_id` and move all its players
-    /// to other tables.  Remove the closed table from state.
+    /// Close the table with `close_table_id`.
     fn close_table_and_move_players_to_other_tables(
         &mut self,
         effect: &mut Effect,
         close_table_id: GameId,
     ) -> HandleResult<()> {
-        // Remove the table
-        let mut table_to_close = self
-            .tables
-            .remove(&close_table_id)
-            .ok_or(errors::error_table_not_fonud())?;
-
-        // All table ids except the one to close
-        let target_table_ids: Vec<GameId> = {
-            let mut table_refs = self
-                .tables
-                .iter()
-                .collect::<Vec<(&GameId, &MttTableState)>>();
-            table_refs.sort_by_key(|(_id, t)| t.players.len());
-            table_refs
-                .into_iter()
-                .map(|(id, _)| *id)
-                .filter(|id| id.ne(&close_table_id))
-                .collect()
-        };
-
-        let mut relocates = BTreeMap::<usize, Vec<MttTablePlayer>>::default();
-        for target_table_id in target_table_ids.iter().cycle() {
-            let target_table = self
-                .tables
-                .get(target_table_id)
-                .ok_or(errors::error_invalid_index_usage())?;
-
-            if table_to_close.players.is_empty() {
-                break;
-            }
-
-            if target_table.players.len() < self.table_size as _ {
-                if let Some(mut player) = table_to_close.players.pop() {
-                    let table_ref = self
-                        .tables
-                        .get_mut(&target_table_id)
-                        .ok_or(errors::error_table_not_fonud())?;
-                    table_ref.add_player(&mut player);
-                    self.table_assigns
-                        .entry(player.id)
-                        .and_modify(|v| *v = *target_table_id);
-
-                    match relocates.entry(*target_table_id as usize) {
-                        Entry::Vacant(e) => {
-                            e.insert(vec![player.clone()]);
-                        }
-                        Entry::Occupied(mut e) => {
-                            e.get_mut().push(player.clone());
-                        }
-                    };
-                } else {
-                    break;
-                }
-            }
-        }
-
         effect.bridge_event(close_table_id as _, HoldemBridgeEvent::CloseTable)?;
 
-        for (table_id, players) in relocates {
-            effect.bridge_event(table_id as _, HoldemBridgeEvent::Relocate { players })?;
-        }
         Ok(())
     }
 
@@ -644,37 +585,19 @@ impl Mtt {
         &mut self,
         effect: &mut Effect,
         from_table_id: GameId,
-        to_table_id: GameId,
+        _to_table_id: GameId,
         num_to_move: usize,
     ) -> HandleResult<()> {
-        let mut players: Vec<MttTablePlayer> = self
+        let sitout_players: Vec<u64> = self
             .tables
             .get_mut(&from_table_id)
             .ok_or(errors::error_invalid_index_usage())?
             .players
-            .drain(0..num_to_move)
+            .iter()
+            .take(num_to_move)
+            .map(|p| p.id)
             .collect();
 
-        let table_ref = self
-            .tables
-            .get_mut(&to_table_id)
-            .ok_or(errors::error_table_not_fonud())?;
-
-        for p in players.iter_mut() {
-            table_ref.add_player(p);
-            self.table_assigns
-                .entry(p.id)
-                .and_modify(|v| *v = to_table_id);
-        }
-
-        let sitout_players = players.iter().map(|p| p.id).collect();
-
-        effect.bridge_event(
-            to_table_id as _,
-            HoldemBridgeEvent::Relocate {
-                players: players.clone(),
-            },
-        )?;
         let (sb, bb) = self.calc_blinds()?;
         effect.bridge_event(
             from_table_id as _,
@@ -813,22 +736,26 @@ impl Mtt {
             return Err(errors::error_player_id_not_found())?;
         };
 
+        let mut table_id_with_least_players = None;
+        let mut least_player_num: usize = self.table_size as _;
 
-        for (table_id, table) in self.tables.iter_mut() {
-            if table.players.len() < self.table_size as usize {
-                let position = table.find_position();
-                let player = MttTablePlayer::new(rank.id, rank.chips, position, MttTablePlayerStatus::SitIn);
-
-                effect.bridge_event(
-                    *table_id,
-                    HoldemBridgeEvent::Relocate {
-                        players: vec![player.clone()],
-                    },
-                )?;
-                effect.info(format!("Add player {} to table {}", player_id, table_id));
-                return Ok(());
+        for (table_id, table) in self.tables.iter() {
+            if table.players.len() < least_player_num {
+                table_id_with_least_players = Some(table_id);
+                least_player_num = table.players.len();
             }
         }
+
+        if let Some(table_id) = table_id_with_least_players {
+            effect.bridge_event(
+                *table_id,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new(rank.id, rank.chips)],
+                },
+            )?;
+            effect.info(format!("Add player {} to table {}", player_id, table_id));
+            return Ok(())
+        };
 
         // Table is full, create a new table with this player.
         effect.info("Create a table for new player");
@@ -932,7 +859,7 @@ mod tests {
                 mtt.ranks.push(PlayerRank {
                     id: rank_id,
                     chips: start_chips,
-                    status: PlayerRankStatus::Alive,
+                    status: PlayerRankStatus::Play,
                     position: rank_id as u16 % table_size as u16,
                 });
 

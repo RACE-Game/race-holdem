@@ -1235,6 +1235,15 @@ impl Holdem {
         Ok(())
     }
 
+    pub fn find_position(&self) -> Option<u8> {
+        for i in 0..self.table_size {
+            if self.player_map.iter().find(|p| p.1.position == i as usize).is_none() {
+                return Some(i)
+            }
+        }
+        return None
+    }
+
     pub fn position_occupied(&self, position: usize) -> bool {
         self.player_map
             .iter()

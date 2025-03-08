@@ -18,6 +18,18 @@ pub struct MttTablePlayer {
     pub player_status: MttTablePlayerStatus,
 }
 
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
+pub struct MttTableSitin {
+    pub id: u64,
+    pub chips: u64,
+}
+
+impl MttTableSitin {
+    pub fn new(id: u64, chips: u64) -> Self {
+        Self { id, chips }
+    }
+}
+
 impl MttTablePlayer {
     pub fn new(
         id: u64,
@@ -111,7 +123,7 @@ pub enum HoldemBridgeEvent {
     },
     /// This event is sent by master game.
     /// Add players to current game.
-    Relocate { players: Vec<MttTablePlayer> },
+    SitinPlayers { sitins: Vec<MttTableSitin> },
     /// This event is sent by master game.
     /// Close table, all players should be removed from this game.
     /// Additionally, the game can be closed.
