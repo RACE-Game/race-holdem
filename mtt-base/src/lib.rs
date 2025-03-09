@@ -107,6 +107,12 @@ impl MttTableState {
             return true;
         }
     }
+
+    /// Remove player on table, always return true as its an idempotent function.
+    pub fn remove_player(&mut self, player_id: u64) -> bool {
+        self.players.retain(|p| p.id != player_id);
+        return true;
+    }
 }
 
 /// Holdem specific bridge events for interaction with the `mtt` crate.  Transactor will pass

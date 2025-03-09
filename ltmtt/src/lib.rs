@@ -12,7 +12,8 @@ use race_api::{
 };
 
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableState,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin,
+    MttTableState,
 };
 use race_proc_macro::game_handler;
 
@@ -167,11 +168,15 @@ fn default_blind_rules() -> Vec<BlindRule> {
     ]
 }
 
-#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
+#[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
 pub enum LtMttPlayerStatus {
     #[default]
-    SatIn,
-    SatOut,
+    // player not join in game.
+    Out,
+    // player join game but not in any table.
+    Pending,
+    // player is playing in a table.
+    Playing,
 }
 
 #[derive(Default, BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -216,7 +221,9 @@ pub struct LtMtt {
     /// belows are ltmtt self hold fields
     stage: LtMttStage,
     rankings: Vec<LtMttPlayer>,
+    // table_id -> table_state
     tables: BTreeMap<usize, MttTableState>,
+    // player_id -> table_id
     table_assigns: BTreeMap<u64, usize>,
     // theme: Option<String>,
     player_balances: BTreeMap<u64, u64>,
@@ -290,7 +297,6 @@ impl GameHandler for LtMtt {
             Event::Deposit { deposits } => {
                 for deposit in deposits {
                     if let Some(_player) = self.on_deposit(effect, &deposit)? {
-                        // self.do_sit_in(effect, &player)?;
                         self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
                     } else {
                         ()
@@ -304,8 +310,39 @@ impl GameHandler for LtMtt {
                 match bridge_event {
                     game_result @ HoldemBridgeEvent::GameResult { .. } => {
                         self.on_game_result(effect, game_result)?;
-                        self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
+                        effect.checkpoint();
                     }
+
+                    HoldemBridgeEvent::SitResult {
+                        table_id,
+                        sitin_players,
+                        sitout_players,
+                    } => {
+                        // Handle sitin players, which triggerred by HoldemBridgeEvent::SitinPlayers
+                        // Update tables and table_assigns.  `LtMttPlayerStatus` not changed
+                        for in_pid in sitin_players {
+                            self.update_table_player(effect, in_pid, Some(table_id))?;
+                            effect.info(format!(
+                                "SitResult: user[{}] sit in table[{}].",
+                                in_pid, table_id
+                            ));
+                        }
+
+                        // Handle sitout players
+                        // These players are marked with pending status,
+                        // and will match a new table for them later.
+                        for out_pid in sitout_players {
+                            self.update_table_player(effect, out_pid, None)?;
+                            effect.info(format!(
+                                "SitResult: user[{}] sit out table[{}].",
+                                out_pid, table_id
+                            ));
+                        }
+
+                        self.match_table_for_pending_users(effect)?;
+                        effect.checkpoint();
+                    }
+
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
             }
@@ -327,8 +364,15 @@ impl GameHandler for LtMtt {
                             Some(exist_table_id) => *exist_table_id,
                             None => self.find_table_to_sit(1, player.chips),
                         };
-                        let sit_players = BTreeMap::from([(player.player_id, player.chips)]);
-                        self.do_sit_in(effect, table_id, sit_players)?;
+                        // send a bridge event to subgame, waiting `HoldemBridgeEvent::SitinResult` from subgame.
+                        // when received the response, update self state.
+                        let sitin = MttTableSitin::new(player.player_id, player.chips);
+                        effect.bridge_event(
+                            table_id,
+                            HoldemBridgeEvent::SitinPlayers {
+                                sitins: vec![sitin],
+                            },
+                        )?;
                     }
 
                     _ => (),
@@ -424,7 +468,7 @@ impl LtMtt {
                 let ltmtt_player = LtMttPlayer {
                     player_id: player.id(),
                     position: player.position(),
-                    status: LtMttPlayerStatus::SatIn,
+                    status: LtMttPlayerStatus::Out,
                     chips: 0,
                     deposit_history: vec![],
                 };
@@ -496,6 +540,7 @@ impl LtMtt {
         }
     }
 
+    // game_result implicit another case for sitout players should remove from state.
     fn on_game_result(
         &mut self,
         effect: &mut Effect,
@@ -526,28 +571,21 @@ impl LtMtt {
                 .collect();
 
             for player_id in moved_player_ids {
-                // Remove player from table_assigns
-                self.table_assigns.remove(player_id);
-                // Set ltmttplayerstatus to sitout
-                for ranking in self.rankings.iter_mut() {
-                    if ranking.player_id == *player_id {
-                        ranking.status = LtMttPlayerStatus::SatOut;
-                    }
-                }
+                self.update_table_player(effect, *player_id, None)?;
             }
 
-            self.tables.insert(table_id, table);
             self.apply_chips_change(effect, chips_change)?;
-            self.level_up(effect, table_id)?;
-
-            effect.checkpoint();
+            self.start_next_game(effect, table_id)?;
             Ok(())
         } else {
             Ok(())
         }
     }
 
-    fn level_up(&mut self, effect: &mut Effect, table_id: usize) -> HandleResult<()> {
+    /// Origin table should send start game event,
+    /// when received sitresult, confirm all the level up players,
+    /// then for level up players find their new table.
+    fn start_next_game(&mut self, effect: &mut Effect, table_id: usize) -> HandleResult<()> {
         let origin_table = self.tables.get_mut(&table_id).unwrap();
         let cur_blind_rule = self
             .blind_rules
@@ -565,25 +603,13 @@ impl LtMtt {
             let origin_player_num = origin_table.players.len();
             let level_up_player_num = level_up_player_ids.len();
 
-            // to moved player num >= 2
-            // origin table player num >= 2, or eq 0 after moved.
+            // To moved player num >= 2
+            // Origin table player num >= 2, or eq 0 after moved.
+            // TODO: if all players moved from origin table, maybe should close table.
             if level_up_player_ids.len() >= 2
                 && (origin_player_num == level_up_player_num
                     || (origin_player_num - level_up_player_num) >= 2)
             {
-                // origin table
-                for &up_player_id in level_up_player_ids.iter() {
-                    self.table_assigns.remove(&up_player_id);
-
-                    let mut origin_new_players = vec![];
-                    for p in origin_table.players.iter() {
-                        if p.id != up_player_id {
-                            origin_new_players.push(p.clone());
-                        }
-                    }
-                    origin_table.players = origin_new_players;
-                }
-
                 effect.bridge_event(
                     table_id,
                     HoldemBridgeEvent::StartGame {
@@ -593,29 +619,6 @@ impl LtMtt {
                     },
                 )?;
 
-                // up level table
-                let next_blind_rule = self
-                    .blind_rules
-                    .iter()
-                    .find(|br| origin_table.sb < br.sb)
-                    .unwrap();
-                let next_max_chips = next_blind_rule.max_chips.unwrap_or(u64::max_value());
-                let to_sit_table_id = self.find_table_to_sit(level_up_player_num, next_max_chips);
-                let relocate_players: BTreeMap<u64, u64> = level_up_player_ids
-                    .into_iter()
-                    .map(|pid| {
-                        (
-                            pid,
-                            self.rankings
-                                .iter()
-                                .find(|r| r.player_id == pid)
-                                .unwrap()
-                                .chips,
-                        )
-                    })
-                    .collect();
-
-                self.do_sit_in(effect, to_sit_table_id, relocate_players)?;
                 return Ok(());
             }
         }
@@ -632,61 +635,83 @@ impl LtMtt {
         return Ok(());
     }
 
-    /// Used with `find_table_to_sit`, which ensure multi player sit into one table.
-    /// `do_sit_in` handle all the state then.
+    fn match_table_for_pending_users(&mut self, effect: &mut Effect) -> HandleResult<()> {
+        let pending_players: Vec<_> = self
+            .rankings
+            .iter()
+            .filter(|r| r.status == LtMttPlayerStatus::Pending)
+            .collect();
+
+        // It's a simple match rule, do sit in one by one.
+        // For some optimizations, should grouped all pending players.
+        for p in pending_players {
+            let to_table_id = self.find_table_to_sit(1, p.chips);
+            let sitin = MttTableSitin::new(p.player_id, p.chips);
+            effect.bridge_event(
+                to_table_id,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![sitin],
+                },
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Internal update helper function, ignore its result.
+    /// Update `tables` and `table_assigns` after receive a confirm bridge event from sub game.
     ///
-    /// # Params
-    ///
-    /// players: BTreeMap<player_id, chips>
-    ///
-    fn do_sit_in(
+    /// if table_id None, represents sit out the table, otherwise sit in the table.
+    fn update_table_player(
         &mut self,
         effect: &mut Effect,
-        table_id: usize,
-        players: BTreeMap<u64, u64>,
+        player_id: u64,
+        table_id: Option<usize>,
     ) -> HandleResult<()> {
-        let table_ref = self
-            .tables
-            .get_mut(&table_id)
-            .ok_or(errors::error_table_not_found())?;
+        let player = self.find_player_by_id(player_id);
 
-        let mut mtt_table_players = vec![];
-        for (player_id, chips) in players {
-            let mtt_table_player =
-                MttTablePlayer::new(player_id, chips, 0, MttTablePlayerStatus::SitIn);
-            let ranking = self
-                .rankings
-                .iter_mut()
-                .find(|rank| rank.player_id == player_id)
-                .unwrap();
-            ranking.status = LtMttPlayerStatus::SatIn;
-            mtt_table_players.push(mtt_table_player);
-        }
-
-        for mtt_player in mtt_table_players.iter_mut() {
-            if table_ref.players.len() >= self.table_size as usize {
-                return Err(errors::error_table_is_full());
-            } else if !table_ref.add_player(mtt_player) {
-                return Err(errors::error_player_already_on_table());
-            } else {
-                self.table_assigns.insert(mtt_player.id, table_id);
-                effect.info(format!(
-                    "ltmtt do_sit_in: user[{}] sit in table[{}].",
-                    mtt_player.id, table_id
-                ));
+        match table_id {
+            Some(table_id) => {
+                if let Some(table) = self.tables.get_mut(&table_id) {
+                    let mut table_player = MttTablePlayer::new(
+                        player_id,
+                        player.chips,
+                        0,
+                        MttTablePlayerStatus::SitIn,
+                    );
+                    table.add_player(&mut table_player);
+                    self.table_assigns.insert(player_id, table_id);
+                    // Maybe there's a better way to update.
+                    for ranking in self.rankings.iter_mut() {
+                        if ranking.player_id == player_id {
+                            ranking.status = LtMttPlayerStatus::Playing;
+                        }
+                    }
+                    // Ensure there's always an empty table for each level.
+                    self.create_table_if_target_table_not_enough(effect, table_id)?;
+                } else {
+                    return Err(errors::error_table_not_found());
+                }
+            }
+            None => {
+                if let Some(table_id) = self.table_assigns.get(&player_id) {
+                    if let Some(table) = self.tables.get_mut(table_id) {
+                        table.remove_player(player_id);
+                        self.table_assigns.remove(&player_id);
+                        // Maybe there's a better way to update.
+                        for ranking in self.rankings.iter_mut() {
+                            if ranking.player_id == player_id && ranking.chips <= 0 {
+                                ranking.status = LtMttPlayerStatus::Out;
+                            } else if ranking.player_id == player_id {
+                                ranking.status = LtMttPlayerStatus::Pending;
+                            }
+                        }
+                    }
+                } else {
+                    return Err(errors::error_table_not_found());
+                }
             }
         }
-
-        effect.bridge_event(
-            table_id,
-            HoldemBridgeEvent::Relocate {
-                players: mtt_table_players,
-            },
-        )?;
-
-        // Ensure there's always an empty table for each level.
-        self.create_table_if_target_table_not_enough(effect, table_id)?;
-        effect.checkpoint();
 
         Ok(())
     }
@@ -694,7 +719,7 @@ impl LtMtt {
     /// find_table_to_sit
     /// find the table which satisfy
     ///
-    /// # Parmas
+    /// # Params
     ///
     /// - `self`
     /// - `seats`: how many seats the caller needs
@@ -704,7 +729,7 @@ impl LtMtt {
     ///
     /// - table_id: usize
     ///
-    fn find_table_to_sit(&mut self, seats: usize, player_chips: u64) -> usize {
+    fn find_table_to_sit(&self, seats: usize, player_chips: u64) -> usize {
         let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player_chips);
         let mut sorted_tables: Vec<_> = self
             .tables
@@ -729,11 +754,11 @@ impl LtMtt {
         effect: &mut Effect,
         chips_change: BTreeMap<u64, ChipsChange>,
     ) -> HandleResult<()> {
-        for (player_id, change) in chips_change.into_iter() {
+        for (player_id, change) in chips_change.iter() {
             let player = self
                 .rankings
                 .iter_mut()
-                .find(|p| p.player_id == player_id)
+                .find(|p| p.player_id == *player_id)
                 .ok_or(errors::error_player_not_found())?;
 
             match change {
@@ -750,14 +775,18 @@ impl LtMtt {
                         player_id, player.chips, amount
                     ));
                     player.chips -= amount;
-                    if player.chips <= 0 {
-                        player.status = LtMttPlayerStatus::SatOut;
-                        self.table_assigns.remove(&player.player_id);
-                    }
                 }
             }
         }
 
+        for (player_id, _) in chips_change {
+            let player = self.find_player_by_id(player_id);
+            if player.chips <= 0 {
+                self.update_table_player(effect, player.player_id, None)?;
+            }
+        }
+
+        self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
         Ok(())
     }
 
@@ -790,32 +819,6 @@ impl LtMtt {
             .find(|p| p.player_id == player_id)
             .unwrap()
             .clone()
-    }
-
-    #[allow(unused)]
-    fn find_or_create_table(
-        &mut self,
-        effect: &mut Effect,
-        player: &LtMttPlayer,
-    ) -> HandleResult<usize> {
-        // Sort tables, order by sb asc, players_num asc
-        // Traverse sorted_tables, the first one is the best table fit current player.
-        let mut sorted_tables: Vec<_> = self.tables.iter().collect();
-        sorted_tables.sort_by(|(_, a), (_, b)| {
-            a.sb.cmp(&b.sb)
-                .then_with(|| a.players.len().cmp(&b.players.len()))
-        });
-
-        let matched_blind_rule = match_blind_rule_by_chips(&self.blind_rules, player.chips);
-
-        if let Some((&id, _)) = sorted_tables.iter().find(|(_id, table)| {
-            matched_blind_rule.sb <= table.sb && table.players.len() < self.table_size as _
-        }) {
-            Ok(id)
-        } else {
-            let table_id = self.create_table(effect, matched_blind_rule.clone())?;
-            Ok(table_id)
-        }
     }
 
     /// Ensure each blind rule's table has one more empty table.
