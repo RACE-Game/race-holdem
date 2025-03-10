@@ -3,19 +3,11 @@ use std::collections::BTreeMap;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::prelude::*;
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone, Eq, Default)]
-pub enum MttTablePlayerStatus {
-    #[default]
-    SitIn,
-    SitOut,
-}
-
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
     pub id: u64,
     pub chips: u64,
     pub table_position: usize,
-    pub player_status: MttTablePlayerStatus,
 }
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
@@ -35,13 +27,11 @@ impl MttTablePlayer {
         id: u64,
         chips: u64,
         table_position: usize,
-        player_status: MttTablePlayerStatus,
     ) -> Self {
         Self {
             id,
             chips,
             table_position,
-            player_status,
         }
     }
 }
@@ -98,7 +88,6 @@ impl MttTableState {
             self.players.push(MttTablePlayer {
                 id: player.id,
                 chips: player.chips,
-                player_status: player.player_status.clone(),
                 table_position,
             });
             // Update relocated player's table position as well

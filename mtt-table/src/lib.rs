@@ -8,7 +8,7 @@ use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin,
     MttTableState,
 };
 use race_proc_macro::game_handler;
@@ -86,11 +86,6 @@ impl GameHandler for MttTable {
                                 p.id,
                                 p.chips,
                                 p.position as _,
-                                if p.status == PlayerStatus::Out {
-                                    MttTablePlayerStatus::SitOut
-                                } else {
-                                    MttTablePlayerStatus::SitIn
-                                },
                             )
                         })
                         .collect();

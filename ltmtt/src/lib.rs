@@ -12,7 +12,7 @@ use race_api::{
 };
 
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTablePlayerStatus, MttTableSitin,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin,
     MttTableState,
 };
 use race_proc_macro::game_handler;
@@ -677,7 +677,6 @@ impl LtMtt {
                         player_id,
                         player.chips,
                         0,
-                        MttTablePlayerStatus::SitIn,
                     );
                     table.add_player(&mut table_player);
                     self.table_assigns.insert(player_id, table_id);
