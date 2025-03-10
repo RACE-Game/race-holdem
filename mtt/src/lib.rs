@@ -740,7 +740,8 @@ impl Mtt {
         let mut least_player_num: usize = self.table_size as _;
 
         for (table_id, table) in self.tables.iter() {
-            if table.players.len() < least_player_num {
+            // The table with least player but not empty
+            if table.players.len() < least_player_num && table.players.len() > 0 {
                 table_id_with_least_players = Some(table_id);
                 least_player_num = table.players.len();
             }
