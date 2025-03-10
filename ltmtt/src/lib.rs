@@ -706,8 +706,6 @@ impl LtMtt {
                             }
                         }
                     }
-                } else {
-                    return Err(errors::error_table_not_found());
                 }
             }
         }
