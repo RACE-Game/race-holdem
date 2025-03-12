@@ -271,12 +271,7 @@ impl GameHandler for Mtt {
                 MttStage::Playing => {
                     if !self.in_the_money && effect.timestamp() <= self.entry_close_time {
                         for p in players {
-                            self.ranks.push(PlayerRank {
-                                id: p.id(),
-                                chips: 0,
-                                status: PlayerRankStatus::Pending,
-                                position: p.position(),
-                            });
+                            self.add_player_rank(p);
                         }
                     } else {
                         for p in players {
@@ -449,6 +444,15 @@ impl Mtt {
             .filter(|r| matches!(r.status, PlayerRankStatus::Play | PlayerRankStatus::Pending))
             .count()
             == 1
+    }
+
+    fn add_player_rank(&mut self, p: GamePlayer) {
+        self.ranks.push(PlayerRank {
+            id: p.id(),
+            chips: 0,
+            status: PlayerRankStatus::Pending, // By default, the player is not sitted
+            position: p.position(),
+        });
     }
 
     fn launch_table(
@@ -842,4 +846,5 @@ mod tests {
 
     mod test_start_game;
     mod test_handle_game_result;
+    mod test_sit_player;
 }
