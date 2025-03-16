@@ -79,14 +79,13 @@ impl PlayerRank {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindRuleItem {
-    sb: u64,
-    bb: u64,
-    ante: u64,
+    sb_x: u32,
+    bb_x: u32,
 }
 
 impl BlindRuleItem {
-    fn new(sb: u64, bb: u64, ante: u64) -> Self {
-        Self { sb, bb, ante }
+    fn new(sb_x: u32, bb_x: u32) -> Self {
+        Self { sb_x, bb_x }
     }
 }
 
@@ -98,12 +97,13 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
         50000, 56000, 62000, 68000, 80000, 100000,
     ]
     .into_iter()
-        .map(|sb| BlindRuleItem::new(sb, 2 * sb, 0))
+    .map(|sb| BlindRuleItem::new(sb, 2 * sb))
     .collect()
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindInfo {
+    blind_base: u64,
     blind_interval: u64,
     blind_rules: Vec<BlindRuleItem>,
 }
@@ -111,6 +111,7 @@ pub struct BlindInfo {
 impl Default for BlindInfo {
     fn default() -> Self {
         Self {
+            blind_base: 10,
             blind_interval: 60_000,
             blind_rules: default_blind_rules(),
         }
@@ -481,7 +482,7 @@ impl Mtt {
                 self.table_assigns.insert(r.id, table_id as _);
                 j += num_of_tables;
             }
-            let (sb, bb, _ante) = self.calc_blinds()?;
+            let (sb, bb) = self.calc_blinds()?;
             let table_id = effect.next_sub_game_id();
             let table = MttTableState {
                 table_id: table_id.into(),
@@ -541,7 +542,7 @@ impl Mtt {
         self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
     }
 
-    fn calc_blinds(&self) -> Result<(u64, u64, u64), HandleError> {
+    fn calc_blinds(&self) -> Result<(u64, u64), HandleError> {
         let time_elapsed = self.time_elapsed;
         let level = time_elapsed / self.blind_info.blind_interval;
         let mut blind_rule = self.blind_info.blind_rules.get(level as usize);
@@ -549,10 +550,9 @@ impl Mtt {
             blind_rule = self.blind_info.blind_rules.last();
         }
         let blind_rule = blind_rule.ok_or(errors::error_empty_blind_rules())?;
-        let sb = blind_rule.sb;
-        let bb = blind_rule.bb;
-        let ante = blind_rule.ante;
-        Ok((sb, bb, ante))
+        let sb = blind_rule.sb_x as u64 * self.blind_info.blind_base;
+        let bb = blind_rule.bb_x as u64 * self.blind_info.blind_base;
+        Ok((sb, bb))
     }
 
     /// Return the tables with least players and most players in a
@@ -610,7 +610,7 @@ impl Mtt {
             .map(|p| p.id)
             .collect();
 
-        let (sb, bb, _ante) = self.calc_blinds()?;
+        let (sb, bb) = self.calc_blinds()?;
         effect.bridge_event(
             from_table_id as _,
             HoldemBridgeEvent::StartGame {
@@ -647,7 +647,7 @@ impl Mtt {
                 return Err(errors::error_table_not_fonud());
             };
             if final_table.players.len() > 1 {
-                let (sb, bb, _ante) = self.calc_blinds()?;
+                let (sb, bb) = self.calc_blinds()?;
                 effect.bridge_event(
                     table_id as _,
                     HoldemBridgeEvent::StartGame {
@@ -706,7 +706,7 @@ impl Mtt {
             // Otherwise this table should wait another table for
             // merging.
             if table.players.len() > 1 {
-                let (sb, bb, _ante) = self.calc_blinds()?;
+                let (sb, bb) = self.calc_blinds()?;
                 effect.bridge_event(
                     table_id as _,
                     HoldemBridgeEvent::StartGame {
@@ -742,7 +742,7 @@ impl Mtt {
             return Ok(());
         }
 
-        let (sb, bb, _ante) = self.calc_blinds()?;
+        let (sb, bb) = self.calc_blinds()?;
 
         let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) else {
             return Err(errors::error_player_id_not_found())?;
