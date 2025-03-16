@@ -12,8 +12,7 @@ use race_api::{
 };
 
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin,
-    MttTableState,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState,
 };
 use race_proc_macro::game_handler;
 
@@ -173,8 +172,8 @@ pub enum LtMttPlayerStatus {
     #[default]
     // player not join in game.
     Out,
-    // player join game but not in any table.
-    Pending,
+    // player intend to sitin a table.
+    Pending(usize),
     // player is playing in a table.
     Playing,
 }
@@ -304,57 +303,11 @@ impl GameHandler for LtMtt {
                 }
             }
 
-            Event::Bridge { raw, .. } => {
-                let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
-
-                match bridge_event {
-                    game_result @ HoldemBridgeEvent::GameResult { .. } => {
-                        self.on_game_result(effect, game_result)?;
-                        effect.checkpoint();
-                    }
-
-                    HoldemBridgeEvent::SitResult {
-                        table_id,
-                        sitin_players,
-                        sitout_players,
-                    } => {
-                        // Handle sitin players, which triggerred by HoldemBridgeEvent::SitinPlayers
-                        // Update tables and table_assigns.  `LtMttPlayerStatus` not changed
-                        for in_pid in sitin_players {
-                            self.update_table_player(effect, in_pid, Some(table_id))?;
-                            effect.info(format!(
-                                "SitResult: user[{}] sit in table[{}].",
-                                in_pid, table_id
-                            ));
-                        }
-
-                        // Handle sitout players
-                        // These players are marked with pending status,
-                        // and will match a new table for them later.
-                        for out_pid in sitout_players {
-                            self.update_table_player(effect, out_pid, None)?;
-                            effect.info(format!(
-                                "SitResult: user[{}] sit out table[{}].",
-                                out_pid, table_id
-                            ));
-                        }
-
-                        self.match_table_for_pending_users(effect)?;
-                        effect.checkpoint();
-                    }
-
-                    _ => return Err(errors::error_invalid_bridge_event()),
-                }
-            }
-
-            Event::SubGameReady { .. } => {
-                effect.checkpoint();
-            }
-
             Event::Custom { sender, raw } => {
                 let event: ClientEvent = ClientEvent::try_parse(&raw)?;
 
                 match event {
+                    // player first join to play
                     ClientEvent::SitIn => {
                         effect.info("Client event sitin received.");
                         let player = self.find_player_by_id(sender);
@@ -377,6 +330,83 @@ impl GameHandler for LtMtt {
 
                     _ => (),
                 }
+            }
+
+            Event::Bridge { raw, .. } => {
+                let bridge_event = HoldemBridgeEvent::try_parse(&raw)?;
+
+                match bridge_event {
+                    game_result @ HoldemBridgeEvent::GameResult { .. } => {
+                        self.on_game_result(effect, game_result)?;
+                        effect.checkpoint();
+                    }
+
+                    HoldemBridgeEvent::SitResult {
+                        table_id,
+                        sitin_players,
+                        sitout_players,
+                    } => {
+                        // Handle sitin players, which triggerred by HoldemBridgeEvent::SitinPlayers
+                        // Update tables and table_assigns.  `LtMttPlayerStatus` not changed
+                        for in_pid in sitin_players {
+                            for ranking in self.rankings.iter_mut() {
+                                if ranking.player_id == in_pid {
+                                    ranking.status = LtMttPlayerStatus::Pending(table_id);
+                                }
+                            }
+
+                            effect.info(format!(
+                                "SitResult: user[{}] sit in table[{}].",
+                                in_pid, table_id
+                            ));
+                        }
+
+                        // Handle sitout players
+                        // These players are marked with pending status,
+                        // and will match a new table for them later.
+                        if !sitout_players.is_empty() {
+                            let outs: Vec<_> = self
+                                .rankings
+                                .iter()
+                                .filter(|&p| sitout_players.contains(&p.player_id))
+                                .collect();
+
+                            let outs_max_chips = outs.iter().max_by_key(|p| p.chips).unwrap();
+                            let to_table_id =
+                                self.find_table_to_sit(outs.len(), outs_max_chips.chips);
+
+                            let mut sitins = vec![];
+                            for out_pid in sitout_players {
+                                for ranking in self.rankings.iter_mut() {
+                                    if ranking.player_id == out_pid {
+                                        ranking.status = LtMttPlayerStatus::Pending(to_table_id);
+                                    }
+                                }
+
+                                let player = self.find_player_by_id(out_pid);
+                                sitins.push(MttTableSitin::new(player.player_id, player.chips));
+
+                                effect.info(format!(
+                                    "SitResult: user[{}] sit out table[{}], in table[{}].",
+                                    out_pid, table_id, to_table_id
+                                ));
+                            }
+
+                            effect.bridge_event(
+                                to_table_id,
+                                HoldemBridgeEvent::SitinPlayers { sitins },
+                            )?;
+                        }
+
+                        effect.checkpoint();
+                    }
+
+                    _ => return Err(errors::error_invalid_bridge_event()),
+                }
+            }
+
+            Event::SubGameReady { .. } => {
+                effect.checkpoint();
             }
 
             _ => (),
@@ -540,7 +570,8 @@ impl LtMtt {
         }
     }
 
-    // game_result implicit another case for sitout players should remove from state.
+    // Table contains players who request sitin during this hand.
+    // It's final state of this table.
     fn on_game_result(
         &mut self,
         effect: &mut Effect,
@@ -554,27 +585,21 @@ impl LtMtt {
         } = game_result
         {
             effect.info(format!("on_game_result: table_id: {}", table_id));
-            let old_table_player_ids: Vec<_> = self
-                .tables
-                .get(&table_id)
-                .unwrap()
-                .players
-                .clone()
-                .iter()
-                .map(|p| p.id)
-                .collect();
-            let new_table_player_ids: Vec<_> = table.players.clone().iter().map(|p| p.id).collect();
+            self.apply_chips_change(effect, chips_change)?;
 
-            let moved_player_ids: Vec<_> = old_table_player_ids
-                .iter()
-                .filter(|&p| !new_table_player_ids.contains(p))
-                .collect();
-
-            for player_id in moved_player_ids {
+            let old_table = self.tables.get(&table_id).unwrap();
+            let old_pids: Vec<_> = old_table.players.iter().map(|p| p.id).collect();
+            let new_pids: Vec<_> = table.players.iter().map(|p| p.id).collect();
+            let moved_pids: Vec<_> = old_pids.iter().filter(|&p| !new_pids.contains(p)).collect();
+            // remove moved players, and marked as `LtMttPlayerStatus::Out`
+            for player_id in moved_pids {
                 self.update_table_player(effect, *player_id, None)?;
             }
+            // update current players as `LtMttPlayerStatus::Playing`
+            for cur_player in table.players {
+                self.update_table_player(effect, cur_player.id, Some(table_id))?;
+            }
 
-            self.apply_chips_change(effect, chips_change)?;
             self.start_next_game(effect, table_id)?;
             Ok(())
         } else {
@@ -595,18 +620,22 @@ impl LtMtt {
 
         if let Some(max_chips) = cur_blind_rule.max_chips {
             let mut level_up_player_ids: Vec<u64> = vec![];
-            for player in origin_table.players.iter() {
+            for player in self.rankings.iter() {
+                effect.info(format!("level up players chips: {}", player.chips));
                 if player.chips > max_chips {
-                    level_up_player_ids.push(player.id);
+                    level_up_player_ids.push(player.player_id);
                 }
             }
+
             let origin_player_num = origin_table.players.len();
             let level_up_player_num = level_up_player_ids.len();
+            effect.info(format!("origin players: {}", origin_player_num));
+            effect.info(format!("level up players: {}", level_up_player_num));
 
             // To moved player num >= 2
             // Origin table player num >= 2, or eq 0 after moved.
             // TODO: if all players moved from origin table, maybe should close table.
-            if level_up_player_ids.len() >= 2
+            if level_up_player_num >= 2
                 && (origin_player_num == level_up_player_num
                     || (origin_player_num - level_up_player_num) >= 2)
             {
@@ -639,7 +668,7 @@ impl LtMtt {
         let pending_players: Vec<_> = self
             .rankings
             .iter()
-            .filter(|r| r.status == LtMttPlayerStatus::Pending)
+            // .filter(|r| r.status == LtMttPlayerStatus::Pending())
             .collect();
 
         // It's a simple match rule, do sit in one by one.
@@ -673,38 +702,32 @@ impl LtMtt {
         match table_id {
             Some(table_id) => {
                 if let Some(table) = self.tables.get_mut(&table_id) {
-                    let mut table_player = MttTablePlayer::new(
-                        player_id,
-                        player.chips,
-                        0,
-                    );
+                    let mut table_player = MttTablePlayer::new(player_id, player.chips, 0);
                     table.add_player(&mut table_player);
                     self.table_assigns.insert(player_id, table_id);
-                    // Maybe there's a better way to update.
-                    for ranking in self.rankings.iter_mut() {
-                        if ranking.player_id == player_id {
-                            ranking.status = LtMttPlayerStatus::Playing;
-                        }
-                    }
-                    // Ensure there's always an empty table for each level.
                     self.create_table_if_target_table_not_enough(effect, table_id)?;
                 } else {
                     return Err(errors::error_table_not_found());
                 }
+
+                for ranking in self.rankings.iter_mut() {
+                    if ranking.player_id == player_id {
+                        ranking.status = LtMttPlayerStatus::Playing;
+                    }
+                }
             }
+
             None => {
                 if let Some(table_id) = self.table_assigns.get(&player_id) {
                     if let Some(table) = self.tables.get_mut(table_id) {
                         table.remove_player(player_id);
                         self.table_assigns.remove(&player_id);
-                        // Maybe there's a better way to update.
-                        for ranking in self.rankings.iter_mut() {
-                            if ranking.player_id == player_id && ranking.chips <= 0 {
-                                ranking.status = LtMttPlayerStatus::Out;
-                            } else if ranking.player_id == player_id {
-                                ranking.status = LtMttPlayerStatus::Pending;
-                            }
-                        }
+                    }
+                }
+
+                for ranking in self.rankings.iter_mut() {
+                    if ranking.player_id == player_id {
+                        ranking.status = LtMttPlayerStatus::Out;
                     }
                 }
             }
@@ -773,13 +796,6 @@ impl LtMtt {
                     ));
                     player.chips -= amount;
                 }
-            }
-        }
-
-        for (player_id, _) in chips_change {
-            let player = self.find_player_by_id(player_id);
-            if player.chips <= 0 {
-                self.update_table_player(effect, player.player_id, None)?;
             }
         }
 
@@ -876,25 +892,28 @@ mod tests {
     #[test]
     fn test() {
         let effect = [
-            0, 0, 0, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 228, 0, 0, 0, 54, 191, 170, 244, 147, 1, 0, 0, 150, 169,
-            171, 244, 147, 1, 0, 0, 22, 76, 197, 244, 147, 1, 0, 0, 9, 6, 0, 0, 0, 1, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 152, 58, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-            0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-            128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 0, 32, 161, 7, 0, 0, 0, 0,
-            0, 240, 73, 2, 0, 0, 0, 0, 0, 0, 224, 103, 53, 0, 0, 0, 0, 0, 144, 58, 28, 0, 0, 0, 0,
-            0, 0, 128, 240, 250, 2, 0, 0, 0, 0, 224, 112, 114, 0, 0, 0, 0, 0, 16, 39, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0, 0, 0, 114, 97, 99, 101, 104, 111, 108, 100, 101,
-            109, 116, 97, 114, 103, 101, 116, 114, 97, 99, 101, 104, 111, 108, 100, 101, 109, 108,
-            116, 109, 116, 116, 116, 97, 98, 108, 101, 119, 97, 115, 109, 2, 0, 0, 0, 0, 0, 0, 0,
+            5, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 117, 56,
+            0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 8, 1, 5, 0, 0, 0,
+            2, 0, 0, 0, 115, 52, 2, 0, 0, 0, 99, 51, 2, 0, 0, 0, 104, 107, 2, 0, 0, 0, 100, 107, 2,
+            0, 0, 0, 115, 51, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 232, 3, 0, 0, 0, 0, 0, 0, 5,
+            0, 0, 0, 0, 0, 0, 0, 1, 208, 7, 0, 0, 0, 0, 0, 0, 184, 11, 0, 0, 0, 0, 0, 0, 2, 0, 0,
+            0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 168, 54, 28, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 99, 54,
+            2, 0, 0, 0, 104, 51, 3, 5, 0, 0, 0, 2, 0, 0, 0, 99, 51, 2, 0, 0, 0, 115, 51, 2, 0, 0,
+            0, 104, 51, 2, 0, 0, 0, 104, 107, 2, 0, 0, 0, 100, 107, 5, 0, 0, 0, 0, 0, 0, 0, 2, 0,
+            0, 0, 2, 0, 0, 0, 104, 50, 2, 0, 0, 0, 100, 52, 7, 5, 0, 0, 0, 2, 0, 0, 0, 104, 107, 2,
+            0, 0, 0, 100, 107, 2, 0, 0, 0, 115, 52, 2, 0, 0, 0, 100, 52, 2, 0, 0, 0, 99, 51, 2, 0,
+            0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 144, 58, 28, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2,
+            144, 58, 28, 0, 0, 0, 0, 0, 250, 117, 133, 159, 149, 1, 0, 0,
         ];
+
         let event = [12];
 
         let mut effect = Effect::try_from_slice(&effect).unwrap();
         let event = Event::try_from_slice(&event).unwrap();
+        println!("{}", event);
 
         let mut ltmtt = effect.__handler_state::<LtMtt>();
         ltmtt.handle_event(&mut effect, event).unwrap();
