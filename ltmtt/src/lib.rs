@@ -434,6 +434,30 @@ impl LtMtt {
 
     fn on_ready(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_ready...");
+
+        if !self.table_assigns_pending.is_empty() {
+            let mut grouped_players: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
+
+            for (player_id, table_id) in self.table_assigns_pending.clone() {
+                grouped_players
+                    .entry(table_id)
+                    .or_insert_with(Vec::new)
+                    .push(player_id)
+            }
+
+            for (table_id, player_ids) in grouped_players {
+                let sitins: Vec<MttTableSitin> = player_ids
+                    .iter()
+                    .map(|id| {
+                        let player = self.find_player_by_id(*id);
+                        MttTableSitin::new(player.player_id, player.chips)
+                    })
+                    .collect();
+
+                effect.bridge_event(table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
+            }
+        }
+
         effect.start_game();
         Ok(())
     }
