@@ -173,7 +173,7 @@ pub enum LtMttPlayerStatus {
     // player not join in game.
     Out,
     // player intend to sitin a table.
-    Pending(usize),
+    Pending,
     // player is playing in a table.
     Playing,
 }
@@ -224,6 +224,8 @@ pub struct LtMtt {
     tables: BTreeMap<usize, MttTableState>,
     // player_id -> table_id
     table_assigns: BTreeMap<u64, usize>,
+    // players who request sit in a table but not receive a confirmation.
+    table_assigns_pending: BTreeMap<u64, usize>,
     // theme: Option<String>,
     player_balances: BTreeMap<u64, u64>,
 }
@@ -349,9 +351,10 @@ impl GameHandler for LtMtt {
                         // Handle sitin players, which triggerred by HoldemBridgeEvent::SitinPlayers
                         // Update tables and table_assigns.  `LtMttPlayerStatus` not changed
                         for in_pid in sitin_players {
+                            self.table_assigns_pending.insert(in_pid, table_id);
                             for ranking in self.rankings.iter_mut() {
                                 if ranking.player_id == in_pid {
-                                    ranking.status = LtMttPlayerStatus::Pending(table_id);
+                                    ranking.status = LtMttPlayerStatus::Pending;
                                 }
                             }
 
@@ -377,9 +380,10 @@ impl GameHandler for LtMtt {
 
                             let mut sitins = vec![];
                             for out_pid in sitout_players {
+                                self.table_assigns_pending.insert(out_pid, to_table_id);
                                 for ranking in self.rankings.iter_mut() {
                                     if ranking.player_id == out_pid {
-                                        ranking.status = LtMttPlayerStatus::Pending(to_table_id);
+                                        ranking.status = LtMttPlayerStatus::Pending;
                                     }
                                 }
 
@@ -664,6 +668,7 @@ impl LtMtt {
         return Ok(());
     }
 
+    #[allow(unused)]
     fn match_table_for_pending_users(&mut self, effect: &mut Effect) -> HandleResult<()> {
         let pending_players: Vec<_> = self
             .rankings
@@ -710,6 +715,7 @@ impl LtMtt {
                     return Err(errors::error_table_not_found());
                 }
 
+                self.table_assigns_pending.remove(&player_id);
                 for ranking in self.rankings.iter_mut() {
                     if ranking.player_id == player_id {
                         ranking.status = LtMttPlayerStatus::Playing;
@@ -725,6 +731,7 @@ impl LtMtt {
                     }
                 }
 
+                self.table_assigns_pending.remove(&player_id);
                 for ranking in self.rankings.iter_mut() {
                     if ranking.player_id == player_id {
                         ranking.status = LtMttPlayerStatus::Out;
