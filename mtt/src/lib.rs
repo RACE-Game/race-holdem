@@ -42,11 +42,14 @@ use race_holdem_mtt_base::{
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
 
+const BONUS_DISTRIBUTION_DELAY: u64 = 120_000;
+
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug, Clone, Copy)]
 pub enum MttStage {
     #[default]
     Init,
     Playing,
+    DistributingPrize,
     Completed,
 }
 
@@ -419,6 +422,10 @@ impl GameHandler for Mtt {
 
                 MttStage::Playing => {}
 
+                MttStage::DistributingPrize => {
+                    self.distribute_awards(effect);
+                }
+
                 MttStage::Completed => {}
             },
             _ => (),
@@ -733,6 +740,19 @@ impl Mtt {
         }
     }
 
+    fn distribute_awards(&mut self, effect: &mut Effect) {
+        for (i, rank) in self.ranks.iter().enumerate() {
+            // We support at most 8 bonuses
+            // Identifier = i + 1
+            if i > 7 {
+                break;
+            }
+            let id = rank.id;
+            effect.award(id, &(i + 1).to_string());
+        }
+        self.stage = MttStage::Completed;
+    }
+
     /// Add a new player to the game.
     ///
     /// NB: The game will launch tables when receiving GameStart
@@ -816,7 +836,10 @@ impl Mtt {
             }
         }
 
-        self.stage = MttStage::Completed;
+        self.stage = MttStage::DistributingPrize;
+        effect.info("Schedule bonus distribution");
+        effect.wait_timeout(BONUS_DISTRIBUTION_DELAY);
+
         Ok(())
     }
 
