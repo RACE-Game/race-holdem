@@ -620,9 +620,11 @@ impl LtMtt {
             let new_pids: Vec<_> = table.players.iter().map(|p| p.id).collect();
             let moved_pids: Vec<_> = old_pids.iter().filter(|&p| !new_pids.contains(p)).collect();
             // remove moved players, and marked as `LtMttPlayerStatus::Out`
+            effect.info(format!("on_game_result: moved players: {:?}", moved_pids));
             for player_id in moved_pids {
                 self.update_table_player(effect, *player_id, None)?;
             }
+
             // update current players as `LtMttPlayerStatus::Playing`
             for cur_player in table.players {
                 self.update_table_player(effect, cur_player.id, Some(table_id))?;
@@ -649,7 +651,6 @@ impl LtMtt {
         if let Some(max_chips) = cur_blind_rule.max_chips {
             let mut level_up_player_ids: Vec<u64> = vec![];
             for player in self.rankings.iter() {
-                effect.info(format!("level up players chips: {}", player.chips));
                 if player.chips > max_chips {
                     level_up_player_ids.push(player.player_id);
                 }
@@ -657,8 +658,10 @@ impl LtMtt {
 
             let origin_player_num = origin_table.players.len();
             let level_up_player_num = level_up_player_ids.len();
-            effect.info(format!("origin players: {}", origin_player_num));
-            effect.info(format!("level up players: {}", level_up_player_num));
+            effect.info(format!(
+                "on_game_result: origin players: {}, level up players: {}",
+                origin_player_num, level_up_player_num
+            ));
 
             // To moved player num >= 2
             // Origin table player num >= 2, or eq 0 after moved.
