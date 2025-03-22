@@ -5,7 +5,7 @@ use std::collections::btree_map::Entry;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
-use race_holdem_base::essential::{GameMode, HoldemStage, Player, PlayerStatus};
+use race_holdem_base::essential::{GameMode, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{
     ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult, PlayerResultStatus
@@ -168,8 +168,7 @@ impl MttTable {
             // Add players from other tables
             HoldemBridgeEvent::SitinPlayers { sitins } => {
 
-                // TODO: Send game result
-                // When this event trigger game starts
+                let origin_num_of_players = self.holdem.player_map.len();
 
                 for sitin in sitins.into_iter() {
                     let MttTableSitin { id, chips } = sitin;
@@ -189,18 +188,25 @@ impl MttTable {
                     }
                 }
 
-                if matches!(
-                    self.holdem.stage,
-                    HoldemStage::Init
-                        | HoldemStage::Settle
-                        | HoldemStage::Runner
-                        | HoldemStage::Showdown
-                ) {
+                if origin_num_of_players < 2 {
+                    // The game is supposed to be halted. We should add the new player then start the game.
+                    effect.checkpoint();
+                    effect.bridge_event(0, HoldemBridgeEvent::GameResult {
+                        hand_id: self.holdem.hand_id,
+                        table_id: self.table_id,
+                        player_results: vec![],
+                        table: self.make_mtt_table_state(),
+                    })?;
+
+                    if self.holdem.player_map.len() >= 2 {
                     let timeout = self
                         .holdem
                         .next_game_start
                         .saturating_sub(effect.timestamp());
                     effect.wait_timeout(timeout);
+                    }
+                } else {
+                    // The game will receive a StartGame anyway. The only thing we do is to add the new players.
                 }
             }
             HoldemBridgeEvent::CloseTable => {
@@ -218,32 +224,25 @@ mod tests {
 
     use super::*;
     use borsh::BorshDeserialize;
-    use race_holdem_base::essential::{
-        WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN,
-    };
     use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 
-    fn default_3_players() -> Vec<MttTablePlayer> {
-        vec![
-            MttTablePlayer::new(1, 1000, 0),
-            MttTablePlayer::new(2, 1500, 1),
-            MttTablePlayer::new(3, 2000, 1),
-        ]
+    fn default_players(num_of_players: usize) -> Vec<MttTablePlayer> {
+        (1..=num_of_players).map(|n| MttTablePlayer::new(n as u64, (n + 1) as u64 * 500, n - 1)).collect()
     }
 
-    fn default_mtt_table_state() -> MttTableState {
+    fn default_mtt_table_state(num_of_players: usize) -> MttTableState {
         MttTableState {
             sb: 100,
             bb: 200,
-            players: default_3_players(),
+            players: default_players(num_of_players),
             table_id: 1,
             btn: 0,
             ..Default::default()
         }
     }
 
-    fn mtt_table_with_3_players() -> MttTable {
-        let init_data = default_mtt_table_state();
+    fn mtt_table_with_players(num_of_players: usize) -> MttTable {
+        let init_data = default_mtt_table_state(num_of_players);
 
         let init_account = InitAccount {
             max_players: 9,
@@ -283,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_start_game_invalid_player_id() {
-        let mut mtt_table = mtt_table_with_3_players();
+        let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
         let invalid_player_id_event = HoldemBridgeEvent::StartGame {
             sb: 100,
@@ -297,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_handle_bridge_event_start_game() {
-        let mut mtt_table = mtt_table_with_3_players();
+        let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
 
         let bridge_event = HoldemBridgeEvent::StartGame {
@@ -317,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_handle_bridge_event_relocate_duplicate_player() {
-        let mut mtt_table = mtt_table_with_3_players();
+        let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
 
         // Attempt to relocate the same player to the table
@@ -335,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_handle_bridge_event_relocate_duplicate_position() {
-        let mut mtt_table = mtt_table_with_3_players();
+        let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
 
         // Attempt to relocate a player to an already occupied position
@@ -356,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_handle_bridge_event_relocate_in_init_stage() {
-        let mut mtt_table = mtt_table_with_3_players();
+        let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
 
         let sitins = vec![
@@ -373,49 +372,17 @@ mod tests {
         assert_eq!(mtt_table.holdem.player_map.len(), 5);
         assert!(mtt_table.holdem.player_map.contains_key(&4));
         assert!(mtt_table.holdem.player_map.contains_key(&5));
-        assert_eq!(effect.wait_timeout, Some(0));
-    }
-
-    #[test]
-    fn test_handle_bridge_event_relocate_in_play_stage() {
-        let mut mtt_table = mtt_table_with_3_players();
-        mtt_table.holdem.stage = HoldemStage::Play;
-        let mut effect = Effect::default();
-
-        let sitins = vec![
-            MttTableSitin::new(4, 1000),
-            MttTableSitin::new(5, 1500),
-        ];
-
-        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
-
-        mtt_table
-            .handle_bridge_event(&mut effect, bridge_event)
-            .unwrap();
-
-        assert_eq!(mtt_table.holdem.player_map.len(), 5);
-
-        assert!(matches!(
-            mtt_table.holdem.player_map.get(&4).unwrap().status,
-            PlayerStatus::Init
-        ));
-        assert!(matches!(
-            mtt_table.holdem.player_map.get(&5).unwrap().status,
-            PlayerStatus::Init
-        ));
         assert_eq!(effect.wait_timeout, None);
+        assert_eq!(effect.list_bridge_events::<HoldemBridgeEvent>().unwrap(), vec![]);
     }
 
     #[test]
-    fn test_handle_bridge_event_relocate_in_settle_stage() {
-        let mut mtt_table = mtt_table_with_3_players();
-        mtt_table.holdem.stage = HoldemStage::Settle;
-        mtt_table.holdem.next_game_start = WAIT_TIMEOUT_DEFAULT;
+    fn test_handle_bridge_event_relocate_in_init_stage_with_0_player() {
+        let mut mtt_table = mtt_table_with_players(0);
         let mut effect = Effect::default();
 
         let sitins = vec![
-            MttTableSitin::new(4, 1000),
-            MttTableSitin::new(5, 1500),
+            MttTableSitin::new(1, 500),
         ];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
@@ -424,39 +391,27 @@ mod tests {
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
 
-        assert_eq!(effect.wait_timeout, Some(WAIT_TIMEOUT_DEFAULT));
+        assert_eq!(mtt_table.holdem.player_map.len(), 1);
+        assert!(mtt_table.holdem.player_map.contains_key(&1));
+        assert!(effect.is_checkpoint());
+        assert_eq!(effect.wait_timeout, None);
+        assert_eq!(effect.list_bridge_events().unwrap(), vec![
+            (0, HoldemBridgeEvent::GameResult {
+                hand_id:mtt_table.holdem.hand_id,
+                table_id:mtt_table.table_id,
+                player_results: vec![],
+                table: mtt_table.make_mtt_table_state(),
+            })
+        ]);
     }
 
     #[test]
-    fn test_handle_bridge_event_relocate_in_runner_stage() {
-        let mut mtt_table = mtt_table_with_3_players();
-        mtt_table.holdem.stage = HoldemStage::Runner;
-        mtt_table.holdem.next_game_start = WAIT_TIMEOUT_RUNNER;
+    fn test_handle_bridge_event_relocate_in_init_stage_with_1_player() {
+        let mut mtt_table = mtt_table_with_players(1);
         let mut effect = Effect::default();
 
         let sitins = vec![
-            MttTableSitin::new(4, 1000),
-            MttTableSitin::new(5, 1500),
-        ];
-
-        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
-        mtt_table
-            .handle_bridge_event(&mut effect, bridge_event)
-            .unwrap();
-
-        assert_eq!(effect.wait_timeout, Some(WAIT_TIMEOUT_RUNNER));
-    }
-
-    #[test]
-    fn test_handle_bridge_event_relocate_in_showdown_stage() {
-        let mut mtt_table = mtt_table_with_3_players();
-        mtt_table.holdem.stage = HoldemStage::Showdown;
-        mtt_table.holdem.next_game_start = WAIT_TIMEOUT_SHOWDOWN;
-        let mut effect = Effect::default();
-
-        let sitins = vec![
-            MttTableSitin::new(4, 1000),
-            MttTableSitin::new(5, 1500),
+            MttTableSitin::new(2, 500),
         ];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
@@ -465,7 +420,19 @@ mod tests {
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
 
-        assert_eq!(effect.wait_timeout, Some(WAIT_TIMEOUT_SHOWDOWN));
+        assert_eq!(mtt_table.holdem.player_map.len(), 2);
+        assert!(mtt_table.holdem.player_map.contains_key(&1));
+        assert!(mtt_table.holdem.player_map.contains_key(&2));
+        assert!(effect.is_checkpoint());
+        assert_eq!(effect.wait_timeout, Some(0));
+        assert_eq!(effect.list_bridge_events().unwrap(), vec![
+            (0, HoldemBridgeEvent::GameResult {
+                hand_id:mtt_table.holdem.hand_id,
+                table_id:mtt_table.table_id,
+                player_results: vec![],
+                table: mtt_table.make_mtt_table_state(),
+            })
+        ]);
     }
 
     #[test]
@@ -485,7 +452,7 @@ mod tests {
 
     #[test]
     fn test_handle_event_with_checkpoint() {
-        let mut mtt_table = mtt_table_with_3_players();
+        let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
         let event = Event::Ready; // The event doesn't really matter here.
         effect.checkpoint(); // Set checkpoint
@@ -501,7 +468,7 @@ mod tests {
                 sb: 100,
                 bb: 200,
                 next_game_start: 0,
-                players: default_3_players(),
+                players: default_players(3),
             },
             player_results: vec![
                 PlayerResult::new(1, 1000, None, PlayerResultStatus::Normal),
