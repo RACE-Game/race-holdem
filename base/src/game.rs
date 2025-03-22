@@ -211,7 +211,7 @@ impl Holdem {
     ) -> Result<(), HandleError> {
         let timeout = self.get_action_time();
         if let Some(player) = self.player_map.get_mut(&player_id) {
-            println!("Asking {} to act", player.id);
+            effect.info(format!("Asking {} to act", player.id));
             player.status = PlayerStatus::Acting;
             self.acting_player = Some(ActingPlayer {
                 id: player.id,
@@ -427,7 +427,7 @@ impl Holdem {
         }
         self.collect_bets()?;
         self.street = new_street;
-        println!("Street changes to {:?}", self.street);
+        effect.info(format!("Street changes to {:?}", self.street));
         self.min_raise = self.bb;
         self.street_bet = 0;
         self.acting_player = None;
@@ -480,19 +480,19 @@ impl Holdem {
                     (players_cnt..(players_cnt + 3)).collect::<Vec<usize>>(),
                 );
                 self.stage = HoldemStage::ShareKey;
-                println!("Board is {:?}", self.board);
+                effect.info(format!("Board is {:?}", self.board));
             }
 
             Street::Turn => {
                 effect.reveal(self.deck_random_id, vec![players_cnt + 3]);
                 self.stage = HoldemStage::ShareKey;
-                println!("Board is {:?}", self.board);
+                effect.info(format!("Board is {:?}", self.board));
             }
 
             Street::River => {
                 effect.reveal(self.deck_random_id, vec![players_cnt + 4]);
                 self.stage = HoldemStage::ShareKey;
-                println!("Board is {:?}", self.board);
+                effect.info(format!("Board is {:?}", self.board));
             }
 
             // For Runner, update 5 community cards at once
@@ -508,7 +508,7 @@ impl Holdem {
                 }
                 let board = self.board.clone();
                 self.hand_history.set_board(board);
-                println!("Board is {:?}", self.board);
+                effect.info(format!("Board is {:?}", self.board));
             }
             _ => {}
         }
@@ -641,7 +641,11 @@ impl Holdem {
         Ok(award_pots)
     }
 
-    fn create_game_result_display(&mut self, award_pots: Vec<AwardPot>, player_result_map: BTreeMap<u64, PlayerResult>) {
+    fn create_game_result_display(
+        &mut self,
+        award_pots: Vec<AwardPot>,
+        player_result_map: BTreeMap<u64, PlayerResult>,
+    ) {
         self.display.push(Display::GameResult {
             award_pots,
             player_map: player_result_map,
@@ -650,9 +654,7 @@ impl Holdem {
 
     /// Update the map that records players chips change (increased or decreased)
     /// Used for settlement
-    pub fn update_player_chips(
-        &mut self,
-    ) -> Result<BTreeMap<u64, PlayerResult>, HandleError> {
+    pub fn update_player_chips(&mut self) -> Result<BTreeMap<u64, PlayerResult>, HandleError> {
         // The i64 change for each player.  The amount = total pots
         // earned - total bet.  This map will be returned for furture
         // calculation.
@@ -697,7 +699,6 @@ impl Holdem {
 
             player_result_map.insert(*id, result);
         }
-
 
         self.hand_history.set_chips_change(&chips_change_map);
         Ok(player_result_map)
@@ -1140,7 +1141,7 @@ impl Holdem {
                     && !self.is_acting_player(player_id)
                     && unfolded_cnt > 1
                 {
-                    println!("Game continues as the leaving player not acting");
+                    effect.info("Game continues as the leaving player not acting");
                 } else if self.is_acting_player(player_id) {
                     // TODO: fold the `Leave' player?
                     self.next_state(effect)?;
@@ -1237,11 +1238,16 @@ impl Holdem {
 
     pub fn find_position(&self) -> Option<u8> {
         for i in 0..self.table_size {
-            if self.player_map.iter().find(|p| p.1.position == i as usize).is_none() {
-                return Some(i)
+            if self
+                .player_map
+                .iter()
+                .find(|p| p.1.position == i as usize)
+                .is_none()
+            {
+                return Some(i);
             }
         }
-        return None
+        return None;
     }
 
     pub fn position_occupied(&self, position: usize) -> bool {
@@ -1280,7 +1286,7 @@ impl Holdem {
         self.fill_player_chips_with_deposits();
 
         let next_btn = self.get_next_btn()?;
-        println!("Game starts and next BTN: {}", next_btn);
+        effect.info(format!("Game starts and next BTN: {}", next_btn));
         self.btn = next_btn;
 
         // Only start game when there are at least two available player
@@ -1348,7 +1354,11 @@ impl GameHandler for Holdem {
             Event::Custom { sender, raw } => {
                 self.reset_player_timeout(sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
-                println!("Player action event: {:?}, sender: {:?}", event, sender);
+
+                effect.info(format!(
+                    "Player action event: {:?}, sender: {:?}",
+                    event, sender
+                ));
 
                 match event {
                     GameEvent::SitOut => {
@@ -1482,7 +1492,7 @@ impl GameHandler for Holdem {
 
             Event::Leave { player_id } => {
                 // TODO: Leaving is not allowed in SNG game
-                println!("Player {} decides to leave game", player_id);
+                effect.info(format!("Player {} decides to leave game", player_id));
                 self.set_player_status(player_id, PlayerStatus::Leave)?;
                 let _ = self.handle_player_leave(effect, player_id);
 
