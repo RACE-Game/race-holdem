@@ -37,7 +37,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
 };
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -159,6 +159,7 @@ pub struct Mtt {
     alives: usize, // The number of alive players
     stage: MttStage,
     table_assigns: BTreeMap<u64, GameId>,
+    table_assigns_pending: BTreeMap<u64, GameId>,
     ranks: Vec<PlayerRank>,
     tables: BTreeMap<GameId, MttTableState>,
     table_size: u8,
@@ -229,7 +230,8 @@ impl GameHandler for Mtt {
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
         // Update time elapsed for blinds calculation.
         if self.stage == MttStage::Playing {
-            self.time_elapsed = self.time_elapsed + effect.timestamp() - self.timestamp;
+            self.time_elapsed =
+                (self.time_elapsed + effect.timestamp()).saturating_sub(self.timestamp);
             self.timestamp = effect.timestamp();
         }
 
@@ -308,6 +310,7 @@ impl GameHandler for Mtt {
                         effect.reject_deposit(&d)?;
                     }
                 } else {
+                    let mut pids_to_sit = Vec::new();
                     for d in deposits {
                         let player_id = d.id();
                         if let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) {
@@ -317,8 +320,7 @@ impl GameHandler for Mtt {
                                 effect.info(format!("Accept player deposit: {}", d.id()));
                                 effect.accept_deposit(&d)?;
                                 self.total_prize += d.balance();
-                                self.sit_player(effect, player_id)?;
-                                self.update_alives();
+                                pids_to_sit.push(player_id);
                                 self.deposit_balance(d.balance());
                             } else {
                                 effect.warn(format!(
@@ -335,6 +337,8 @@ impl GameHandler for Mtt {
                             effect.reject_deposit(&d)?;
                         }
                     }
+                    self.sit_players(effect, pids_to_sit)?;
+                    self.update_alives();
                 }
             }
 
@@ -368,37 +372,20 @@ impl GameHandler for Mtt {
                 match bridge_event {
                     HoldemBridgeEvent::GameResult {
                         table_id,
-                        chips_change,
+                        player_results,
                         table,
                         ..
                     } => {
+                        for p in table.players.iter() {
+                            self.table_assigns_pending.remove(&p.id);
+                            self.table_assigns.insert(p.id, table.table_id);
+                        }
                         self.tables.insert(table_id, table);
-                        self.apply_chips_change(chips_change)?;
+                        self.apply_chips_change(&player_results)?;
                         self.update_tables(effect, table_id)?;
                         self.apply_prizes(effect)?;
                         self.maybe_set_entry_close(effect);
                         effect.checkpoint();
-                    }
-
-                    HoldemBridgeEvent::SitResult {
-                        table_id,
-                        sitin_players,
-                        sitout_players,
-                    } => {
-                        for pid in sitin_players {
-                            self.table_assigns.insert(pid, table_id);
-                        }
-                        for pid in sitout_players {
-                            let table_id = self.table_assigns.remove(&pid);
-                            if let Some(table_id) = table_id {
-                                // Remove player from table
-                                self.tables
-                                    .values_mut()
-                                    .find(|t| t.table_id == table_id)
-                                    .map(|t| t.players.retain(|p| p.id != pid));
-                            }
-                            self.sit_player(effect, pid)?;
-                        }
                     }
 
                     _ => return Err(errors::error_invalid_bridge_event()),
@@ -468,7 +455,6 @@ impl Mtt {
         table: MttTableState,
     ) -> Result<(), HandleError> {
         effect.launch_sub_game(self.subgame_bundle.clone(), self.table_size as _, &table)?;
-        self.tables.insert(table.table_id, table);
         Ok(())
     }
 
@@ -510,19 +496,19 @@ impl Mtt {
 
     fn apply_chips_change(
         &mut self,
-        chips_change: BTreeMap<u64, ChipsChange>,
+        player_results: &[PlayerResult],
     ) -> Result<(), HandleError> {
-        for (pid, change) in chips_change.into_iter() {
+        for rst in player_results {
             let rank = self
                 .ranks
                 .iter_mut()
-                .find(|r| r.id.eq(&pid))
+                .find(|r| r.id.eq(&rst.player_id))
                 .ok_or(errors::error_player_not_found())?;
-            match change {
-                ChipsChange::Add(amount) => {
+            match rst.chips_change {
+                Some(ChipsChange::Add(amount)) => {
                     rank.chips += amount;
                 }
-                ChipsChange::Sub(amount) => {
+                Some(ChipsChange::Sub(amount)) => {
                     rank.chips -= amount;
                     if rank.chips == 0 {
                         rank.status = PlayerRankStatus::Out;
@@ -530,6 +516,7 @@ impl Mtt {
                         self.table_assigns.remove(&rank.id);
                     }
                 }
+                _ => {}
             }
         }
         self.sort_ranks();
@@ -757,57 +744,88 @@ impl Mtt {
     ///
     /// NB: The game will launch tables when receiving GameStart
     /// event, so this function is No-op in Init stage.
-    fn sit_player(&mut self, effect: &mut Effect, player_id: u64) -> HandleResult<()> {
+    fn sit_players(&mut self, effect: &mut Effect, player_ids: Vec<u64>) -> HandleResult<()> {
         if self.stage == MttStage::Init {
             return Ok(());
         }
 
+        let mut table_sitin_pending_count = BTreeMap::<usize, usize>::new();
+        self.table_assigns_pending.values().for_each(|tid| {
+            table_sitin_pending_count
+                .entry(*tid)
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
+        });
+        let mut table_id_to_sitins = BTreeMap::<usize, Vec<MttTableSitin>>::new();
+        let mut tables_to_launch = Vec::<MttTableState>::new();
+
         let (sb, bb) = self.calc_blinds()?;
 
-        let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) else {
-            return Err(errors::error_player_id_not_found())?;
-        };
+        for player_id in player_ids {
+            let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) else {
+                return Err(errors::error_player_id_not_found())?;
+            };
 
-        let mut table_id_with_least_players = None;
-        let mut least_player_num: usize = self.table_size as _;
+            let mut table_id_with_least_players = None;
+            let mut least_player_num: usize = self.table_size as _;
 
-        for (table_id, table) in self.tables.iter() {
-            // The table with least player but not empty
-            if table.players.len() < least_player_num && table.players.len() > 0 {
-                table_id_with_least_players = Some(table_id);
-                least_player_num = table.players.len();
+            let last_table_to_launch = tables_to_launch.last_mut();
+
+            for (table_id, table) in self.tables.iter() {
+                // The table with least player but not empty
+                let count: usize =
+                    table.players.len() + table_sitin_pending_count.get(&table_id).unwrap_or(&0);
+                if count < least_player_num && count > 0 {
+                    table_id_with_least_players = Some(table_id);
+                    least_player_num = count;
+                }
+            }
+
+            if let Some(table_id) = table_id_with_least_players {
+                // Find a table to sit
+                effect.info(format!("Sit player {} to {}", rank.id, table_id));
+                let sitin = MttTableSitin::new(rank.id, rank.chips);
+                match table_id_to_sitins.entry(*table_id) {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(vec![sitin]);
+                    }
+                    Entry::Occupied(mut occupied_entry) => {
+                        occupied_entry.get_mut().push(sitin);
+                    }
+                };
+                self.table_assigns_pending.insert(rank.id, *table_id);
+                table_sitin_pending_count
+                    .entry(*table_id)
+                    .and_modify(|c| *c += 1)
+                    .or_insert(1);
+            } else if last_table_to_launch.as_ref().is_some_and(|t| t.players.len() < self.table_size as _) {
+                let Some(table) = last_table_to_launch else {
+                    return Err(errors::error_table_not_fonud())?;
+                };
+                effect.info(format!("Sit player {} to the table just created {}", rank.id, table.table_id));
+                let position = table.players.len();
+                let player = MttTablePlayer::new(rank.id, rank.chips, position);
+                table.players.push(player);
+            } else {
+                // Table is full, create a new table with this player.
+                let table_id = effect.next_sub_game_id();
+                effect.info(format!("Create {} table for player {}", table_id, rank.id));
+                let player = MttTablePlayer::new(rank.id, rank.chips, 0);
+                let players = vec![player];
+                let table = MttTableState::new(table_id, sb, bb, players);
+                tables_to_launch.push(table);
             }
         }
 
-        if let Some(table_id) = table_id_with_least_players {
-            effect.bridge_event(
-                *table_id,
-                HoldemBridgeEvent::SitinPlayers {
-                    sitins: vec![MttTableSitin::new(rank.id, rank.chips)],
-                },
-            )?;
-            effect.info(format!("Add player {} to table {}", player_id, table_id));
-            return Ok(());
-        };
+        for (table_id, sitins) in table_id_to_sitins {
+            effect.bridge_event(table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
+        }
 
-        // Table is full, create a new table with this player.
-        effect.info("Create a table for new player");
+        for table in tables_to_launch {
+            println!("Table: {:?}", table);
+            self.launch_table(effect, table)?;
+        }
 
-        let player = MttTablePlayer::new(rank.id, rank.chips, 0);
-        let players = vec![player];
-
-        let table_id = effect.next_sub_game_id();
-        let table = MttTableState {
-            table_id,
-            btn: 0,
-            sb,
-            bb,
-            players,
-            next_game_start: 0,
-            hand_id: 0,
-        };
-
-        self.launch_table(effect, table)?;
         Ok(())
     }
 
@@ -863,11 +881,11 @@ impl Mtt {
 mod tests {
     use super::*;
 
-    mod misc;
     mod helper;
+    mod misc;
     use helper::*;
 
-    mod test_start_game;
     mod test_handle_game_result;
-    mod test_sit_player;
+    mod test_sit_players;
+    mod test_start_game;
 }

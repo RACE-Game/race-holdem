@@ -5,10 +5,10 @@ mod helper;
 
 use std::collections::BTreeMap;
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 use helper::make_uneven_betmap;
 use race_holdem_base::essential::{
-    AwardPot, Display, GameEvent, HoldemAccount, Player, PlayerResult, PlayerStatus, Pot,
+    Display, GameEvent, HoldemAccount, Player, PlayerResult, PlayerStatus, Pot,
 };
 
 const ALICE: u64 = 0;
@@ -18,7 +18,7 @@ const CAROL: u64 = 2;
 #[test]
 fn test_borsh_player() {
     let player = Player::new_with_timeout(ALICE, 1000, 1u16, 0);
-    let player_ser = player.try_to_vec().unwrap();
+    let player_ser = borsh::to_vec(&player).unwrap();
     let player_de = Player::try_from_slice(&player_ser).unwrap();
     assert_eq!(player_de, player);
 }
@@ -30,7 +30,7 @@ fn test_borsh_pot() {
         winners: vec![ALICE],
         amount: 120,
     };
-    let pot_ser = pot.try_to_vec().unwrap();
+    let pot_ser = borsh::to_vec(&pot).unwrap();
     let pot_de = Pot::try_from_slice(&pot_ser).unwrap();
     assert_eq!(pot_de, pot);
 }
@@ -43,9 +43,10 @@ fn test_borsh_holdem_account() {
         ante: 0,
         rake: 3,
         rake_cap: 1,
+        max_deposit: 6000,
         theme: None,
     };
-    let acct_ser = acct.try_to_vec().unwrap();
+    let acct_ser = borsh::to_vec(&acct).unwrap();
     println!("Game Account Ser data {:?}", acct_ser);
     let acct_de = HoldemAccount::try_from_slice(&acct_ser).unwrap();
     assert_eq!(acct_de, acct);
@@ -62,7 +63,7 @@ fn test_borsh_game_event() {
     ];
     for evt in evts.into_iter() {
         println!("Event: {:?}", evt);
-        let evt_ser = evt.try_to_vec().unwrap();
+        let evt_ser = borsh::to_vec(&evt).unwrap();
         let evt_de = GameEvent::try_from_slice(&evt_ser).unwrap();
         assert_eq!(evt_de, evt);
     }
@@ -83,6 +84,7 @@ fn test_borsh_display() {
             ],
         },
         Display::GameResult {
+            award_pots: Default::default(),
             player_map: BTreeMap::from([
                 (
                     ALICE,
@@ -91,7 +93,6 @@ fn test_borsh_display() {
                         position: 0,
                         status: PlayerStatus::Wait,
                         chips: 100,
-                        prize: Some(100),
                     },
                 ),
                 (
@@ -101,7 +102,6 @@ fn test_borsh_display() {
                         position: 1,
                         status: PlayerStatus::Out,
                         chips: 0,
-                        prize: None,
                     },
                 ),
             ]),
@@ -114,7 +114,7 @@ fn test_borsh_display() {
 
     for dlp in display.into_iter() {
         println!("Display: {:?}", dlp);
-        let dlp_ser = dlp.try_to_vec().unwrap();
+        let dlp_ser = borsh::to_vec(&dlp).unwrap();
         let dlp_de = Display::try_from_slice(&dlp_ser).unwrap();
         assert_eq!(dlp_de, dlp);
     }

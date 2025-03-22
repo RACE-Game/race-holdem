@@ -47,29 +47,41 @@ pub struct Holdem {
 
 // Methods that mutate or query the game state
 impl Holdem {
-    // Mark out players.
-    // An out player is one with zero chips.
-    fn mark_out_players(&mut self) {
-        for (_, v) in self.player_map.iter_mut() {
-            if v.status != PlayerStatus::Leave && v.chips + v.deposit == 0 {
-                // Set player status to Out to indicates this player has no chips
-                v.status = PlayerStatus::Out;
-                // Here we use timeout for rebuy timeout.
-                v.timeout = 0;
-            };
+    // Mark all eliminated players.
+    // An eliminated player is one with zero chips.
+    fn mark_eliminated_players(&mut self) {
+        for p in self.player_map.values_mut() {
+            if p.status != PlayerStatus::Leave && p.chips + p.deposit == 0 {
+                p.status = PlayerStatus::Eliminated;
+            }
         }
     }
 
-    // Remove players with `Leave` or `Out` status.
-    fn remove_leave_and_out_players(&mut self) -> Vec<Player> {
+    fn cash_table_kick_players(&mut self, effect: &mut Effect) -> Vec<Player> {
+        if self.mode == GameMode::Cash {
+            return self.kick_players(effect);
+        }
+        Vec::default()
+    }
+
+    // Remove players with `Leave`, `Out` or `Eliminated` status.
+    pub fn kick_players(&mut self, effect: &mut Effect) -> Vec<Player> {
         let player_map = take(&mut self.player_map);
         let mut removed = Vec::new();
         let mut retained = Vec::new();
 
         for player in player_map.into_values() {
             if player.status == PlayerStatus::Leave {
+                effect.info(format!("Remove player {} with Leave status", player.id));
                 removed.push(player);
             } else if player.status == PlayerStatus::Out {
+                effect.info(format!("Remove player {} with Out status", player.id));
+                removed.push(player);
+            } else if player.status == PlayerStatus::Eliminated {
+                effect.info(format!(
+                    "Remove player {} with Eliminated status",
+                    player.id
+                ));
                 removed.push(player);
             } else {
                 retained.push(player);
@@ -716,10 +728,10 @@ impl Holdem {
         let player_result_map = self.update_player_chips()?;
         self.create_game_result_display(award_pots, player_result_map);
         self.apply_prize()?;
-        self.mark_out_players();
+        self.mark_eliminated_players();
         self.hand_history.valid = true;
 
-        let removed_players = self.remove_leave_and_out_players();
+        let removed_players = self.cash_table_kick_players(effect);
         for player in removed_players {
             effect.withdraw(player.id, player.chips + player.deposit);
             effect.eject(player.id);
@@ -845,8 +857,9 @@ impl Holdem {
         self.apply_prize()?;
         self.hand_history.valid = true;
 
-        self.mark_out_players();
-        let removed_players = self.remove_leave_and_out_players();
+        self.mark_eliminated_players();
+
+        let removed_players = self.cash_table_kick_players(effect);
 
         for player in removed_players {
             effect.withdraw(player.id, player.chips + player.deposit);
@@ -1655,7 +1668,8 @@ mod tests {
             player_map: setup_players(),
             ..Default::default()
         };
-        let removed = holdem.remove_leave_and_out_players();
+        let mut effect = Effect::default();
+        let removed = holdem.kick_players(&mut effect);
 
         assert_eq!(removed.len(), 2);
         assert!(removed

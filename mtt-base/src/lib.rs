@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::prelude::*;
 
@@ -23,11 +21,7 @@ impl MttTableSitin {
 }
 
 impl MttTablePlayer {
-    pub fn new(
-        id: u64,
-        chips: u64,
-        table_position: usize,
-    ) -> Self {
+    pub fn new(id: u64, chips: u64, table_position: usize) -> Self {
         Self {
             id,
             chips,
@@ -48,6 +42,17 @@ pub struct MttTableState {
 }
 
 impl MttTableState {
+    pub fn new(table_id: GameId, sb: u64, bb: u64, players: Vec<MttTablePlayer>) -> Self {
+        Self {
+            table_id,
+            hand_id: 0,
+            btn: 0,
+            sb,
+            bb,
+            players,
+            next_game_start: 0,
+        }
+    }
 
     pub fn find_position(&self) -> usize {
         let mut table_position = 0;
@@ -57,10 +62,10 @@ impl MttTableState {
                 .iter()
                 .find(|p| p.table_position == i)
                 .is_none()
-                {
-                    table_position = i;
-                    break;
-                }
+            {
+                table_position = i;
+                break;
+            }
         }
         return table_position;
     }
@@ -104,6 +109,29 @@ impl MttTableState {
     }
 }
 
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+pub enum PlayerResultStatus {
+    Normal,
+    Sitout,
+    Eliminated,
+}
+
+#[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
+pub struct PlayerResult {
+    pub player_id: u64,
+    pub chips: u64,
+    pub chips_change: Option<ChipsChange>,
+    pub status: PlayerResultStatus,
+}
+
+impl PlayerResult {
+    pub fn new(player_id: u64, chips: u64, chips_change: Option<ChipsChange>, status: PlayerResultStatus) -> Self {
+        Self {
+            player_id, chips, chips_change, status
+        }
+    }
+}
+
 /// Holdem specific bridge events for interaction with the `mtt` crate.  Transactor will pass
 /// through such events to the mtt handler.  Also see [`race_api::event::Event::Bridge`].
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
@@ -128,17 +156,8 @@ pub enum HoldemBridgeEvent {
     GameResult {
         hand_id: usize,
         table_id: GameId,
-        chips_change: BTreeMap<u64, ChipsChange>,
+        player_results: Vec<PlayerResult>,
         table: MttTableState,
-    },
-    /// This event is sent by sub game.
-    /// Represent result of relocate which contains the player id of succeed and failed movements.
-    SitResult {
-        table_id: GameId,
-        // These players have been sitted in successfully.
-        sitin_players: Vec<u64>,
-        // These players failed to get sitted in, hence they are sitted out.
-        sitout_players: Vec<u64>,
     },
 }
 

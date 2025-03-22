@@ -30,16 +30,17 @@ pub enum GameMode {
 #[derive(BorshSerialize, BorshDeserialize, Default, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum PlayerStatus {
     #[default]
-    Wait,
-    Acted,
-    Acting,
-    Allin,
-    Fold,
-    Init, // Indicating new players ready for the next hand
-    Leave,
-    Out,
+    Wait,       // the player is waiting for others' action
+    Acted,      // the player has acted on current street
+    Acting,     // the player is acting
+    Allin,      // the player is allin
+    Fold,       // the player has folded
+    Init,       // the player just joined the game, waiting for next hand to start
+    Leave,      // the player just sent the Leave event
+    Out,        // the player is sitted out
+    Eliminated, // the player has zero chips
+    Afk,        // the player is away from keyboard
 }
-
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]
 pub struct InternalPlayerJoin {
@@ -52,10 +53,10 @@ pub struct InternalPlayerJoin {
 pub struct Player {
     pub id: u64,
     pub chips: u64,
-    pub position: usize,      // zero indexed
+    pub position: usize, // zero indexed
     pub status: PlayerStatus,
-    pub timeout: u8,          // count the times of action timeout
-    pub deposit: u64,         // The deposited amount
+    pub timeout: u8,  // count the times of action timeout
+    pub deposit: u64, // The deposited amount
 }
 
 impl Player {
@@ -103,7 +104,11 @@ impl Player {
 
     pub fn next_to_act(&self) -> bool {
         match self.status {
-            PlayerStatus::Allin | PlayerStatus::Fold | PlayerStatus::Init | PlayerStatus::Leave | PlayerStatus::Out => false,
+            PlayerStatus::Allin
+            | PlayerStatus::Fold
+            | PlayerStatus::Init
+            | PlayerStatus::Leave
+            | PlayerStatus::Out => false,
             _ => true,
         }
     }
@@ -125,7 +130,6 @@ impl Player {
         }
     }
 }
-
 
 /// Representation of the player who should be acting at the moment
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
@@ -203,7 +207,7 @@ impl Default for HoldemAccount {
             rake: 3,
             rake_cap: 1,
             max_deposit: 2000,
-            theme: None
+            theme: None,
         }
     }
 }
@@ -252,5 +256,5 @@ pub enum Display {
     GameResult {
         award_pots: Vec<AwardPot>,
         player_map: BTreeMap<u64, PlayerResult>,
-    }
+    },
 }

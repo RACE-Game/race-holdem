@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 
-use borsh::BorshSerialize;
 use race_api::prelude::*;
 use race_holdem_base::hand_history::HandHistory;
 use race_test::prelude::*;
@@ -112,6 +111,7 @@ pub fn make_pots() -> Vec<Pot> {
 pub fn setup_holdem_state() -> Result<Holdem> {
     let players_map = initial_players();
     let mut state = Holdem {
+        hand_id: 1,
         deck_random_id: 1,
         sb: 10,
         bb: 20,
@@ -137,6 +137,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         table_size: 7,
         hand_history: HandHistory::default(),
         next_game_start: 0,
+        max_deposit: 6000,
     };
     state.arrange_players(0usize)?;
     Ok(state)
@@ -146,6 +147,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
 pub fn setup_two_player_holdem() -> Result<Holdem> {
     let players_map = initial_two_players();
     let mut state = Holdem {
+        hand_id: 1,
         deck_random_id: 1,
         sb: 10,
         bb: 20,
@@ -158,6 +160,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
         player_map: players_map,
         table_size: 6,
         mode: GameMode::Cash,
+        max_deposit: 6000,
         ..Default::default()
     };
     state.arrange_players(0usize)?;
