@@ -12,7 +12,8 @@ use race_api::{
 };
 
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState,
+    HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
+    PlayerResultStatus,
 };
 use race_proc_macro::game_handler;
 
@@ -343,68 +344,6 @@ impl GameHandler for LtMtt {
                         effect.checkpoint();
                     }
 
-                    HoldemBridgeEvent::SitResult {
-                        table_id,
-                        sitin_players,
-                        sitout_players,
-                    } => {
-                        // Handle sitin players, which triggerred by HoldemBridgeEvent::SitinPlayers
-                        // Update tables and table_assigns.  `LtMttPlayerStatus` not changed
-                        for in_pid in sitin_players {
-                            self.table_assigns_pending.insert(in_pid, table_id);
-                            for ranking in self.rankings.iter_mut() {
-                                if ranking.player_id == in_pid {
-                                    ranking.status = LtMttPlayerStatus::Pending;
-                                }
-                            }
-
-                            effect.info(format!(
-                                "SitResult: user[{}] sit in table[{}].",
-                                in_pid, table_id
-                            ));
-                        }
-
-                        // Handle sitout players
-                        // These players are marked with pending status,
-                        // and will match a new table for them later.
-                        if !sitout_players.is_empty() {
-                            let outs: Vec<_> = self
-                                .rankings
-                                .iter()
-                                .filter(|&p| sitout_players.contains(&p.player_id))
-                                .collect();
-
-                            let outs_max_chips = outs.iter().max_by_key(|p| p.chips).unwrap();
-                            let to_table_id =
-                                self.find_table_to_sit(outs.len(), outs_max_chips.chips);
-
-                            let mut sitins = vec![];
-                            for out_pid in sitout_players {
-                                self.table_assigns_pending.insert(out_pid, to_table_id);
-                                for ranking in self.rankings.iter_mut() {
-                                    if ranking.player_id == out_pid {
-                                        ranking.status = LtMttPlayerStatus::Pending;
-                                    }
-                                }
-
-                                let player = self.find_player_by_id(out_pid);
-                                sitins.push(MttTableSitin::new(player.player_id, player.chips));
-
-                                effect.info(format!(
-                                    "SitResult: user[{}] sit out table[{}], in table[{}].",
-                                    out_pid, table_id, to_table_id
-                                ));
-                            }
-
-                            effect.bridge_event(
-                                to_table_id,
-                                HoldemBridgeEvent::SitinPlayers { sitins },
-                            )?;
-                        }
-
-                        effect.checkpoint();
-                    }
-
                     _ => return Err(errors::error_invalid_bridge_event()),
                 }
             }
@@ -598,8 +537,6 @@ impl LtMtt {
         }
     }
 
-    // Table contains players who request sitin during this hand.
-    // It's final state of this table.
     fn on_game_result(
         &mut self,
         effect: &mut Effect,
@@ -608,26 +545,23 @@ impl LtMtt {
         if let HoldemBridgeEvent::GameResult {
             hand_id: _,
             table_id,
-            chips_change,
+            player_results,
             table,
         } = game_result
         {
             effect.info(format!("on_game_result: table_id: {}", table_id));
-            self.apply_chips_change(effect, chips_change)?;
+            // Update table state first
+            self.tables.insert(table_id, table);
+            self.apply_chips_change(effect, &player_results)?;
 
-            let old_table = self.tables.get(&table_id).unwrap();
-            let old_pids: Vec<_> = old_table.players.iter().map(|p| p.id).collect();
-            let new_pids: Vec<_> = table.players.iter().map(|p| p.id).collect();
-            let moved_pids: Vec<_> = old_pids.iter().filter(|&p| !new_pids.contains(p)).collect();
-            // remove moved players, and marked as `LtMttPlayerStatus::Out`
-            effect.info(format!("on_game_result: moved players: {:?}", moved_pids));
-            for player_id in moved_pids {
-                self.update_table_player(effect, *player_id, None)?;
-            }
-
-            // update current players as `LtMttPlayerStatus::Playing`
-            for cur_player in table.players {
-                self.update_table_player(effect, cur_player.id, Some(table_id))?;
+            for player in player_results {
+                if player.status == PlayerResultStatus::Normal {
+                    // update current players as `LtMttPlayerStatus::Playing`
+                    self.update_table_player(effect, player.player_id, Some(table_id))?;
+                } else {
+                    // remove moved players, and marked as `LtMttPlayerStatus::Out`
+                    self.update_table_player(effect, player.player_id, None)?;
+                }
             }
 
             self.start_next_game(effect, table_id)?;
@@ -641,7 +575,7 @@ impl LtMtt {
     /// when received sitresult, confirm all the level up players,
     /// then for level up players find their new table.
     fn start_next_game(&mut self, effect: &mut Effect, table_id: usize) -> HandleResult<()> {
-        let origin_table = self.tables.get_mut(&table_id).unwrap();
+        let origin_table = self.tables.get(&table_id).unwrap();
         let cur_blind_rule = self
             .blind_rules
             .iter()
@@ -649,15 +583,15 @@ impl LtMtt {
             .unwrap();
 
         if let Some(max_chips) = cur_blind_rule.max_chips {
-            let mut level_up_player_ids: Vec<u64> = vec![];
+            let mut level_up_players: Vec<LtMttPlayer> = vec![];
             for player in self.rankings.iter() {
                 if player.chips > max_chips {
-                    level_up_player_ids.push(player.player_id);
+                    level_up_players.push(player.clone());
                 }
             }
 
             let origin_player_num = origin_table.players.len();
-            let level_up_player_num = level_up_player_ids.len();
+            let level_up_player_num = level_up_players.len();
             effect.info(format!(
                 "on_game_result: origin players: {}, level up players: {}",
                 origin_player_num, level_up_player_num
@@ -670,14 +604,34 @@ impl LtMtt {
                 && (origin_player_num == level_up_player_num
                     || (origin_player_num - level_up_player_num) >= 2)
             {
+                let up_ids = level_up_players.iter().map(|p| p.player_id).collect();
                 effect.bridge_event(
                     table_id,
                     HoldemBridgeEvent::StartGame {
                         sb: origin_table.sb,
                         bb: origin_table.bb,
-                        sitout_players: level_up_player_ids.clone(),
+                        sitout_players: up_ids,
                     },
                 )?;
+
+                let max_chips = level_up_players.iter().max_by_key(|p| p.chips).unwrap();
+                let to_table_id = self.find_table_to_sit(level_up_player_num, max_chips.chips);
+                let mut sitins = vec![];
+                for player in level_up_players.iter() {
+                    self.table_assigns_pending.insert(player.player_id, to_table_id);
+                    for ranking in self.rankings.iter_mut() {
+                        if ranking.player_id == player.player_id {
+                            ranking.status = LtMttPlayerStatus::Pending;
+                        }
+                    }
+                    sitins.push(MttTableSitin::new(player.player_id, player.chips));
+                }
+                effect.bridge_event(to_table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
+
+                let origin_table = self.tables.get_mut(&table_id).unwrap();
+                for player in level_up_players {
+                    origin_table.remove_player(player.player_id);
+                }
 
                 return Ok(());
             }
@@ -806,31 +760,21 @@ impl LtMtt {
     fn apply_chips_change(
         &mut self,
         effect: &mut Effect,
-        chips_change: BTreeMap<u64, ChipsChange>,
+        player_results: &[PlayerResult],
     ) -> HandleResult<()> {
-        for (player_id, change) in chips_change.iter() {
+        for player_result in player_results {
             let player = self
                 .rankings
                 .iter_mut()
-                .find(|p| p.player_id == *player_id)
+                .find(|p| p.player_id == player_result.player_id)
                 .ok_or(errors::error_player_not_found())?;
 
-            match change {
-                ChipsChange::Add(amount) => {
-                    effect.info(format!(
-                        "chips_changes: Player[{}] chips: {} add {}",
-                        player_id, player.chips, amount
-                    ));
-                    player.chips += amount;
-                }
-                ChipsChange::Sub(amount) => {
-                    effect.info(format!(
-                        "chips_changes: Player[{}] chips: {} sub {}",
-                        player_id, player.chips, amount
-                    ));
-                    player.chips -= amount;
-                }
-            }
+            effect.info(format!(
+                "chips_changes: Player[{}] chips: {}",
+                player_result.player_id, player_result.chips
+            ));
+
+            player.chips = player_result.chips;
         }
 
         self.rankings.sort_by_key(|ranking| Reverse(ranking.chips));
