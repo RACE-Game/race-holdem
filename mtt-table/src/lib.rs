@@ -241,9 +241,9 @@ mod tests {
 
     fn default_3_players() -> Vec<MttTablePlayer> {
         vec![
-            MttTablePlayer::new(1, 1000, 0, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(2, 1500, 1, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(3, 2000, 1, MttTablePlayerStatus::SitIn),
+            MttTablePlayer::new(1, 1000, 0),
+            MttTablePlayer::new(2, 1500, 1),
+            MttTablePlayer::new(3, 2000, 1),
         ]
     }
 
@@ -276,8 +276,8 @@ mod tests {
             sb: 100,
             bb: 200,
             players: vec![
-                MttTablePlayer::new(1, 1000, 0, MttTablePlayerStatus::SitIn),
-                MttTablePlayer::new(2, 1500, 1, MttTablePlayerStatus::SitIn),
+                MttTablePlayer::new(1, 1000, 0),
+                MttTablePlayer::new(2, 1500, 1),
             ],
             table_id: 1,
             btn: 0,
@@ -304,7 +304,7 @@ mod tests {
         let invalid_player_id_event = HoldemBridgeEvent::StartGame {
             sb: 100,
             bb: 200,
-            moved_players: vec![999], // Invalid player ID
+            sitout_players: vec![999], // Invalid player ID
         };
         let result = mtt_table.handle_bridge_event(&mut effect, invalid_player_id_event);
         assert!(result.is_err());
@@ -319,7 +319,7 @@ mod tests {
         let bridge_event = HoldemBridgeEvent::StartGame {
             sb: 100,
             bb: 200,
-            moved_players: vec![1, 2],
+            sitout_players: vec![1, 2],
         };
 
         mtt_table
@@ -337,9 +337,9 @@ mod tests {
         let mut effect = Effect::default();
 
         // Attempt to relocate the same player to the table
-        let bridge_event = HoldemBridgeEvent::Relocate {
-            players: vec![
-                MttTablePlayer::new(1, 1000, 4, MttTablePlayerStatus::SitIn), // Duplicate player
+        let bridge_event = HoldemBridgeEvent::SitinPlayers {
+            sitins: vec![
+                MttTableSitin::new(1, 1000), // Duplicate player
             ],
         };
 
@@ -355,9 +355,9 @@ mod tests {
         let mut effect = Effect::default();
 
         // Attempt to relocate a player to an already occupied position
-        let bridge_event = HoldemBridgeEvent::Relocate {
-            players: vec![
-                MttTablePlayer::new(4, 3000, 1, MttTablePlayerStatus::SitIn), // Position 1 is already occupied
+        let bridge_event = HoldemBridgeEvent::SitinPlayers {
+            sitins: vec![
+                MttTableSitin::new(3, 3000), // Player 3 is already on the table
             ],
         };
 
@@ -366,7 +366,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            errors::duplicated_position_in_relocate()
+            errors::duplicated_player_in_relocate()
         );
     }
 
@@ -375,12 +375,12 @@ mod tests {
         let mut mtt_table = mtt_table_with_3_players();
         let mut effect = Effect::default();
 
-        let players = vec![
-            MttTablePlayer::new(4, 1000, 3, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(5, 1500, 4, MttTablePlayerStatus::SitIn),
+        let sitins = vec![
+            MttTableSitin::new(4, 1000),
+            MttTableSitin::new(5, 1500),
         ];
 
-        let bridge_event = HoldemBridgeEvent::Relocate { players };
+        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
 
         mtt_table
             .handle_bridge_event(&mut effect, bridge_event)
@@ -398,12 +398,12 @@ mod tests {
         mtt_table.holdem.stage = HoldemStage::Play;
         let mut effect = Effect::default();
 
-        let players = vec![
-            MttTablePlayer::new(4, 1000, 3, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(5, 1500, 4, MttTablePlayerStatus::SitIn),
+        let sitins = vec![
+            MttTableSitin::new(4, 1000),
+            MttTableSitin::new(5, 1500),
         ];
 
-        let bridge_event = HoldemBridgeEvent::Relocate { players };
+        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
 
         mtt_table
             .handle_bridge_event(&mut effect, bridge_event)
@@ -429,11 +429,13 @@ mod tests {
         mtt_table.holdem.next_game_start = WAIT_TIMEOUT_DEFAULT;
         let mut effect = Effect::default();
 
-        let players = vec![
-            MttTablePlayer::new(4, 1000, 3, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(5, 1500, 4, MttTablePlayerStatus::SitIn),
+        let sitins = vec![
+            MttTableSitin::new(4, 1000),
+            MttTableSitin::new(5, 1500),
         ];
-        let bridge_event = HoldemBridgeEvent::Relocate { players };
+
+        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
+
         mtt_table
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
@@ -448,11 +450,12 @@ mod tests {
         mtt_table.holdem.next_game_start = WAIT_TIMEOUT_RUNNER;
         let mut effect = Effect::default();
 
-        let players = vec![
-            MttTablePlayer::new(4, 1000, 3, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(5, 1500, 4, MttTablePlayerStatus::SitIn),
+        let sitins = vec![
+            MttTableSitin::new(4, 1000),
+            MttTableSitin::new(5, 1500),
         ];
-        let bridge_event = HoldemBridgeEvent::Relocate { players };
+
+        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
         mtt_table
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
@@ -467,11 +470,13 @@ mod tests {
         mtt_table.holdem.next_game_start = WAIT_TIMEOUT_SHOWDOWN;
         let mut effect = Effect::default();
 
-        let players = vec![
-            MttTablePlayer::new(4, 1000, 3, MttTablePlayerStatus::SitIn),
-            MttTablePlayer::new(5, 1500, 4, MttTablePlayerStatus::SitIn),
+        let sitins = vec![
+            MttTableSitin::new(4, 1000),
+            MttTableSitin::new(5, 1500),
         ];
-        let bridge_event = HoldemBridgeEvent::Relocate { players };
+
+        let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
+
         mtt_table
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
