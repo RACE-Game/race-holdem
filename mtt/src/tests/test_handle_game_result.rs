@@ -1,4 +1,5 @@
 use super::*;
+use race_holdem_mtt_base::PlayerResultStatus;
 
 #[test]
 fn test_game_result_given_3_tables_and_current_table_has_1_player_do_dispatch_nothing() {
@@ -12,7 +13,20 @@ fn test_game_result_given_3_tables_and_current_table_has_1_player_do_dispatch_no
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 3,
-        chips_change: BTreeMap::from([(7, ChipsChange::Sub(10000)), (8, ChipsChange::Add(10000))]),
+        player_results: vec![
+            PlayerResult::new(
+                7,
+                0,
+                Some(ChipsChange::Sub(10000)),
+                PlayerResultStatus::Eliminated,
+            ),
+            PlayerResult::new(
+                8,
+                20000,
+                Some(ChipsChange::Add(10000)),
+                PlayerResultStatus::Normal,
+            ),
+        ],
         table: MttTableState {
             hand_id: 1,
             table_id: 3,
@@ -43,7 +57,20 @@ fn test_game_result_given_2_tables_and_current_table_has_1_player_do_dispatch_no
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 2,
-        chips_change: BTreeMap::from([(4, ChipsChange::Sub(10000)), (5, ChipsChange::Add(10000))]),
+        player_results: vec![
+            PlayerResult::new(
+                4,
+                0,
+                Some(ChipsChange::Sub(10000)),
+                PlayerResultStatus::Eliminated,
+            ),
+            PlayerResult::new(
+                5,
+                20000,
+                Some(ChipsChange::Add(10000)),
+                PlayerResultStatus::Normal,
+            ),
+        ],
         table: MttTableState {
             hand_id: 1,
             table_id: 2,
@@ -76,7 +103,7 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 2,
-        chips_change: BTreeMap::default(),
+        player_results: vec![],
         table: MttTableState {
             hand_id: 1,
             table_id: 2,
@@ -98,7 +125,7 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
     mtt.handle_event(&mut effect, game_result_event).unwrap();
 
     assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
-    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 3);
+    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
     assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 1);
     assert_eq!(
         effect.list_bridge_events().unwrap(),
@@ -109,14 +136,20 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
                 bb: DEFAULT_BB,
                 sitout_players: vec![4],
             },
+        ),(
+            3,
+            HoldemBridgeEvent::SitinPlayers {
+                sitins: vec![MttTableSitin::new(4, 10000)]
+            }
         )]
     );
 }
 
 #[test]
 fn test_game_result_given_3_tables_do_close_table() {
-    // Create three tables with number of players: 3, 3, 1
+    // Create tables with number of players: 3, 3, 1
     let mut mtt = helper::create_mtt_with_players(&[3, 3, 1], 3);
+    mtt.stage = MttStage::Playing;
     let mut effect = Effect::default();
 
     // Eliminate one player on table #1
@@ -125,12 +158,25 @@ fn test_game_result_given_3_tables_do_close_table() {
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 1,
-        chips_change: BTreeMap::from([(1, ChipsChange::Add(10000)), (2, ChipsChange::Sub(10000))]),
+        player_results: vec![
+            PlayerResult::new(
+                2,
+                0,
+                Some(ChipsChange::Sub(10000)),
+                PlayerResultStatus::Eliminated,
+            ),
+            PlayerResult::new(
+                1,
+                20000,
+                Some(ChipsChange::Add(10000)),
+                PlayerResultStatus::Normal,
+            ),
+        ],
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new(0, 20000, 0),
+                MttTablePlayer::new(1, 20000, 0),
                 MttTablePlayer::new(3, 10000, 2),
             ],
             ..Default::default()
@@ -145,22 +191,32 @@ fn test_game_result_given_3_tables_do_close_table() {
 
     mtt.handle_event(&mut effect, game_result_event).unwrap();
 
+    effect.print_logs();
+
     // Table 1 should be closed, two players should be moved to table 3
-    assert_eq!(mtt.tables.len(), 3);
+    assert_eq!(mtt.tables.len(), 2);
     assert_eq!(mtt.get_rank(2).unwrap().chips, 0);
     assert_eq!(mtt.get_rank(1).unwrap().chips, 20000);
-    assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 2);
+    assert_eq!(mtt.tables.get(&1), None);
     assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 3);
     assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 1);
     assert_eq!(
         effect.list_bridge_events().unwrap(),
-        vec![(1, HoldemBridgeEvent::CloseTable),]
+        vec![
+            (1, HoldemBridgeEvent::CloseTable),
+            (
+                3,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new(1, 20000), MttTableSitin::new(3, 10000),],
+                }
+            )
+        ]
     );
 }
 
 #[test]
 fn test_game_result_given_2_tables_do_close_table() {
-    // Create three tables with number of players: 2, 2
+    // Create tables with number of players: 2, 2
     let mut mtt = helper::create_mtt_with_players(&[2, 2], 3);
     let mut effect = Effect::default();
 
@@ -170,7 +226,20 @@ fn test_game_result_given_2_tables_do_close_table() {
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 1,
-        chips_change: BTreeMap::from([(1, ChipsChange::Add(10000)), (2, ChipsChange::Sub(10000))]),
+        player_results: vec![
+            PlayerResult::new(
+                2,
+                0,
+                Some(ChipsChange::Sub(10000)),
+                PlayerResultStatus::Eliminated,
+            ),
+            PlayerResult::new(
+                1,
+                20000,
+                Some(ChipsChange::Add(10000)),
+                PlayerResultStatus::Normal,
+            ),
+        ],
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
@@ -193,7 +262,15 @@ fn test_game_result_given_2_tables_do_close_table() {
     assert_eq!(mtt.get_rank(1).unwrap().chips, 20000);
     assert_eq!(
         effect.list_bridge_events().unwrap(),
-        vec![(1, HoldemBridgeEvent::CloseTable),]
+        vec![
+            (1, HoldemBridgeEvent::CloseTable),
+            (
+                2,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new(1, 20000),]
+                }
+            )
+        ]
     );
 }
 
@@ -206,7 +283,7 @@ fn test_game_result_given_2_tables_move_one_player() {
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 1,
-        chips_change: BTreeMap::default(),
+        player_results: vec![],
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
@@ -229,19 +306,28 @@ fn test_game_result_given_2_tables_move_one_player() {
 
     assert_eq!(
         effect.list_bridge_events().unwrap(),
-        vec![(
-            1,
-            HoldemBridgeEvent::StartGame {
-                sitout_players: vec![1],
-                sb: DEFAULT_SB,
-                bb: DEFAULT_BB,
-            }
-        ),]
+        vec![
+            (
+                1,
+                HoldemBridgeEvent::StartGame {
+                    sitout_players: vec![1],
+                    sb: DEFAULT_SB,
+                    bb: DEFAULT_BB,
+                }
+            ),
+            (
+                2,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new(1, 10000)]
+                }
+            )
+        ]
     );
-    assert_eq!(mtt.table_assigns.get(&1), Some(&1));
+    assert_eq!(mtt.table_assigns.get(&1), None);
+    assert_eq!(mtt.table_assigns_pending.get(&1), Some(&2));
     assert_eq!(mtt.table_assigns.get(&2), Some(&1));
     assert_eq!(mtt.table_assigns.get(&3), Some(&1));
     assert_eq!(mtt.table_assigns.get(&4), Some(&2));
-    assert_eq!(mtt.tables.get(&1).map(|t| t.players.len()), Some(3));
+    assert_eq!(mtt.tables.get(&1).map(|t| t.players.len()), Some(2));
     assert_eq!(mtt.tables.get(&2).map(|t| t.players.len()), Some(1));
 }

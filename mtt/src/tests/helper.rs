@@ -8,6 +8,7 @@ pub const DEFAULT_BB: u64 = 100;
 pub fn create_mtt_with_players(player_nums_per_table: &[usize], table_size: u8) -> Mtt {
     let start_chips = 10000;
     let mut mtt = Mtt {
+        stage: MttStage::Playing,
         table_size,
         start_chips,
         ..Default::default()

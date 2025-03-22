@@ -565,7 +565,7 @@ impl Mtt {
         let mut table_with_most_players = default;
 
         for (id, table) in self.tables.iter() {
-            let count = table.players.len();
+            let count = self.count_table_players(*id);
             if count < table_with_least_players.2 {
                 table_with_least_players = (id, table, count);
             } else if count > table_with_most_players.2 {
@@ -582,8 +582,19 @@ impl Mtt {
         effect: &mut Effect,
         close_table_id: GameId,
     ) -> HandleResult<()> {
+        let Some(table) = self.tables.get(&close_table_id) else {
+            return Err(errors::error_table_not_fonud());
+        };
+        // Remove all table_assigns
+        effect.info(format!("Close table {}", close_table_id));
+        let player_ids: Vec<u64> = table.players.iter().map(|p| p.id).collect();
+        for pid in player_ids.iter() {
+            self.table_assigns.remove(pid);
+        }
         effect.bridge_event(close_table_id as _, HoldemBridgeEvent::CloseTable)?;
-
+        self.tables.remove(&close_table_id);
+        effect.info(format!("Move these player {:?} to other tables", player_ids));
+        self.sit_players(effect, player_ids)?;
         Ok(())
     }
 
@@ -591,20 +602,23 @@ impl Mtt {
         &mut self,
         effect: &mut Effect,
         from_table_id: GameId,
-        _to_table_id: GameId,
+        to_table_id: GameId,
         num_to_move: usize,
     ) -> HandleResult<()> {
-        let sitout_players: Vec<u64> = self
+        let players_to_move: Vec<MttTablePlayer> = self
             .tables
             .get_mut(&from_table_id)
             .ok_or(errors::error_invalid_index_usage())?
             .players
-            .iter()
-            .take(num_to_move)
-            .map(|p| p.id)
-            .collect();
+            .drain(0..num_to_move).collect();
 
         let (sb, bb) = self.calc_blinds()?;
+        let sitout_players: Vec<u64> = players_to_move.iter().map(|p| p.id).collect();
+        sitout_players.iter().for_each(|pid| {
+            self.table_assigns.remove(&pid);
+            self.table_assigns_pending.insert(*pid, to_table_id);
+        });
+
         effect.bridge_event(
             from_table_id as _,
             HoldemBridgeEvent::StartGame {
@@ -612,6 +626,13 @@ impl Mtt {
                 bb,
                 sitout_players,
             },
+        )?;
+
+        effect.bridge_event(
+            to_table_id as _,
+            HoldemBridgeEvent::SitinPlayers {
+                sitins: players_to_move.iter().map(|p| MttTableSitin::new(p.id, p.chips)).collect(),
+            }
         )?;
 
         Ok(())
@@ -740,52 +761,57 @@ impl Mtt {
         self.stage = MttStage::Completed;
     }
 
+    fn count_table_players(&self, table_id: GameId) -> usize {
+        self.tables.get(&table_id).map(|t| t.players.len()).unwrap_or(0)
+            + self.table_assigns_pending.values().filter(|tid| **tid == table_id).count()
+    }
+
+    fn find_sparse_non_empty_table(&self) -> Option<GameId> {
+        let mut table_id_with_least_players = None;
+        let mut least_player_num: usize = self.table_size as _;
+
+
+        for table_id in self.tables.keys() {
+            // The table with least player but not empty
+            let count = self.count_table_players(*table_id);
+            if count < least_player_num && count > 0 {
+                table_id_with_least_players = Some(*table_id);
+                least_player_num = count;
+            }
+        }
+        table_id_with_least_players
+    }
+
     /// Add a new player to the game.
     ///
     /// NB: The game will launch tables when receiving GameStart
     /// event, so this function is No-op in Init stage.
     fn sit_players(&mut self, effect: &mut Effect, player_ids: Vec<u64>) -> HandleResult<()> {
         if self.stage == MttStage::Init {
+            effect.info("Skip sitting player, because the tourney is not started yet.");
             return Ok(());
         }
 
-        let mut table_sitin_pending_count = BTreeMap::<usize, usize>::new();
-        self.table_assigns_pending.values().for_each(|tid| {
-            table_sitin_pending_count
-                .entry(*tid)
-                .and_modify(|c| *c += 1)
-                .or_insert(1);
-        });
         let mut table_id_to_sitins = BTreeMap::<usize, Vec<MttTableSitin>>::new();
         let mut tables_to_launch = Vec::<MttTableState>::new();
 
         let (sb, bb) = self.calc_blinds()?;
 
         for player_id in player_ids {
+
+            let last_table_to_launch = tables_to_launch.last_mut();
+
+            let table_to_sit = self.find_sparse_non_empty_table();
+
             let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) else {
                 return Err(errors::error_player_id_not_found())?;
             };
 
-            let mut table_id_with_least_players = None;
-            let mut least_player_num: usize = self.table_size as _;
-
-            let last_table_to_launch = tables_to_launch.last_mut();
-
-            for (table_id, table) in self.tables.iter() {
-                // The table with least player but not empty
-                let count: usize =
-                    table.players.len() + table_sitin_pending_count.get(&table_id).unwrap_or(&0);
-                if count < least_player_num && count > 0 {
-                    table_id_with_least_players = Some(table_id);
-                    least_player_num = count;
-                }
-            }
-
-            if let Some(table_id) = table_id_with_least_players {
+            if let Some(table_id) = table_to_sit {
                 // Find a table to sit
                 effect.info(format!("Sit player {} to {}", rank.id, table_id));
                 let sitin = MttTableSitin::new(rank.id, rank.chips);
-                match table_id_to_sitins.entry(*table_id) {
+                match table_id_to_sitins.entry(table_id) {
                     Entry::Vacant(vacant_entry) => {
                         vacant_entry.insert(vec![sitin]);
                     }
@@ -793,11 +819,7 @@ impl Mtt {
                         occupied_entry.get_mut().push(sitin);
                     }
                 };
-                self.table_assigns_pending.insert(rank.id, *table_id);
-                table_sitin_pending_count
-                    .entry(*table_id)
-                    .and_modify(|c| *c += 1)
-                    .or_insert(1);
+                self.table_assigns_pending.insert(rank.id, table_id);
             } else if last_table_to_launch.as_ref().is_some_and(|t| t.players.len() < self.table_size as _) {
                 let Some(table) = last_table_to_launch else {
                     return Err(errors::error_table_not_fonud())?;
