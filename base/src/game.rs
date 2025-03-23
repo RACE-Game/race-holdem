@@ -1122,13 +1122,13 @@ impl Holdem {
             | HoldemStage::Settle
             | HoldemStage::Runner
             | HoldemStage::Showdown => {
-                let removed = self.player_map.remove_entry(&player_id);
-                if let Some((id, p)) = removed {
-                    effect.withdraw(id, p.chips + p.deposit);
-                    effect.eject(id);
+                if let Some(player) = self.player_map.get(&player_id) {
+                    effect.withdraw(player_id, player.chips + player.deposit);
+                    effect.eject(player_id);
                     effect.checkpoint();
                     self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                     self.signal_game_end(effect)?;
+                    self.cash_table_kick_players(effect);
                 } else {
                     return Err(HandleError::InvalidPlayer)?;
                 }
