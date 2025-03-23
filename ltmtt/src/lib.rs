@@ -312,7 +312,7 @@ impl GameHandler for LtMtt {
                 match event {
                     // player first join to play
                     ClientEvent::SitIn => {
-                        effect.info("Client event sitin received.");
+                        effect.info(format!("Player[{}] sitin custom event.", sender));
                         let player = self.find_player_by_id(sender);
                         // Sit into lowest sb/bb table directly.
                         // Move player to higher sb/bb table if satisfy condition when `game_result`.
@@ -329,6 +329,7 @@ impl GameHandler for LtMtt {
                                 sitins: vec![sitin],
                             },
                         )?;
+                        self.table_assigns_pending.insert(player.player_id, table_id);
                     }
 
                     _ => (),
@@ -616,22 +617,18 @@ impl LtMtt {
 
                 let max_chips = level_up_players.iter().max_by_key(|p| p.chips).unwrap();
                 let to_table_id = self.find_table_to_sit(level_up_player_num, max_chips.chips);
+
                 let mut sitins = vec![];
                 for player in level_up_players.iter() {
-                    self.table_assigns_pending.insert(player.player_id, to_table_id);
                     for ranking in self.rankings.iter_mut() {
                         if ranking.player_id == player.player_id {
                             ranking.status = LtMttPlayerStatus::Pending;
                         }
                     }
                     sitins.push(MttTableSitin::new(player.player_id, player.chips));
+                    self.table_assigns_pending.insert(player.player_id, to_table_id);
                 }
                 effect.bridge_event(to_table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
-
-                let origin_table = self.tables.get_mut(&table_id).unwrap();
-                for player in level_up_players {
-                    origin_table.remove_player(player.player_id);
-                }
 
                 return Ok(());
             }
@@ -683,10 +680,16 @@ impl LtMtt {
         player_id: u64,
         table_id: Option<usize>,
     ) -> HandleResult<()> {
-        let player = self.find_player_by_id(player_id);
-
         match table_id {
             Some(table_id) => {
+                let player = self.find_player_by_id(player_id);
+                // remove from origin table if exists
+                if let Some(origin_table_id) = self.table_assigns.get(&player_id) {
+                    let table = self.tables.get_mut(origin_table_id).unwrap();
+                    table.remove_player(player_id);
+                    self.table_assigns.remove(&player_id);
+                }
+                // add into current table
                 if let Some(table) = self.tables.get_mut(&table_id) {
                     let mut table_player = MttTablePlayer::new(player_id, player.chips, 0);
                     table.add_player(&mut table_player);
@@ -696,7 +699,6 @@ impl LtMtt {
                     return Err(errors::error_table_not_found());
                 }
 
-                self.table_assigns_pending.remove(&player_id);
                 for ranking in self.rankings.iter_mut() {
                     if ranking.player_id == player_id {
                         ranking.status = LtMttPlayerStatus::Playing;
@@ -712,7 +714,6 @@ impl LtMtt {
                     }
                 }
 
-                self.table_assigns_pending.remove(&player_id);
                 for ranking in self.rankings.iter_mut() {
                     if ranking.player_id == player_id {
                         ranking.status = LtMttPlayerStatus::Out;
@@ -721,6 +722,7 @@ impl LtMtt {
             }
         }
 
+        self.table_assigns_pending.remove(&player_id);
         Ok(())
     }
 
