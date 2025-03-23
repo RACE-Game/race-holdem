@@ -584,8 +584,8 @@ impl LtMtt {
             .unwrap();
 
         if let Some(max_chips) = cur_blind_rule.max_chips {
-            let mut level_up_players: Vec<LtMttPlayer> = vec![];
-            for player in self.rankings.iter() {
+            let mut level_up_players: Vec<MttTablePlayer> = vec![];
+            for player in origin_table.players.iter() {
                 if player.chips > max_chips {
                     level_up_players.push(player.clone());
                 }
@@ -605,7 +605,7 @@ impl LtMtt {
                 && (origin_player_num == level_up_player_num
                     || (origin_player_num - level_up_player_num) >= 2)
             {
-                let up_ids = level_up_players.iter().map(|p| p.player_id).collect();
+                let up_ids = level_up_players.iter().map(|p| p.id).collect();
                 effect.bridge_event(
                     table_id,
                     HoldemBridgeEvent::StartGame {
@@ -621,12 +621,12 @@ impl LtMtt {
                 let mut sitins = vec![];
                 for player in level_up_players.iter() {
                     for ranking in self.rankings.iter_mut() {
-                        if ranking.player_id == player.player_id {
+                        if ranking.player_id == player.id {
                             ranking.status = LtMttPlayerStatus::Pending;
                         }
                     }
-                    sitins.push(MttTableSitin::new(player.player_id, player.chips));
-                    self.table_assigns_pending.insert(player.player_id, to_table_id);
+                    sitins.push(MttTableSitin::new(player.id, player.chips));
+                    self.table_assigns_pending.insert(player.id, to_table_id);
                 }
                 effect.bridge_event(to_table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
 
