@@ -82,7 +82,7 @@ impl GameHandler for MttTable {
 
                     for p in self.holdem.player_map.values() {
                         let status = match p.status {
-                            PlayerStatus::Out => PlayerResultStatus::Sitout,
+                            PlayerStatus::Leave => PlayerResultStatus::Sitout,
                             PlayerStatus::Eliminated => PlayerResultStatus::Eliminated,
                             _ => PlayerResultStatus::Normal,
                         };

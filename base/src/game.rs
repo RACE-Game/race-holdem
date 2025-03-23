@@ -1375,7 +1375,7 @@ impl GameHandler for Holdem {
 
                 match event {
                     GameEvent::SitOut => {
-                        self.set_player_status(sender, PlayerStatus::Out)?;
+                        self.set_player_status(sender, PlayerStatus::Leave)?;
                         let _ = self.handle_player_leave(effect, sender);
                     }
 
