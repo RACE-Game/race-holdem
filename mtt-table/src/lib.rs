@@ -76,6 +76,7 @@ impl GameHandler for MttTable {
                 self.holdem.handle_event(effect, event)?;
                 // Check if there's a checkpoint
                 if effect.is_checkpoint() {
+                    effect.info(format!("Send game result"));
 
                     let mut player_results = Vec::new();
 
@@ -189,7 +190,8 @@ impl MttTable {
                 }
 
                 if origin_num_of_players < 2 {
-                    // The game is supposed to be halted. We should add the new player then start the game.
+                    // The game is supposed to be halted.
+                    // We send a GameResult to trigger the StartGame instead of start directly here.
                     effect.checkpoint();
                     effect.bridge_event(0, HoldemBridgeEvent::GameResult {
                         hand_id: self.holdem.hand_id,
@@ -197,16 +199,6 @@ impl MttTable {
                         player_results: vec![],
                         table: self.make_mtt_table_state(),
                     })?;
-
-                    if self.holdem.player_map.len() >= 2 {
-                    let timeout = self
-                        .holdem
-                        .next_game_start
-                        .saturating_sub(effect.timestamp());
-                    effect.wait_timeout(timeout);
-                    }
-                } else {
-                    // The game will receive a StartGame anyway. The only thing we do is to add the new players.
                 }
             }
             HoldemBridgeEvent::CloseTable => {

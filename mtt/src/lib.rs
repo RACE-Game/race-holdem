@@ -662,6 +662,7 @@ impl Mtt {
                 return Err(errors::error_table_not_fonud());
             };
             if final_table.players.len() > 1 {
+                effect.info(format!("Send start game to final table {}", table_id));
                 let (sb, bb) = self.calc_blinds()?;
                 effect.bridge_event(
                     table_id as _,
@@ -784,7 +785,7 @@ impl Mtt {
 
     /// Add a new player to the game.
     ///
-    /// NB: The game will launch tables when receiving GameStart
+    /// NB: The game will launch tables when receiving StartGame
     /// event, so this function is No-op in Init stage.
     fn sit_players(&mut self, effect: &mut Effect, player_ids: Vec<u64>) -> HandleResult<()> {
         if self.stage == MttStage::Init {
