@@ -338,6 +338,7 @@ impl GameHandler for Mtt {
                         }
                     }
                     self.sit_players(effect, pids_to_sit)?;
+                    self.sort_ranks();
                     self.update_alives();
                 }
             }
