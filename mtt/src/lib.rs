@@ -37,7 +37,8 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult, PlayerResultStatus,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
+    PlayerResultStatus,
 };
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -69,10 +70,17 @@ pub struct PlayerRank {
     position: u16,
     bounty_reward: u64,
     bounty_transfer: u64,
+    deposit_history: Vec<u64>,
 }
 
 impl PlayerRank {
-    pub fn new(id: u64, chips: u64, status: PlayerRankStatus, position: u16) -> Self {
+    pub fn new(
+        id: u64,
+        chips: u64,
+        status: PlayerRankStatus,
+        position: u16,
+        deposit_history: Vec<u64>,
+    ) -> Self {
         Self {
             id,
             chips,
@@ -80,6 +88,7 @@ impl PlayerRank {
             position,
             bounty_reward: 0,
             bounty_transfer: 0,
+            deposit_history,
         }
     }
 }
@@ -108,11 +117,9 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
     .collect()
 }
 
-
 fn take_amount_by_portion(amount: u64, portion: u16) -> u64 {
     amount * portion as u64 / 1000
 }
-
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindInfo {
@@ -285,9 +292,13 @@ impl GameHandler for Mtt {
             Event::Join { players } => match self.stage {
                 MttStage::Init => {
                     for p in players {
-                        self.ranks.push(
-                            PlayerRank::new(p.id(), 0, PlayerRankStatus::Pending, p.position())
-                        );
+                        self.ranks.push(PlayerRank::new(
+                            p.id(),
+                            0,
+                            PlayerRankStatus::Pending,
+                            p.position(),
+                            vec![],
+                        ));
                     }
                 }
                 MttStage::Playing => {
@@ -338,6 +349,8 @@ impl GameHandler for Mtt {
                                 let amount_to_prize = amount - amount_to_rake - amount_to_bounty;
                                 let bounty_reward = take_amount_by_portion(amount_to_bounty, 500);
                                 let bounty_tranfer = amount_to_bounty - bounty_reward;
+
+                                rank.deposit_history.push(d.balance());
                                 rank.chips = self.start_chips;
                                 rank.status = PlayerRankStatus::Pending;
                                 rank.bounty_reward += bounty_reward;
@@ -471,7 +484,13 @@ impl Mtt {
     }
 
     fn add_player_rank(&mut self, p: GamePlayer) {
-        self.ranks.push(PlayerRank::new(p.id(), 0, PlayerRankStatus::Pending, p.position()));
+        self.ranks.push(PlayerRank::new(
+            p.id(),
+            0,
+            PlayerRankStatus::Pending,
+            p.position(),
+            vec![],
+        ));
     }
 
     fn launch_table(
@@ -519,21 +538,35 @@ impl Mtt {
         Ok(())
     }
 
-    fn handle_bounty(&mut self, player_results: &[PlayerResult], effect: &mut Effect) -> Result<(), HandleError> {
-        let eliminated_pids: Vec<u64> = player_results.iter().filter(|r| r.status == PlayerResultStatus::Eliminated).map(|r| r.player_id).collect();
+    fn handle_bounty(
+        &mut self,
+        player_results: &[PlayerResult],
+        effect: &mut Effect,
+    ) -> Result<(), HandleError> {
+        let eliminated_pids: Vec<u64> = player_results
+            .iter()
+            .filter(|r| r.status == PlayerResultStatus::Eliminated)
+            .map(|r| r.player_id)
+            .collect();
 
         if eliminated_pids.is_empty() {
             // No player is eliminated
-            return Ok(())
+            return Ok(());
         }
 
-        let winner_pids: Vec<u64> = player_results.iter().filter(|r| matches!(r.chips_change, Some(ChipsChange::Add(_)))).map(|r| r.player_id).collect();
+        let winner_pids: Vec<u64> = player_results
+            .iter()
+            .filter(|r| matches!(r.chips_change, Some(ChipsChange::Add(_))))
+            .map(|r| r.player_id)
+            .collect();
         let winners_count: u64 = winner_pids.len() as u64;
         let mut total_bounty_reward = 0;
         let mut total_bounty_transfer = 0;
 
         for pid in eliminated_pids {
-            let rank = self.get_rank_mut(pid).ok_or(errors::error_player_not_found())?;
+            let rank = self
+                .get_rank_mut(pid)
+                .ok_or(errors::error_player_not_found())?;
             total_bounty_reward += rank.bounty_reward;
             total_bounty_transfer += rank.bounty_transfer;
             rank.bounty_reward = 0;
@@ -544,31 +577,41 @@ impl Mtt {
         let bounty_transfer = total_bounty_transfer / winners_count as u64;
 
         for pid in winner_pids {
-            let rank = self.get_rank_mut(pid).ok_or(errors::error_player_not_found())?;
+            let rank = self
+                .get_rank_mut(pid)
+                .ok_or(errors::error_player_not_found())?;
             rank.bounty_reward += bounty_transfer;
-            effect.info(format!("Increase bounty of player {} to {}", rank.id, rank.bounty_reward));
-            effect.info(format!("Send bounty {} to player {}", bounty_reward, rank.id));
+            effect.info(format!(
+                "Increase bounty of player {} to {}",
+                rank.id, rank.bounty_reward
+            ));
+            effect.info(format!(
+                "Send bounty {} to player {}",
+                bounty_reward, rank.id
+            ));
             effect.withdraw(rank.id, bounty_reward);
         }
 
         // put the rest money into the prize pool
-        let remain = total_bounty_reward - (winners_count * bounty_reward) + total_bounty_transfer - (winners_count * bounty_transfer);
+        let remain = total_bounty_reward - (winners_count * bounty_reward) + total_bounty_transfer
+            - (winners_count * bounty_transfer);
         if remain > 0 {
             self.total_prize += remain;
             effect.info(format!("Increase prize to {}", self.total_prize));
         }
 
-        self.total_bounty = self.ranks.iter().map(|r| r.bounty_reward + r.bounty_transfer).sum();
+        self.total_bounty = self
+            .ranks
+            .iter()
+            .map(|r| r.bounty_reward + r.bounty_transfer)
+            .sum();
 
         self.update_player_balances();
 
         Ok(())
     }
 
-    fn apply_chips_change(
-        &mut self,
-        player_results: &[PlayerResult],
-    ) -> Result<(), HandleError> {
+    fn apply_chips_change(&mut self, player_results: &[PlayerResult]) -> Result<(), HandleError> {
         for rst in player_results {
             let rank = self
                 .ranks
@@ -664,7 +707,10 @@ impl Mtt {
         }
         effect.bridge_event(close_table_id as _, HoldemBridgeEvent::CloseTable)?;
         self.tables.remove(&close_table_id);
-        effect.info(format!("Move these player {:?} to other tables", player_ids));
+        effect.info(format!(
+            "Move these player {:?} to other tables",
+            player_ids
+        ));
         self.sit_players(effect, player_ids)?;
         Ok(())
     }
@@ -681,7 +727,8 @@ impl Mtt {
             .get_mut(&from_table_id)
             .ok_or(errors::error_invalid_index_usage())?
             .players
-            .drain(0..num_to_move).collect();
+            .drain(0..num_to_move)
+            .collect();
 
         let (sb, bb) = self.calc_blinds()?;
         let sitout_players: Vec<u64> = players_to_move.iter().map(|p| p.id).collect();
@@ -702,8 +749,11 @@ impl Mtt {
         effect.bridge_event(
             to_table_id as _,
             HoldemBridgeEvent::SitinPlayers {
-                sitins: players_to_move.iter().map(|p| MttTableSitin::new(p.id, p.chips)).collect(),
-            }
+                sitins: players_to_move
+                    .iter()
+                    .map(|p| MttTableSitin::new(p.id, p.chips))
+                    .collect(),
+            },
         )?;
 
         Ok(())
@@ -836,14 +886,20 @@ impl Mtt {
     }
 
     fn count_table_players(&self, table_id: GameId) -> usize {
-        self.tables.get(&table_id).map(|t| t.players.len()).unwrap_or(0)
-            + self.table_assigns_pending.values().filter(|tid| **tid == table_id).count()
+        self.tables
+            .get(&table_id)
+            .map(|t| t.players.len())
+            .unwrap_or(0)
+            + self
+                .table_assigns_pending
+                .values()
+                .filter(|tid| **tid == table_id)
+                .count()
     }
 
     fn find_sparse_non_empty_table(&self) -> Option<GameId> {
         let mut table_id_with_least_players = None;
         let mut least_player_num: usize = self.table_size as _;
-
 
         for table_id in self.tables.keys() {
             // The table with least player but not empty
@@ -872,7 +928,6 @@ impl Mtt {
         let (sb, bb) = self.calc_blinds()?;
 
         for player_id in player_ids {
-
             let last_table_to_launch = tables_to_launch.last_mut();
 
             let table_to_sit = self.find_sparse_non_empty_table();
@@ -894,11 +949,17 @@ impl Mtt {
                     }
                 };
                 self.table_assigns_pending.insert(rank.id, table_id);
-            } else if last_table_to_launch.as_ref().is_some_and(|t| t.players.len() < self.table_size as _) {
+            } else if last_table_to_launch
+                .as_ref()
+                .is_some_and(|t| t.players.len() < self.table_size as _)
+            {
                 let Some(table) = last_table_to_launch else {
                     return Err(errors::error_table_not_fonud())?;
                 };
-                effect.info(format!("Sit player {} to the table just created {}", rank.id, table.table_id));
+                effect.info(format!(
+                    "Sit player {} to the table just created {}",
+                    rank.id, table.table_id
+                ));
                 let position = table.players.len();
                 let player = MttTablePlayer::new(rank.id, rank.chips, position);
                 table.players.push(player);

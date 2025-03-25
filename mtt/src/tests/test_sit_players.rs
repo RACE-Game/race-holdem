@@ -8,6 +8,7 @@ fn add_player_to_mtt(mtt: &mut Mtt) -> u64 {
         1000,
         PlayerRankStatus::Pending,
         l as u16,
+        vec![1000],
     ));
     return player_id;
 }
