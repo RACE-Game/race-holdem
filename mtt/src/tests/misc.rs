@@ -1,5 +1,14 @@
 use super::*;
 
+#[test]
+fn test_update_player_balances() {
+    let mut mtt = Mtt::default();
+    mtt.total_prize = 10000;
+    mtt.total_rake = 2000;
+    mtt.update_player_balances();
+    assert_eq!(mtt.player_balances.get(&0), Some(&12000));
+}
+
 // Test sort ranks
 #[test]
 fn test_sort_ranks_ensures_eliminated_players_keep_order() {

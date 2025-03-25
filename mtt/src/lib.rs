@@ -37,7 +37,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult, PlayerResultStatus,
 };
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -67,6 +67,8 @@ pub struct PlayerRank {
     chips: u64,
     status: PlayerRankStatus,
     position: u16,
+    bounty_reward: u64,
+    bounty_transfer: u64,
 }
 
 impl PlayerRank {
@@ -76,6 +78,8 @@ impl PlayerRank {
             chips,
             status,
             position,
+            bounty_reward: 0,
+            bounty_transfer: 0,
         }
     }
 }
@@ -103,6 +107,12 @@ fn default_blind_rules() -> Vec<BlindRuleItem> {
     .map(|sb| BlindRuleItem::new(sb, 2 * sb))
     .collect()
 }
+
+
+fn take_amount_by_portion(amount: u64, portion: u16) -> u64 {
+    amount * portion as u64 / 1000
+}
+
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindInfo {
@@ -139,6 +149,8 @@ pub struct MttAccountData {
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     min_players: u16,
+    rake: u16,             // an integer representing the rake (per thousand)
+    bounty: u16,           // an integer representing the bounty (per thousand)
     theme: Option<String>, // optional NFT theme
     subgame_bundle: String,
 }
@@ -169,6 +181,8 @@ pub struct Mtt {
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     total_prize: u64,
+    total_rake: u64,
+    total_bounty: u64,
     ticket: u64,
     theme: Option<String>,
     subgame_bundle: String,
@@ -184,6 +198,8 @@ pub struct Mtt {
     // The minimal number of player to start this game.
     // When there are fewer players, we cancel the game.
     min_players: u16,
+    rake: u16,
+    bounty: u16,
 }
 
 impl GameHandler for Mtt {
@@ -204,6 +220,8 @@ impl GameHandler for Mtt {
             mut blind_info,
             prize_rules,
             min_players,
+            rake,
+            bounty,
             theme,
             subgame_bundle,
         } = init_account.data()?;
@@ -219,6 +237,8 @@ impl GameHandler for Mtt {
             prize_rules,
             ticket,
             min_players,
+            rake,
+            bounty,
             theme,
             subgame_bundle,
             ..Default::default()
@@ -265,12 +285,9 @@ impl GameHandler for Mtt {
             Event::Join { players } => match self.stage {
                 MttStage::Init => {
                     for p in players {
-                        self.ranks.push(PlayerRank {
-                            id: p.id(),
-                            chips: 0,
-                            status: PlayerRankStatus::Pending, // By default, the player is not sitted
-                            position: p.position(),
-                        });
+                        self.ranks.push(
+                            PlayerRank::new(p.id(), 0, PlayerRankStatus::Pending, p.position())
+                        );
                     }
                 }
                 MttStage::Playing => {
@@ -315,13 +332,24 @@ impl GameHandler for Mtt {
                         let player_id = d.id();
                         if let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) {
                             if rank.chips == 0 {
+                                let amount = d.balance();
+                                let amount_to_rake = take_amount_by_portion(amount, self.rake);
+                                let amount_to_bounty = take_amount_by_portion(amount, self.bounty);
+                                let amount_to_prize = amount - amount_to_rake - amount_to_bounty;
+                                let bounty_reward = take_amount_by_portion(amount_to_bounty, 500);
+                                let bounty_tranfer = amount_to_bounty - bounty_reward;
                                 rank.chips = self.start_chips;
                                 rank.status = PlayerRankStatus::Pending;
+                                rank.bounty_reward += bounty_reward;
+                                rank.bounty_transfer += bounty_tranfer;
                                 effect.info(format!("Accept player deposit: {}", d.id()));
                                 effect.accept_deposit(&d)?;
-                                self.total_prize += d.balance();
+                                self.total_prize += amount_to_prize;
+                                self.total_rake += amount_to_rake;
+                                self.total_bounty += amount_to_bounty;
                                 pids_to_sit.push(player_id);
-                                self.deposit_balance(d.balance());
+
+                                self.update_player_balances();
                             } else {
                                 effect.warn(format!(
                                     "Reject player deposit: {} (Player Has Chips)",
@@ -381,6 +409,7 @@ impl GameHandler for Mtt {
                             self.table_assigns_pending.remove(&p.id);
                             self.table_assigns.insert(p.id, table.table_id);
                         }
+                        self.handle_bounty(&player_results, effect)?;
                         self.tables.insert(table_id, table);
                         self.apply_chips_change(&player_results)?;
                         self.update_tables(effect, table_id)?;
@@ -442,12 +471,7 @@ impl Mtt {
     }
 
     fn add_player_rank(&mut self, p: GamePlayer) {
-        self.ranks.push(PlayerRank {
-            id: p.id(),
-            chips: 0,
-            status: PlayerRankStatus::Pending, // By default, the player is not sitted
-            position: p.position(),
-        });
+        self.ranks.push(PlayerRank::new(p.id(), 0, PlayerRankStatus::Pending, p.position()));
     }
 
     fn launch_table(
@@ -491,6 +515,52 @@ impl Mtt {
         }
 
         self.maybe_set_in_the_money();
+
+        Ok(())
+    }
+
+    fn handle_bounty(&mut self, player_results: &[PlayerResult], effect: &mut Effect) -> Result<(), HandleError> {
+        let eliminated_pids: Vec<u64> = player_results.iter().filter(|r| r.status == PlayerResultStatus::Eliminated).map(|r| r.player_id).collect();
+
+        if eliminated_pids.is_empty() {
+            // No player is eliminated
+            return Ok(())
+        }
+
+        let winner_pids: Vec<u64> = player_results.iter().filter(|r| matches!(r.chips_change, Some(ChipsChange::Add(_)))).map(|r| r.player_id).collect();
+        let winners_count: u64 = winner_pids.len() as u64;
+        let mut total_bounty_reward = 0;
+        let mut total_bounty_transfer = 0;
+
+        for pid in eliminated_pids {
+            let rank = self.get_rank_mut(pid).ok_or(errors::error_player_not_found())?;
+            total_bounty_reward += rank.bounty_reward;
+            total_bounty_transfer += rank.bounty_transfer;
+            rank.bounty_reward = 0;
+            rank.bounty_transfer = 0;
+        }
+
+        let bounty_reward = total_bounty_reward / winners_count;
+        let bounty_transfer = total_bounty_transfer / winners_count as u64;
+
+        for pid in winner_pids {
+            let rank = self.get_rank_mut(pid).ok_or(errors::error_player_not_found())?;
+            rank.bounty_reward += bounty_transfer;
+            effect.info(format!("Increase bounty of player {} to {}", rank.id, rank.bounty_reward));
+            effect.info(format!("Send bounty {} to player {}", bounty_reward, rank.id));
+            effect.withdraw(rank.id, bounty_reward);
+        }
+
+        // put the rest money into the prize pool
+        let remain = total_bounty_reward - (winners_count * bounty_reward) + total_bounty_transfer - (winners_count * bounty_transfer);
+        if remain > 0 {
+            self.total_prize += remain;
+            effect.info(format!("Increase prize to {}", self.total_prize));
+        }
+
+        self.total_bounty = self.ranks.iter().map(|r| r.bounty_reward + r.bounty_transfer).sum();
+
+        self.update_player_balances();
 
         Ok(())
     }
@@ -741,7 +811,9 @@ impl Mtt {
     }
 
     fn maybe_set_entry_close(&self, effect: &mut Effect) {
-        effect.set_entry_lock(EntryLock::Closed);
+        if effect.timestamp() > self.entry_close_time {
+            effect.set_entry_lock(EntryLock::Closed);
+        }
     }
 
     fn maybe_set_in_the_money(&mut self) {
@@ -846,7 +918,6 @@ impl Mtt {
         }
 
         for table in tables_to_launch {
-            println!("Table: {:?}", table);
             self.launch_table(effect, table)?;
         }
 
@@ -874,13 +945,16 @@ impl Mtt {
                     player_id: id,
                     prize,
                 });
-                effect.withdraw(id, prize);
+                effect.withdraw(id, prize + rank.bounty_reward + rank.bounty_transfer);
             }
         }
 
         self.stage = MttStage::DistributingPrize;
         effect.info("Schedule bonus distribution");
         effect.wait_timeout(BONUS_DISTRIBUTION_DELAY);
+
+        // We also collect the rake when distributing prizes
+        effect.transfer(self.total_rake);
 
         Ok(())
     }
@@ -889,15 +963,13 @@ impl Mtt {
         self.ranks.iter().find(|r| r.id == id)
     }
 
-    pub fn deposit_balance(&mut self, amount: u64) {
-        match self.player_balances.entry(0) {
-            Entry::Occupied(mut e) => {
-                e.insert(e.get() + amount);
-            }
-            Entry::Vacant(e) => {
-                e.insert(amount);
-            }
-        }
+    pub fn get_rank_mut(&mut self, id: u64) -> Option<&mut PlayerRank> {
+        self.ranks.iter_mut().find(|r| r.id == id)
+    }
+
+    pub fn update_player_balances(&mut self) {
+        let amount = self.total_prize + self.total_rake + self.total_bounty;
+        self.player_balances.insert(0, amount);
     }
 }
 
@@ -909,6 +981,7 @@ mod tests {
     mod misc;
     use helper::*;
 
+    mod test_handle_bounty;
     mod test_handle_game_result;
     mod test_sit_players;
     mod test_start_game;
