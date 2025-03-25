@@ -7,17 +7,17 @@ fn test_sort_ranks_ensures_eliminated_players_keep_order() {
 
     // Active players
     mtt.ranks
-        .push(PlayerRank::new(1, 5000, PlayerRankStatus::Play, 0));
+        .push(PlayerRank::new(1, 5000, PlayerRankStatus::Play, 0, vec![5000]));
     mtt.ranks
-        .push(PlayerRank::new(2, 10000, PlayerRankStatus::Play, 1));
+        .push(PlayerRank::new(2, 10000, PlayerRankStatus::Play, 1, vec![10000]));
     mtt.ranks
-        .push(PlayerRank::new(3, 7000, PlayerRankStatus::Play, 2));
+        .push(PlayerRank::new(3, 7000, PlayerRankStatus::Play, 2, vec![7000]));
 
     // Eliminated players
     mtt.ranks
-        .push(PlayerRank::new(4, 0, PlayerRankStatus::Out, 3));
+        .push(PlayerRank::new(4, 0, PlayerRankStatus::Out, 3, vec![5000]));
     mtt.ranks
-        .push(PlayerRank::new(5, 0, PlayerRankStatus::Out, 4));
+        .push(PlayerRank::new(5, 0, PlayerRankStatus::Out, 4, vec![5000]));
 
     mtt.sort_ranks();
 

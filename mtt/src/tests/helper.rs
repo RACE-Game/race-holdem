@@ -37,6 +37,7 @@ pub fn create_mtt_with_players(player_nums_per_table: &[usize], table_size: u8) 
                 chips: start_chips,
                 status: PlayerRankStatus::Play,
                 position: rank_id as u16 % table_size as u16,
+                deposit_history: vec![start_chips],
             });
 
             let player = MttTablePlayer::new(rank_id, start_chips, i);

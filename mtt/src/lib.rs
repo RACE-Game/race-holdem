@@ -67,15 +67,23 @@ pub struct PlayerRank {
     chips: u64,
     status: PlayerRankStatus,
     position: u16,
+    deposit_history: Vec<u64>,
 }
 
 impl PlayerRank {
-    pub fn new(id: u64, chips: u64, status: PlayerRankStatus, position: u16) -> Self {
+    pub fn new(
+        id: u64,
+        chips: u64,
+        status: PlayerRankStatus,
+        position: u16,
+        deposit_history: Vec<u64>,
+    ) -> Self {
         Self {
             id,
             chips,
             status,
             position,
+            deposit_history,
         }
     }
 }
@@ -270,6 +278,7 @@ impl GameHandler for Mtt {
                             chips: 0,
                             status: PlayerRankStatus::Pending, // By default, the player is not sitted
                             position: p.position(),
+                            deposit_history: vec![], // history will be handled in `Event::Deposit`
                         });
                     }
                 }
@@ -315,6 +324,7 @@ impl GameHandler for Mtt {
                         let player_id = d.id();
                         if let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) {
                             if rank.chips == 0 {
+                                rank.deposit_history.push(d.balance());
                                 rank.chips = self.start_chips;
                                 rank.status = PlayerRankStatus::Pending;
                                 effect.info(format!("Accept player deposit: {}", d.id()));
@@ -447,6 +457,7 @@ impl Mtt {
             chips: 0,
             status: PlayerRankStatus::Pending, // By default, the player is not sitted
             position: p.position(),
+            deposit_history: vec![],
         });
     }
 
@@ -495,10 +506,7 @@ impl Mtt {
         Ok(())
     }
 
-    fn apply_chips_change(
-        &mut self,
-        player_results: &[PlayerResult],
-    ) -> Result<(), HandleError> {
+    fn apply_chips_change(&mut self, player_results: &[PlayerResult]) -> Result<(), HandleError> {
         for rst in player_results {
             let rank = self
                 .ranks
@@ -594,7 +602,10 @@ impl Mtt {
         }
         effect.bridge_event(close_table_id as _, HoldemBridgeEvent::CloseTable)?;
         self.tables.remove(&close_table_id);
-        effect.info(format!("Move these player {:?} to other tables", player_ids));
+        effect.info(format!(
+            "Move these player {:?} to other tables",
+            player_ids
+        ));
         self.sit_players(effect, player_ids)?;
         Ok(())
     }
@@ -611,7 +622,8 @@ impl Mtt {
             .get_mut(&from_table_id)
             .ok_or(errors::error_invalid_index_usage())?
             .players
-            .drain(0..num_to_move).collect();
+            .drain(0..num_to_move)
+            .collect();
 
         let (sb, bb) = self.calc_blinds()?;
         let sitout_players: Vec<u64> = players_to_move.iter().map(|p| p.id).collect();
@@ -632,8 +644,11 @@ impl Mtt {
         effect.bridge_event(
             to_table_id as _,
             HoldemBridgeEvent::SitinPlayers {
-                sitins: players_to_move.iter().map(|p| MttTableSitin::new(p.id, p.chips)).collect(),
-            }
+                sitins: players_to_move
+                    .iter()
+                    .map(|p| MttTableSitin::new(p.id, p.chips))
+                    .collect(),
+            },
         )?;
 
         Ok(())
@@ -764,14 +779,20 @@ impl Mtt {
     }
 
     fn count_table_players(&self, table_id: GameId) -> usize {
-        self.tables.get(&table_id).map(|t| t.players.len()).unwrap_or(0)
-            + self.table_assigns_pending.values().filter(|tid| **tid == table_id).count()
+        self.tables
+            .get(&table_id)
+            .map(|t| t.players.len())
+            .unwrap_or(0)
+            + self
+                .table_assigns_pending
+                .values()
+                .filter(|tid| **tid == table_id)
+                .count()
     }
 
     fn find_sparse_non_empty_table(&self) -> Option<GameId> {
         let mut table_id_with_least_players = None;
         let mut least_player_num: usize = self.table_size as _;
-
 
         for table_id in self.tables.keys() {
             // The table with least player but not empty
@@ -800,7 +821,6 @@ impl Mtt {
         let (sb, bb) = self.calc_blinds()?;
 
         for player_id in player_ids {
-
             let last_table_to_launch = tables_to_launch.last_mut();
 
             let table_to_sit = self.find_sparse_non_empty_table();
@@ -822,11 +842,17 @@ impl Mtt {
                     }
                 };
                 self.table_assigns_pending.insert(rank.id, table_id);
-            } else if last_table_to_launch.as_ref().is_some_and(|t| t.players.len() < self.table_size as _) {
+            } else if last_table_to_launch
+                .as_ref()
+                .is_some_and(|t| t.players.len() < self.table_size as _)
+            {
                 let Some(table) = last_table_to_launch else {
                     return Err(errors::error_table_not_fonud())?;
                 };
-                effect.info(format!("Sit player {} to the table just created {}", rank.id, table.table_id));
+                effect.info(format!(
+                    "Sit player {} to the table just created {}",
+                    rank.id, table.table_id
+                ));
                 let position = table.players.len();
                 let player = MttTablePlayer::new(rank.id, rank.chips, position);
                 table.players.push(player);
