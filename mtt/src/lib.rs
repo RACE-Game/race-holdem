@@ -235,6 +235,25 @@ impl GameHandler for Mtt {
 
         blind_info.with_default_blind_rules();
 
+        if prize_rules.is_empty() || prize_rules.iter().sum::<u8>() != 100 {
+            return Err(errors::error_invalid_prize_rules());
+        }
+
+        if entry_close_time < start_time {
+            return Err(errors::error_invalid_entry_close_time());
+        }
+
+        if rake + bounty > 1000 {
+            return Err(errors::error_invalid_rake_and_bounty());
+        }
+
+        if let Some(first_level) = blind_info.blind_rules.first() {
+            // Start chips is less than 50BBs
+            if start_chips < first_level.bb_x as u64 * 50 * blind_info.blind_base {
+                return Err(errors::error_start_chips_too_low());
+            }
+        }
+
         let state = Self {
             start_time,
             entry_close_time,
@@ -1042,8 +1061,10 @@ mod tests {
     mod misc;
     use helper::*;
 
+    mod test_init_state;
     mod test_handle_bounty;
     mod test_handle_game_result;
     mod test_sit_players;
     mod test_start_game;
+    mod regressions;
 }
