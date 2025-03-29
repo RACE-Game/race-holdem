@@ -90,7 +90,7 @@ impl Holdem {
         }
         // 3. do checkpoint
         effect.checkpoint();
-        self.reset_state()?;
+        self.cash_table_reset_state()?;
 
         Ok(())
     }
@@ -110,6 +110,13 @@ impl Holdem {
             return self.kick_players(effect);
         }
         Vec::default()
+    }
+
+    fn cash_table_reset_state(&mut self) -> Result<(), HandleError> {
+        if self.mode == GameMode::Cash {
+            return self.reset_state();
+        }
+        Ok(())
     }
 
     // Remove players with `Leave`, `Out` or `Eliminated` status.
@@ -778,9 +785,7 @@ impl Holdem {
 
     pub fn wait_timeout(&mut self, effect: &mut Effect, timeout: u64) {
         self.next_game_start = effect.timestamp() + timeout;
-        if self.mode != GameMode::Mtt {
-            effect.wait_timeout(timeout);
-        }
+        effect.wait_timeout(timeout);
     }
 
     pub fn fill_player_chips_with_deposits(&mut self) {
@@ -1465,10 +1470,10 @@ impl GameHandler for Holdem {
             }
 
             Event::WaitingTimeout => {
-                if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
+                self.after_update_settle(effect)?;
+                if self.player_map.len() >= 2 && effect.count_nodes() >= 1 && self.mode != GameMode::Mtt {
                     effect.start_game();
                 }
-                self.after_update_settle(effect)?;
                 Ok(())
             }
 

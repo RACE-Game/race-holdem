@@ -76,8 +76,6 @@ impl GameHandler for MttTable {
                 self.holdem.handle_event(effect, event)?;
                 // Check if there's a checkpoint
                 if effect.is_checkpoint() {
-                    effect.info(format!("Send game result"));
-
                     let mut player_results = Vec::new();
 
                     for p in self.holdem.player_map.values() {
@@ -96,6 +94,7 @@ impl GameHandler for MttTable {
                     }
 
                     self.holdem.kick_players(effect);
+                    self.holdem.reset_state()?;
 
                     let mtt_table_state = self.make_mtt_table_state();
                     let evt = HoldemBridgeEvent::GameResult {
@@ -150,10 +149,6 @@ impl MttTable {
                 bb,
                 sitout_players,
             } => {
-                let timeout = self
-                    .holdem
-                    .next_game_start
-                    .saturating_sub(effect.timestamp());
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
                 for id in sitout_players.iter() {
@@ -164,7 +159,9 @@ impl MttTable {
                         }
                     }
                 }
-                effect.wait_timeout(timeout);
+                if self.holdem.player_map.len() > 1 {
+                    effect.start_game();
+                }
             }
             // Add players from other tables
             HoldemBridgeEvent::SitinPlayers { sitins } => {
@@ -412,11 +409,11 @@ mod tests {
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
 
+
         assert_eq!(mtt_table.holdem.player_map.len(), 2);
         assert!(mtt_table.holdem.player_map.contains_key(&1));
         assert!(mtt_table.holdem.player_map.contains_key(&2));
         assert!(effect.is_checkpoint());
-        assert_eq!(effect.wait_timeout, Some(0));
         assert_eq!(effect.list_bridge_events().unwrap(), vec![
             (0, HoldemBridgeEvent::GameResult {
                 hand_id:mtt_table.holdem.hand_id,
