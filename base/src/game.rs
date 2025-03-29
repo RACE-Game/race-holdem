@@ -5,10 +5,7 @@ use std::mem::take;
 
 use crate::errors;
 use crate::essential::{
-    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage,
-    InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP,
-    ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT,
-    WAIT_TIMEOUT_DEFAULT,
+    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage, InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP, ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT, TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_LAST_PLAYER, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
@@ -271,6 +268,20 @@ impl Holdem {
         }
     }
 
+    pub fn set_action_timeout(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        let Some(ref acting_player) = self.acting_player else {
+            return Err(errors::internal_cannot_find_action_player())?;
+        };
+        if let Some(t) = acting_player.time_card_clock {
+            effect.info("Set player action timeout according to time card timeout");
+            effect.action_timeout(acting_player.id, t.saturating_sub(effect.timestamp()))?;
+        } else {
+            effect.info("Set player action timeout according to normal timeout");
+            effect.action_timeout(acting_player.id, acting_player.clock.saturating_sub(effect.timestamp()))?;
+        }
+        Ok(())
+    }
+
     pub fn ask_for_action(
         &mut self,
         player_id: u64,
@@ -280,12 +291,10 @@ impl Holdem {
         if let Some(player) = self.player_map.get_mut(&player_id) {
             effect.info(format!("Asking {} to act", player.id));
             player.status = PlayerStatus::Acting;
-            self.acting_player = Some(ActingPlayer {
-                id: player.id,
-                position: player.position,
-                clock: effect.timestamp() + timeout,
-            });
-            effect.action_timeout(player_id, timeout)?; // in msecs
+            let action_start = effect.timestamp();
+            let clock = action_start + timeout;
+            self.acting_player = Some(ActingPlayer::new(player.id, player.position, action_start, clock));
+            self.set_action_timeout(effect)?;
             Ok(())
         } else {
             return Err(errors::next_action_player_missing());
@@ -1035,7 +1044,58 @@ impl Holdem {
         }
     }
 
-    pub fn handle_custom_event(
+    pub fn handle_custom_event(&mut self, effect: &mut Effect, event: GameEvent, sender: u64) -> Result<(), HandleError> {
+        match event {
+            GameEvent::Bet(_) | GameEvent::Check | GameEvent::Fold | GameEvent::Raise(_) | GameEvent::Call => {
+                return self.handle_action_event(effect, event, sender);
+            }
+
+            GameEvent::SitOut => {
+                self.set_player_status(sender, PlayerStatus::Leave)?;
+                let _ = self.handle_player_leave(effect, sender);
+                Ok(())
+            }
+
+            GameEvent::UseTimeCard => {
+                let Some(ref mut acting_player) = self.acting_player else {
+                    return Err(errors::not_the_acting_player())?;
+                };
+                if acting_player.id != sender {
+                    return Err(errors::not_the_acting_player())?;
+                }
+                let Some(ref player) = self.player_map.get(&sender) else {
+                    return Err(HandleError::InvalidPlayer);
+                };
+                if player.time_cards == 0 {
+                    return Err(errors::no_time_cards())?;
+                }
+                if acting_player.time_card_clock.is_some() {
+                    return Err(errors::time_card_already_in_use())?;
+                }
+                acting_player.time_card_clock = Some(acting_player.clock + TIME_CARD_EXTRA_SECS * 1000);
+                self.set_action_timeout(effect)?;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn reduce_time_cards(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        let Some(ref acting_player) = self.acting_player else {
+            return Err(errors::internal_cannot_find_action_player())?;
+        };
+        // When the player used at least one time card
+        if acting_player.time_card_clock.is_some() && effect.timestamp() > acting_player.clock {
+            let extra_time_cost = effect.timestamp() -  acting_player.clock;
+            let time_card_used = extra_time_cost / (TIME_CARD_EXTRA_SECS * 1000) + 1;
+            let Some(player) = self.player_map.get_mut(&acting_player.id) else {
+                return Err(errors::internal_player_not_found())?;
+            };
+            player.time_cards -= time_card_used as u8;
+        }
+        Ok(())
+    }
+
+    pub fn handle_action_event(
         &mut self,
         effect: &mut Effect,
         event: GameEvent,
@@ -1067,6 +1127,7 @@ impl Holdem {
                 self.set_player_acted(sender, allin)?;
                 self.min_raise = amount;
                 self.street_bet = amount;
+                self.reduce_time_cards(effect)?;
             }
 
             GameEvent::Call => {
@@ -1078,6 +1139,7 @@ impl Holdem {
                 let call_amount = self.street_bet - betted;
                 let (allin, _) = self.take_bet(sender.clone(), call_amount)?;
                 self.set_player_acted(sender, allin)?;
+                self.reduce_time_cards(effect)?;
             }
 
             GameEvent::Check => {
@@ -1091,6 +1153,7 @@ impl Holdem {
                     return Err(errors::player_cant_check());
                 }
                 self.set_player_status(sender, PlayerStatus::Acted)?;
+                self.reduce_time_cards(effect)?;
             }
 
             GameEvent::Fold => {
@@ -1098,6 +1161,7 @@ impl Holdem {
                     return Err(errors::not_the_acting_player_to_fold());
                 }
                 self.set_player_status(sender, PlayerStatus::Fold)?;
+                self.reduce_time_cards(effect)?;
             }
 
             GameEvent::Raise(amount) => {
@@ -1119,6 +1183,7 @@ impl Holdem {
                 let new_min_raise = new_street_bet - self.street_bet;
                 self.street_bet = new_street_bet;
                 self.min_raise = new_min_raise;
+                self.reduce_time_cards(effect)?;
             }
 
             _ => {}
@@ -1396,14 +1461,8 @@ impl GameHandler for Holdem {
                     event, sender
                 ));
 
-                match event {
-                    GameEvent::SitOut => {
-                        self.set_player_status(sender, PlayerStatus::Leave)?;
-                        let _ = self.handle_player_leave(effect, sender);
-                    }
 
-                    _ => self.handle_custom_event(effect, event, sender)?,
-                }
+                self.handle_custom_event(effect, event, sender)?;
 
                 Ok(())
             }
@@ -1412,6 +1471,8 @@ impl GameHandler for Holdem {
                 if !self.is_acting_player(player_id) {
                     return Err(errors::not_the_acting_player());
                 }
+
+                self.reduce_time_cards(effect)?;
 
                 let Some(player) = self.player_map.get_mut(&player_id) else {
                     return Err(errors::internal_player_not_found());
@@ -1432,7 +1493,7 @@ impl GameHandler for Holdem {
                         )?;
                         self.next_state(effect)?;
                         return Ok(());
-                    } else {
+                    } else if street != Street::Preflop {
                         player.timeout += 1;
                     }
                 }
