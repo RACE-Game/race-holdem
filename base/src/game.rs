@@ -8,7 +8,7 @@ use crate::essential::{
     ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage,
     InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP,
     ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT,
-    WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_LAST_PLAYER, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN,
+    WAIT_TIMEOUT_DEFAULT,
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
@@ -49,10 +49,28 @@ pub struct Holdem {
 impl Holdem {
     // calc timeout that should be wait after settle by state
     fn calc_timeout_after_settle(&self) -> Result<u64, HandleError> {
+        // 0.5s for collect chips, 5s for players observer game result
+        let collet_chips_time = 500;
+        let dealing_card_time = 1_500;
+        let settle_pot_time = 4_000;
+        let observe_result_time = 5_000;
+
         match self.stage {
-            HoldemStage::Runner => Ok(WAIT_TIMEOUT_RUNNER),
-            HoldemStage::Showdown => Ok(WAIT_TIMEOUT_SHOWDOWN),
-            HoldemStage::Settle => Ok(WAIT_TIMEOUT_LAST_PLAYER),
+            HoldemStage::Runner => {
+                let timeout = collet_chips_time
+                    + observe_result_time
+                    + dealing_card_time * (self.board.len() as u64)
+                    + settle_pot_time * (self.pots.len() as u64);
+                Ok(timeout)
+            }
+            HoldemStage::Showdown => {
+                let timeout = collet_chips_time
+                    + observe_result_time
+                    + settle_pot_time * (self.pots.len() as u64);
+                Ok(timeout)
+            }
+            // for single player win, there's no need to observe game result
+            HoldemStage::Settle => Ok(collet_chips_time + settle_pot_time),
             _ => Err(errors::wait_timeout_error_in_settle()),
         }
     }
@@ -72,6 +90,7 @@ impl Holdem {
         }
         // 3. do checkpoint
         effect.checkpoint();
+        self.reset_state()?;
 
         Ok(())
     }
