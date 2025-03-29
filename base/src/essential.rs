@@ -140,7 +140,7 @@ pub struct ActingPlayer {
 }
 
 /// Representation of Holdem pot
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone, Default)]
 pub struct Pot {
     pub owners: Vec<u64>,
     pub winners: Vec<u64>,
@@ -148,11 +148,11 @@ pub struct Pot {
 }
 
 impl Pot {
-    pub fn new() -> Self {
+    pub fn new(owners: Vec<u64>, amount: u64) -> Self {
         Self {
-            owners: Vec::new(),
+            owners,
             winners: Vec::new(),
-            amount: 0,
+            amount,
         }
     }
 

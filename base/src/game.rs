@@ -43,6 +43,7 @@ pub struct Holdem {
     pub table_size: u8, // The size of table
     pub hand_history: HandHistory,
     pub next_game_start: u64,
+    pub rake_collected: u64,
 }
 
 // Methods that mutate or query the game state
@@ -84,9 +85,8 @@ impl Holdem {
             effect.eject(player.id);
         }
         // 2. transfer rake
-        let rake = self.take_rake_from_prize()?;
-        if rake > 0 {
-            effect.transfer(rake);
+        if self.rake_collected > 0 {
+            effect.transfer(self.rake_collected);
         }
         // 3. do checkpoint
         effect.checkpoint();
@@ -442,11 +442,9 @@ impl Holdem {
             } else {
                 owners.retain(|addr| unfolded_player_addrs.contains(addr));
 
-                new_pots.push(Pot {
-                    owners,
-                    winners: Vec::<u64>::new(),
-                    amount,
-                });
+                let mut pot = Pot::new(owners, amount);
+                self.take_rake_from_pot(&mut pot)?;
+                new_pots.push(pot);
                 acc += actual_bet;
             }
         }
@@ -575,9 +573,7 @@ impl Holdem {
         Ok(())
     }
 
-    /// Take the rake from winners' pot and update prize map.
-    pub fn take_rake_from_prize(&mut self) -> Result<u64, HandleError> {
-        // Only take rakes in Cash game
+    pub fn take_rake_from_pot(&mut self, pot: &mut Pot) -> Result<u64, HandleError> {
         if self.mode != GameMode::Cash {
             return Ok(0);
         }
@@ -586,21 +582,17 @@ impl Holdem {
         if self.street == Street::Preflop {
             return Ok(0);
         }
-        let mut total_rake = 0;
 
-        let rake_cap: u64 = self.bb * self.rake_cap as u64;
+        let rake_to_take =
+            u64::min(
+                self.rake_cap as u64 * self.bb - self.rake_collected,
+                pot.amount * self.rake as u64 / 1000
+            );
 
-        for (_, prize) in self.prize_map.iter_mut() {
-            if *prize > 0 {
-                let r = u64::min(self.rake as u64 * *prize / 1000u64, rake_cap);
-                total_rake += r;
-                *prize = prize
-                    .checked_sub(r)
-                    .ok_or(errors::internal_amount_overflow())?;
-            }
-        }
+        pot.amount -= rake_to_take;
+        self.rake_collected += rake_to_take;
 
-        return Ok(total_rake);
+        Ok(rake_to_take)
     }
 
     /// Build the prize map for awarding chips
@@ -780,7 +772,6 @@ impl Holdem {
         // after settle, waiting timeout, for animations
         let timeout = self.calc_timeout_after_settle()?;
         self.wait_timeout(effect, timeout);
-        self.after_update_settle(effect)?;
 
         Ok(())
     }
@@ -1270,6 +1261,7 @@ impl Holdem {
         self.display.clear();
         self.hand_history = HandHistory::default();
         self.next_game_start = 0;
+        self.rake_collected = 0;
         // Reset player status
         self.reset_player_map_status()?;
         Ok(())
@@ -1472,7 +1464,15 @@ impl GameHandler for Holdem {
                 }
             }
 
-            Event::WaitingTimeout | Event::Ready => {
+            Event::WaitingTimeout => {
+                if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
+                    effect.start_game();
+                }
+                self.after_update_settle(effect)?;
+                Ok(())
+            }
+
+            Event::Ready => {
                 if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                     effect.start_game();
                 }
@@ -1649,7 +1649,6 @@ impl GameHandler for Holdem {
                     let timeout = self.calc_timeout_after_settle()?;
                     // WAIT_TIMEOUT_RUNNER
                     self.wait_timeout(effect, timeout);
-                    self.after_update_settle(effect)?;
 
                     Ok(())
                 }
@@ -1660,7 +1659,6 @@ impl GameHandler for Holdem {
                     let timeout = self.calc_timeout_after_settle()?;
                     // WAIT_TIMEOUT_SHOWDOWN
                     self.wait_timeout(effect, timeout);
-                    self.after_update_settle(effect)?;
 
                     Ok(())
                 }
