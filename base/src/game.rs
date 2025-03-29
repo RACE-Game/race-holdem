@@ -47,6 +47,35 @@ pub struct Holdem {
 
 // Methods that mutate or query the game state
 impl Holdem {
+    // calc timeout that should be wait after settle by state
+    fn calc_timeout_after_settle(&self) -> Result<u64, HandleError> {
+        match self.stage {
+            HoldemStage::Runner => Ok(WAIT_TIMEOUT_RUNNER),
+            HoldemStage::Showdown => Ok(WAIT_TIMEOUT_SHOWDOWN),
+            HoldemStage::Settle => Ok(WAIT_TIMEOUT_LAST_PLAYER),
+            _ => Err(errors::wait_timeout_error_in_settle()),
+        }
+    }
+
+    // After settle, remove players and checkpoint
+    fn after_update_settle(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        // 1. remove players
+        let removed_players = self.cash_table_kick_players(effect);
+        for player in removed_players {
+            effect.withdraw(player.id, player.chips + player.deposit);
+            effect.eject(player.id);
+        }
+        // 2. transfer rake
+        let rake = self.take_rake_from_prize()?;
+        if rake > 0 {
+            effect.transfer(rake);
+        }
+        // 3. do checkpoint
+        effect.checkpoint();
+
+        Ok(())
+    }
+
     // Mark all eliminated players.
     // An eliminated player is one with zero chips.
     fn mark_eliminated_players(&mut self) {
@@ -724,25 +753,16 @@ impl Holdem {
         self.collect_bets()?;
         let award_pots = self.assign_winners(vec![vec![winner]])?;
         self.calc_prize()?;
-        let rake = self.take_rake_from_prize()?;
         let player_result_map = self.update_player_chips()?;
         self.create_game_result_display(award_pots, player_result_map);
         self.apply_prize()?;
         self.mark_eliminated_players();
         self.hand_history.valid = true;
+        // after settle, waiting timeout, for animations
+        let timeout = self.calc_timeout_after_settle()?;
+        self.wait_timeout(effect, timeout);
+        self.after_update_settle(effect)?;
 
-        let removed_players = self.cash_table_kick_players(effect);
-        for player in removed_players {
-            effect.withdraw(player.id, player.chips + player.deposit);
-            effect.eject(player.id);
-        }
-
-        if rake > 0 {
-            effect.transfer(rake);
-        }
-
-        self.wait_timeout(effect, WAIT_TIMEOUT_LAST_PLAYER);
-        effect.checkpoint();
         Ok(())
     }
 
@@ -851,31 +871,18 @@ impl Holdem {
 
         let award_pots = self.assign_winners(winners)?;
         self.calc_prize()?;
-        let rake = self.take_rake_from_prize()?;
+
         let player_result_map = self.update_player_chips()?;
         self.create_game_result_display(award_pots, player_result_map);
         self.apply_prize()?;
         self.hand_history.valid = true;
-
         self.mark_eliminated_players();
-
-        let removed_players = self.cash_table_kick_players(effect);
-
-        for player in removed_players {
-            effect.withdraw(player.id, player.chips + player.deposit);
-            effect.eject(player.id);
-        }
-
-        if rake > 0 {
-            effect.transfer(rake);
-        }
-
-        effect.checkpoint();
 
         // Save to hand history
         for (id, showdown) in showdowns.into_iter() {
             self.hand_history.add_showdown(id, showdown);
         }
+
         Ok(())
     }
 
@@ -1165,8 +1172,8 @@ impl Holdem {
                         .find(|p| p.id() != player_id)
                         .map(|p| p.id())
                         .ok_or(errors::single_winner_missing())?;
-                    self.single_player_win(effect, winner)?;
                     self.stage = HoldemStage::Settle;
+                    self.single_player_win(effect, winner)?;
                     self.signal_game_end(effect)?;
                 }
             }
@@ -1618,16 +1625,24 @@ impl GameHandler for Holdem {
                             board: self.board.clone(),
                         });
                     }
-                    self.settle(effect)?;
 
-                    self.wait_timeout(effect, WAIT_TIMEOUT_RUNNER);
+                    self.settle(effect)?;
+                    let timeout = self.calc_timeout_after_settle()?;
+                    // WAIT_TIMEOUT_RUNNER
+                    self.wait_timeout(effect, timeout);
+                    self.after_update_settle(effect)?;
+
                     Ok(())
                 }
 
                 // Ending, comparing cards
                 HoldemStage::Showdown => {
                     self.settle(effect)?;
-                    self.wait_timeout(effect, WAIT_TIMEOUT_SHOWDOWN);
+                    let timeout = self.calc_timeout_after_settle()?;
+                    // WAIT_TIMEOUT_SHOWDOWN
+                    self.wait_timeout(effect, timeout);
+                    self.after_update_settle(effect)?;
+
                     Ok(())
                 }
 
