@@ -331,3 +331,164 @@ fn test_game_result_given_2_tables_move_one_player() {
     assert_eq!(mtt.tables.get(&1).map(|t| t.players.len()), Some(2));
     assert_eq!(mtt.tables.get(&2).map(|t| t.players.len()), Some(1));
 }
+
+#[test]
+fn test_game_result_no_op_when_players_are_moving() {
+    // Create two tables with number of players: 3, 3
+    let mut mtt = helper::create_mtt_with_players(&[3, 3], 4);
+    let mut effect = Effect::default();
+
+    // Simulate a player is already in the process of moving from table 1 to table 2
+    mtt.table_assigns_pending.insert(4, 1);
+
+    // Trigger a GameResult event from table 1
+    let game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
+        table_id: 1,
+        player_results: vec![],
+        table: MttTableState {
+            hand_id: 1,
+            table_id: 1,
+            players: vec![
+                MttTablePlayer::new(1, 10000, 0),
+                MttTablePlayer::new(2, 10000, 1),
+                MttTablePlayer::new(3, 10000, 2),
+            ],
+            ..Default::default()
+        },
+    };
+    let game_result_event = Event::Bridge {
+        dest_game_id: 0,
+        from_game_id: 1,
+        raw: borsh::to_vec(&game_result).unwrap(),
+    };
+
+    mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+    effect.print_logs();
+
+    // Assert that no relocation or other actions are taken while a player is moving
+    assert_eq!(effect.list_bridge_events().unwrap(), vec![(
+        1,
+        HoldemBridgeEvent::StartGame {
+            sitout_players: vec![],
+            sb: DEFAULT_SB,
+            bb: DEFAULT_BB,
+        }
+    )]);
+
+    assert_eq!(mtt.table_assigns_pending.get(&4), Some(&1));
+    assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
+    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 3);
+}
+
+#[test]
+fn test_game_result_given_moving_player_sitted_do_no_balance_table() {
+    // Create two tables with number of players: 3, 3
+    let mut mtt = helper::create_mtt_with_players(&[2, 4], 4);
+    let mut effect = Effect::default();
+
+    // Simulate a player is already in the process of moving from table 1 to table 2
+    mtt.table_assigns_pending.insert(3, 1);
+
+    // Trigger a GameResult event from table 1
+    let game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
+        table_id: 1,
+        player_results: vec![],
+        table: MttTableState {
+            hand_id: 1,
+            table_id: 1,
+            players: vec![
+                MttTablePlayer::new(1, 10000, 0),
+                MttTablePlayer::new(2, 10000, 1),
+                MttTablePlayer::new(3, 10000, 2),
+            ],
+            ..Default::default()
+        },
+    };
+    let game_result_event = Event::Bridge {
+        dest_game_id: 0,
+        from_game_id: 1,
+        raw: borsh::to_vec(&game_result).unwrap(),
+    };
+
+    mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+    effect.print_logs();
+
+    // Assert that no relocation or other actions are taken while a player is moving
+    assert_eq!(effect.list_bridge_events().unwrap(), vec![(
+        1,
+        HoldemBridgeEvent::StartGame {
+            sitout_players: vec![],
+            sb: DEFAULT_SB,
+            bb: DEFAULT_BB,
+        }
+    )]);
+
+    assert!(mtt.table_assigns_pending.is_empty());
+    assert_eq!(mtt.table_assigns.get(&3), Some(&1));
+    assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
+}
+
+#[test]
+fn test_game_result_given_moving_player_sitted_do_balance_table() {
+    // Create two tables with number of players: 3, 3
+    let mut mtt = helper::create_mtt_with_players(&[4, 2], 6);
+    let mut effect = Effect::default();
+
+    // Simulate a player is already in the process of moving from table 1 to table 2
+    mtt.table_assigns_pending.insert(5, 1);
+
+    // Trigger a GameResult event from table 1
+    let game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
+        table_id: 1,
+        player_results: vec![],
+        table: MttTableState {
+            hand_id: 1,
+            table_id: 1,
+            players: vec![
+                MttTablePlayer::new(1, 10000, 0),
+                MttTablePlayer::new(2, 10000, 1),
+                MttTablePlayer::new(3, 10000, 2),
+                MttTablePlayer::new(4, 10000, 2),
+                MttTablePlayer::new(5, 10000, 2),
+            ],
+            ..Default::default()
+        },
+    };
+    let game_result_event = Event::Bridge {
+        dest_game_id: 0,
+        from_game_id: 1,
+        raw: borsh::to_vec(&game_result).unwrap(),
+    };
+
+    mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+    effect.print_logs();
+
+    // Assert that no relocation or other actions are taken while a player is moving
+    assert_eq!(effect.list_bridge_events().unwrap(), vec![
+        (
+            1,
+            HoldemBridgeEvent::StartGame {
+                sitout_players: vec![1],
+                sb: DEFAULT_SB,
+                bb: DEFAULT_BB,
+            }
+        ),(
+            2,
+            HoldemBridgeEvent::SitinPlayers {
+                sitins: vec![MttTableSitin::new(1, 10000)]
+            }
+        )
+    ]);
+
+    assert_eq!(mtt.table_assigns_pending.get(&1), Some(&2));
+    assert_eq!(mtt.table_assigns_pending.get(&5), None);
+    assert_eq!(mtt.table_assigns.get(&5), Some(&1));
+    assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 4);
+    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
+}

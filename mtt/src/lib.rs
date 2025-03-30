@@ -442,13 +442,14 @@ impl GameHandler for Mtt {
                         ..
                     } => {
                         for p in table.players.iter() {
+                            effect.info(format!("Player {} sitted at table {}", p.id, table_id));
                             self.table_assigns_pending.remove(&p.id);
                             self.table_assigns.insert(p.id, table.table_id);
                         }
                         self.handle_bounty(&player_results, effect)?;
                         self.tables.insert(table_id, table);
                         self.apply_chips_change(&player_results)?;
-                        self.update_tables(effect, table_id)?;
+                        self.balance_tables(effect, table_id)?;
                         self.apply_prizes(effect)?;
                         self.maybe_set_entry_close(effect);
                         effect.checkpoint();
@@ -799,30 +800,28 @@ impl Mtt {
     /// and a Relocate event will be emitted.
     ///
     /// Do nothing when there's only one table.
-    fn update_tables(&mut self, effect: &mut Effect, table_id: GameId) -> Result<(), HandleError> {
+    fn balance_tables(&mut self, effect: &mut Effect, table_id: GameId) -> Result<(), HandleError> {
+        let Some(current_table) = self.tables.get(&table_id) else {
+            Err(errors::error_invalid_table_id())?
+        };
+        let (sb, bb) = self.calc_blinds()?;
+
         // No-op for final table
-        if self.tables.len() == 1 {
-            let Some((_, final_table)) = self.tables.first_key_value() else {
-                return Err(errors::error_table_not_fonud());
-            };
-            if final_table.players.len() > 1 {
-                effect.info(format!("Send start game to final table {}", table_id));
-                let (sb, bb) = self.calc_blinds()?;
+        // No-op if we have players moving at the moment
+        if self.tables.len() == 1 || !self.table_assigns_pending.is_empty() {
+            if current_table.players.len() > 1 {
+                effect.info(format!("Send start game to table {}", table_id));
                 effect.bridge_event(
                     table_id as _,
                     HoldemBridgeEvent::StartGame {
                         sb,
                         bb,
-                        sitout_players: Vec::with_capacity(0),
+                        sitout_players: vec![],
                     },
                 )?;
             }
             return Ok(());
         }
-
-        let Some(current_table) = self.tables.get(&table_id) else {
-            Err(errors::error_invalid_table_id())?
-        };
 
         let table_size = self.table_size as usize;
 
