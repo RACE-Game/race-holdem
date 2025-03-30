@@ -1016,6 +1016,9 @@ impl Mtt {
 
         self.player_balances.insert(0, 0);
 
+        // Collect the remaining
+        let mut bounty_remaining = 0;
+
         // Get eligible ids for prizes
         for (i, rank) in self.ranks.iter().enumerate() {
             let id = rank.id;
@@ -1025,7 +1028,8 @@ impl Mtt {
                     player_id: id,
                     prize,
                 });
-                effect.withdraw(id, prize + rank.bounty_reward + rank.bounty_transfer);
+                bounty_remaining += rank.bounty_reward + rank.bounty_transfer;
+                effect.withdraw(id, prize);
             }
         }
 
@@ -1034,7 +1038,7 @@ impl Mtt {
         effect.wait_timeout(BONUS_DISTRIBUTION_DELAY);
 
         // We also collect the rake when distributing prizes
-        effect.transfer(self.total_rake);
+        effect.transfer(self.total_rake + bounty_remaining);
 
         Ok(())
     }
