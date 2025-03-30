@@ -239,6 +239,10 @@ impl GameHandler for Mtt {
             return Err(errors::error_invalid_prize_rules());
         }
 
+        if prize_rules.iter().any(|p| *p == 0) {
+            return Err(errors::error_invalid_prize_rule());
+        }
+
         if entry_close_time < start_time {
             return Err(errors::error_invalid_entry_close_time());
         }
