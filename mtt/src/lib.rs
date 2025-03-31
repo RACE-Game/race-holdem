@@ -437,10 +437,16 @@ impl GameHandler for Mtt {
                         table,
                         ..
                     } => {
-                        for p in table.players.iter() {
-                            self.table_assigns_pending.remove(&p.id);
-                            self.table_assigns.insert(p.id, table.table_id);
+                        for player in player_results.iter() {
+                            if player.status == PlayerResultStatus::Normal {
+                                self.table_assigns.insert(player.player_id, table_id);
+                                self.table_assigns_pending.remove(&player.player_id);
+                            } else {
+                                self.table_assigns.remove(&player.player_id);
+                                self.table_assigns_pending.remove(&player.player_id);
+                            }
                         }
+
                         self.handle_bounty(&player_results, effect)?;
                         self.tables.insert(table_id, table);
                         self.apply_chips_change(&player_results)?;
