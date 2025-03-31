@@ -470,6 +470,10 @@ impl GameHandler for Mtt {
             } => {
                 let table = MttTableState::try_from_slice(&init_data)?;
                 self.launched_table_ids.push(game_id);
+                for p in table.players.iter() {
+                    self.table_assigns.insert(p.id, table.table_id);
+                    self.table_assigns_pending.remove(&p.id);
+                }
                 self.tables.insert(table.table_id, table);
                 effect.checkpoint();
             }
@@ -940,7 +944,7 @@ impl Mtt {
         table_id_with_least_players
     }
 
-    /// Add a new player to the game.
+    /// Add a list of players to the game.
     ///
     /// NB: The game will launch tables when receiving StartGame
     /// event, so this function is No-op in Init stage.
