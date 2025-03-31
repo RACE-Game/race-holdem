@@ -1023,7 +1023,7 @@ impl Mtt {
         let mut bounty_remaining = 0;
 
         // Get eligible ids for prizes
-        for (i, rank) in self.ranks.iter().enumerate() {
+        for (i, rank) in self.ranks.iter_mut().enumerate() {
             let id = rank.id;
             if let Some(rule) = self.prize_rules.get(i) {
                 let prize: u64 = prize_share * *rule as u64;
@@ -1032,6 +1032,8 @@ impl Mtt {
                     prize,
                 });
                 bounty_remaining += rank.bounty_reward + rank.bounty_transfer;
+                rank.bounty_reward = 0;
+                rank.bounty_transfer = 0;
                 effect.withdraw(id, prize);
             }
         }
