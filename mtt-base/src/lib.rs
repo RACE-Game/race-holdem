@@ -1,7 +1,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::prelude::*;
 
-pub const DEFAULT_TIME_CARDS: u8 = 10;
+pub const DEFAULT_TIME_CARDS: u8 = 5;
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {

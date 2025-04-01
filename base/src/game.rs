@@ -292,7 +292,7 @@ impl Holdem {
             effect.info(format!("Asking {} to act", player.id));
             let action_start = effect.timestamp();
             let clock = action_start + timeout;
-            if self.street == Street::Preflop && player.status == PlayerStatus::Wait {
+            if self.street == Street::Preflop && player.status == PlayerStatus::Wait && player.time_cards > 0 {
                 self.acting_player = Some(ActingPlayer::new(player.id, player.position, action_start, clock));
             } else {
                 self.acting_player = Some(ActingPlayer::new_with_time_card(player.id, player.position, action_start, clock));

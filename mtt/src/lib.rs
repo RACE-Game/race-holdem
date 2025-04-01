@@ -381,6 +381,7 @@ impl GameHandler for Mtt {
                                 rank.deposit_history.push(d.balance());
                                 rank.chips = self.start_chips;
                                 rank.status = PlayerRankStatus::Pending;
+                                rank.time_cards = DEFAULT_TIME_CARDS;
                                 rank.bounty_reward += bounty_reward;
                                 rank.bounty_transfer += bounty_tranfer;
                                 effect.info(format!("Accept player deposit: {}", d.id()));

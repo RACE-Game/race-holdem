@@ -515,6 +515,7 @@ impl LtMtt {
 
             player.chips = ticket_rule.chips;
             player.deposit_history.push(deposit.balance());
+            player.time_cards = DEFAULT_TIME_CARDS;
 
             let rake = deposit.balance() * 10 / 1000;
             let prize = deposit.balance() - rake;
