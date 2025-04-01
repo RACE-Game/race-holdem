@@ -5,7 +5,7 @@ use std::mem::take;
 
 use crate::errors;
 use crate::essential::{
-    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage, InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP, ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT, TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT, WAIT_TIMEOUT_LAST_PLAYER, WAIT_TIMEOUT_RUNNER, WAIT_TIMEOUT_SHOWDOWN
+    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage, InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP, ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT, TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
@@ -290,10 +290,14 @@ impl Holdem {
         let timeout = self.get_action_time();
         if let Some(player) = self.player_map.get_mut(&player_id) {
             effect.info(format!("Asking {} to act", player.id));
-            player.status = PlayerStatus::Acting;
             let action_start = effect.timestamp();
             let clock = action_start + timeout;
-            self.acting_player = Some(ActingPlayer::new(player.id, player.position, action_start, clock));
+            if self.street == Street::Preflop && player.status == PlayerStatus::Wait {
+                self.acting_player = Some(ActingPlayer::new(player.id, player.position, action_start, clock));
+            } else {
+                self.acting_player = Some(ActingPlayer::new_with_time_card(player.id, player.position, action_start, clock));
+            }
+            player.status = PlayerStatus::Acting;
             self.set_action_timeout(effect)?;
             Ok(())
         } else {
@@ -1376,7 +1380,7 @@ impl Holdem {
 
             self.player_map.insert(
                 p.id,
-                Player::new_with_timeout_and_status(p.id, p.chips, pos, PlayerStatus::Fold),
+                Player::new_with_defaults(p.id, p.chips, pos, PlayerStatus::Fold),
             );
         }
         Ok(())
@@ -1747,15 +1751,15 @@ mod tests {
         let mut player_map = BTreeMap::new();
         player_map.insert(
             1,
-            Player::new_with_timeout_and_status(1, 0, 0, PlayerStatus::Leave),
+            Player::new_with_defaults(1, 0, 0, PlayerStatus::Leave),
         );
         player_map.insert(
             2,
-            Player::new_with_timeout_and_status(2, 0, 0, PlayerStatus::Out),
+            Player::new_with_defaults(2, 0, 0, PlayerStatus::Out),
         );
         player_map.insert(
             3,
-            Player::new_with_timeout_and_status(3, 100, 0, PlayerStatus::Acting),
+            Player::new_with_defaults(3, 100, 0, PlayerStatus::Acting),
         );
         player_map
     }

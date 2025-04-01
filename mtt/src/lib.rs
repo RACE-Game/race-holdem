@@ -39,6 +39,7 @@ use race_api::prelude::*;
 use race_holdem_mtt_base::{
     ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
     PlayerResultStatus,
+    DEFAULT_TIME_CARDS,
 };
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -71,6 +72,7 @@ pub struct PlayerRank {
     bounty_reward: u64,
     bounty_transfer: u64,
     deposit_history: Vec<u64>,
+    time_cards: u8,
 }
 
 impl PlayerRank {
@@ -80,6 +82,7 @@ impl PlayerRank {
         status: PlayerRankStatus,
         position: u16,
         deposit_history: Vec<u64>,
+        time_cards: u8,
     ) -> Self {
         Self {
             id,
@@ -89,6 +92,7 @@ impl PlayerRank {
             bounty_reward: 0,
             bounty_transfer: 0,
             deposit_history,
+            time_cards,
         }
     }
 }
@@ -321,6 +325,7 @@ impl GameHandler for Mtt {
                             PlayerRankStatus::Pending,
                             p.position(),
                             vec![],
+                            DEFAULT_TIME_CARDS,
                         ));
                     }
                 }
@@ -524,6 +529,7 @@ impl Mtt {
             PlayerRankStatus::Pending,
             p.position(),
             vec![],
+            DEFAULT_TIME_CARDS,
         ));
     }
 
@@ -549,6 +555,7 @@ impl Mtt {
                     r.id,
                     r.chips,
                     (j / num_of_tables) as usize, // player's table position
+                    r.time_cards,
                 ));
                 self.table_assigns.insert(r.id, table_id as _);
                 j += num_of_tables;
@@ -785,7 +792,7 @@ impl Mtt {
             HoldemBridgeEvent::SitinPlayers {
                 sitins: players_to_move
                     .iter()
-                    .map(|p| MttTableSitin::new(p.id, p.chips))
+                    .map(|p| MttTableSitin::new(p.id, p.chips, p.time_cards))
                     .collect(),
             },
         )?;
@@ -971,7 +978,7 @@ impl Mtt {
             if let Some(table_id) = table_to_sit {
                 // Find a table to sit
                 effect.info(format!("Sit player {} to {}", rank.id, table_id));
-                let sitin = MttTableSitin::new(rank.id, rank.chips);
+                let sitin = MttTableSitin::new(rank.id, rank.chips, rank.time_cards);
                 match table_id_to_sitins.entry(table_id) {
                     Entry::Vacant(vacant_entry) => {
                         vacant_entry.insert(vec![sitin]);
@@ -993,13 +1000,13 @@ impl Mtt {
                     rank.id, table.table_id
                 ));
                 let position = table.players.len();
-                let player = MttTablePlayer::new(rank.id, rank.chips, position);
+                let player = MttTablePlayer::new(rank.id, rank.chips, position, rank.time_cards);
                 table.players.push(player);
             } else {
                 // Table is full, create a new table with this player.
                 let table_id = effect.next_sub_game_id();
                 effect.info(format!("Create {} table for player {}", table_id, rank.id));
-                let player = MttTablePlayer::new(rank.id, rank.chips, 0);
+                let player = MttTablePlayer::new(rank.id, rank.chips, 0, rank.time_cards);
                 let players = vec![player];
                 let table = MttTableState::new(table_id, sb, bb, players);
                 tables_to_launch.push(table);

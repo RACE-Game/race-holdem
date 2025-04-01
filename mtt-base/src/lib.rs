@@ -1,32 +1,53 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::prelude::*;
 
+pub const DEFAULT_TIME_CARDS: u8 = 10;
+
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTablePlayer {
     pub id: u64,
     pub chips: u64,
     pub table_position: usize,
+    pub time_cards: u8,
+}
+
+impl MttTablePlayer {
+    pub fn new(id: u64, chips: u64, table_position: usize, time_cards: u8) -> Self {
+        Self {
+            id,
+            chips,
+            table_position,
+            time_cards,
+        }
+    }
+
+    /// Give time_cards a default value.
+    /// For testing
+    pub fn new_with_defaults(id: u64, chips: u64, table_position: usize) -> Self {
+        Self::new(id, chips, table_position, DEFAULT_TIME_CARDS)
+    }
 }
 
 #[derive(Debug, Clone, BorshSerialize, BorshDeserialize, Default, PartialEq, Eq)]
 pub struct MttTableSitin {
     pub id: u64,
     pub chips: u64,
+    pub time_cards: u8,
 }
 
 impl MttTableSitin {
-    pub fn new(id: u64, chips: u64) -> Self {
-        Self { id, chips }
-    }
-}
-
-impl MttTablePlayer {
-    pub fn new(id: u64, chips: u64, table_position: usize) -> Self {
+    pub fn new(id: u64, chips: u64, time_cards: u8) -> Self {
         Self {
             id,
             chips,
-            table_position,
+            time_cards,
         }
+    }
+
+    /// Give time_cards a default value.
+    /// For testing
+    pub fn new_with_defaults(id: u64, chips: u64) -> Self {
+        Self::new(id, chips, DEFAULT_TIME_CARDS)
     }
 }
 
@@ -90,11 +111,12 @@ impl MttTableState {
                 }
             }
 
-            self.players.push(MttTablePlayer {
-                id: player.id,
-                chips: player.chips,
+            self.players.push(MttTablePlayer::new(
+                player.id,
+                player.chips,
                 table_position,
-            });
+                player.time_cards,
+            ));
             // Update relocated player's table position as well
             player.table_position = table_position;
 
@@ -125,9 +147,17 @@ pub struct PlayerResult {
 }
 
 impl PlayerResult {
-    pub fn new(player_id: u64, chips: u64, chips_change: Option<ChipsChange>, status: PlayerResultStatus) -> Self {
+    pub fn new(
+        player_id: u64,
+        chips: u64,
+        chips_change: Option<ChipsChange>,
+        status: PlayerResultStatus,
+    ) -> Self {
         Self {
-            player_id, chips, chips_change, status
+            player_id,
+            chips,
+            chips_change,
+            status,
         }
     }
 }

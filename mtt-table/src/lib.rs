@@ -123,6 +123,7 @@ impl MttTable {
                     p.id,
                     p.chips,
                     p.position as _,
+                    p.time_cards,
                 )
             })
             .collect();
@@ -169,15 +170,18 @@ impl MttTable {
                 let origin_num_of_players = self.holdem.player_map.len();
 
                 for sitin in sitins.into_iter() {
-                    let MttTableSitin { id, chips } = sitin;
+                    let MttTableSitin { id, chips, time_cards } = sitin;
 
                     if let Some(position) = self.holdem.find_position() {
                         match self.holdem.player_map.entry(id) {
-                            Entry::Vacant(e) => e.insert(Player::new_with_timeout_and_status(
+                            Entry::Vacant(e) => e.insert(Player::new(
                                 id,
                                 chips,
-                                position as usize,
+                                position as u16,
                                 PlayerStatus::Init,
+                                0,
+                                0,
+                                time_cards,
                             )),
                             Entry::Occupied(_) => {
                                 return Err(errors::duplicated_player_in_relocate())
@@ -216,7 +220,7 @@ mod tests {
     use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 
     fn default_players(num_of_players: usize) -> Vec<MttTablePlayer> {
-        (1..=num_of_players).map(|n| MttTablePlayer::new(n as u64, (n + 1) as u64 * 500, n - 1)).collect()
+        (1..=num_of_players).map(|n| MttTablePlayer::new_with_defaults(n as u64, (n + 1) as u64 * 500, n - 1)).collect()
     }
 
     fn default_mtt_table_state(num_of_players: usize) -> MttTableState {
@@ -248,8 +252,8 @@ mod tests {
             sb: 100,
             bb: 200,
             players: vec![
-                MttTablePlayer::new(1, 1000, 0),
-                MttTablePlayer::new(2, 1500, 1),
+                MttTablePlayer::new_with_defaults(1, 1000, 0),
+                MttTablePlayer::new_with_defaults(2, 1500, 1),
             ],
             table_id: 1,
             btn: 0,
@@ -311,7 +315,7 @@ mod tests {
         // Attempt to relocate the same player to the table
         let bridge_event = HoldemBridgeEvent::SitinPlayers {
             sitins: vec![
-                MttTableSitin::new(1, 1000), // Duplicate player
+                MttTableSitin::new_with_defaults(1, 1000), // Duplicate player
             ],
         };
 
@@ -329,7 +333,7 @@ mod tests {
         // Attempt to relocate a player to an already occupied position
         let bridge_event = HoldemBridgeEvent::SitinPlayers {
             sitins: vec![
-                MttTableSitin::new(3, 3000), // Player 3 is already on the table
+                MttTableSitin::new_with_defaults(3, 3000), // Player 3 is already on the table
             ],
         };
 
@@ -348,8 +352,8 @@ mod tests {
         let mut effect = Effect::default();
 
         let sitins = vec![
-            MttTableSitin::new(4, 1000),
-            MttTableSitin::new(5, 1500),
+            MttTableSitin::new_with_defaults(4, 1000),
+            MttTableSitin::new_with_defaults(5, 1500),
         ];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
@@ -371,7 +375,7 @@ mod tests {
         let mut effect = Effect::default();
 
         let sitins = vec![
-            MttTableSitin::new(1, 500),
+            MttTableSitin::new_with_defaults(1, 500),
         ];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
@@ -400,7 +404,7 @@ mod tests {
         let mut effect = Effect::default();
 
         let sitins = vec![
-            MttTableSitin::new(2, 500),
+            MttTableSitin::new_with_defaults(2, 500),
         ];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };

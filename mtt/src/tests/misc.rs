@@ -16,17 +16,17 @@ fn test_sort_ranks_ensures_eliminated_players_keep_order() {
 
     // Active players
     mtt.ranks
-        .push(PlayerRank::new(1, 5000, PlayerRankStatus::Play, 0, vec![5000]));
+        .push(PlayerRank::new(1, 5000, PlayerRankStatus::Play, 0, vec![5000], DEFAULT_TIME_CARDS));
     mtt.ranks
-        .push(PlayerRank::new(2, 10000, PlayerRankStatus::Play, 1, vec![10000]));
+        .push(PlayerRank::new(2, 10000, PlayerRankStatus::Play, 1, vec![10000], DEFAULT_TIME_CARDS));
     mtt.ranks
-        .push(PlayerRank::new(3, 7000, PlayerRankStatus::Play, 2, vec![7000]));
+        .push(PlayerRank::new(3, 7000, PlayerRankStatus::Play, 2, vec![7000], DEFAULT_TIME_CARDS));
 
     // Eliminated players
     mtt.ranks
-        .push(PlayerRank::new(4, 0, PlayerRankStatus::Out, 3, vec![5000]));
+        .push(PlayerRank::new(4, 0, PlayerRankStatus::Out, 3, vec![5000], DEFAULT_TIME_CARDS));
     mtt.ranks
-        .push(PlayerRank::new(5, 0, PlayerRankStatus::Out, 4, vec![5000]));
+        .push(PlayerRank::new(5, 0, PlayerRankStatus::Out, 4, vec![5000], DEFAULT_TIME_CARDS));
 
     mtt.sort_ranks();
 
@@ -47,9 +47,9 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 1,
                     players: vec![
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(2, 10000, 1),
-                        MttTablePlayer::new(3, 10000, 2),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
+                        MttTablePlayer::new_with_defaults(3, 10000, 2),
                     ],
                     ..Default::default()
                 },
@@ -59,8 +59,8 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 2,
                     players: vec![
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(2, 10000, 1),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
                     ],
                     ..Default::default()
                 },
@@ -70,10 +70,10 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 3,
                     players: vec![
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(2, 10000, 1),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
                     ],
                     ..Default::default()
                 },
@@ -83,8 +83,8 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 4,
                     players: vec![
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(2, 10000, 1),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
                     ],
                     ..Default::default()
                 },
@@ -94,10 +94,10 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 5,
                     players: vec![
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(1, 10000, 0),
-                        MttTablePlayer::new(2, 10000, 1),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
                     ],
                     ..Default::default()
                 },

@@ -43,27 +43,27 @@ pub fn gaming_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
         (
             ALICE,
-            Player::new_with_timeout_and_status(ALICE, 1000, 0usize, PlayerStatus::Acting),
+            Player::new_with_defaults(ALICE, 1000, 0usize, PlayerStatus::Acting),
         ),
         (
             BOB,
-            Player::new_with_timeout_and_status(BOB, 200, 1usize, PlayerStatus::Acted),
+            Player::new_with_defaults(BOB, 200, 1usize, PlayerStatus::Acted),
         ),
         (
             CAROL,
-            Player::new_with_timeout_and_status(CAROL, 0, 2usize, PlayerStatus::Allin),
+            Player::new_with_defaults(CAROL, 0, 2usize, PlayerStatus::Allin),
         ),
         (
             DAVE,
-            Player::new_with_timeout_and_status(DAVE, 780, 3usize, PlayerStatus::Acted),
+            Player::new_with_defaults(DAVE, 780, 3usize, PlayerStatus::Acted),
         ),
         (
             EVA,
-            Player::new_with_timeout_and_status(EVA, 650, 4usize, PlayerStatus::Acted),
+            Player::new_with_defaults(EVA, 650, 4usize, PlayerStatus::Acted),
         ),
         (
             FRANK,
-            Player::new_with_timeout_and_status(FRANK, 800, 5usize, PlayerStatus::Fold),
+            Player::new_with_defaults(FRANK, 800, 5usize, PlayerStatus::Fold),
         ),
     ])
 }

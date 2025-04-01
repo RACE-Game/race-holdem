@@ -80,7 +80,9 @@ impl Player {
         }
     }
 
-    pub fn new_with_timeout_and_status(
+    /// Give timeout, deposit and time_cards a default value.
+    /// For testing.
+    pub fn new_with_defaults(
         id: u64,
         chips: u64,
         position: usize,
