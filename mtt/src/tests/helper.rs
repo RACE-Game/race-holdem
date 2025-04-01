@@ -38,9 +38,10 @@ pub fn create_mtt_with_players(player_nums_per_table: &[usize], table_size: u8) 
                 PlayerRankStatus::Play,
                 rank_id as u16 % table_size as u16,
                 vec![start_chips],
+                DEFAULT_TIME_CARDS,
             ));
 
-            let player = MttTablePlayer::new(rank_id, start_chips, i);
+            let player = MttTablePlayer::new(rank_id, start_chips, i, DEFAULT_TIME_CARDS);
             table_state.players.push(player);
             mtt.table_assigns.insert(rank_id, table_id);
             rank_id += 1;

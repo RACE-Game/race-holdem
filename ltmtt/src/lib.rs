@@ -13,7 +13,7 @@ use race_api::{
 
 use race_holdem_mtt_base::{
     HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
-    PlayerResultStatus,
+    PlayerResultStatus, DEFAULT_TIME_CARDS,
 };
 use race_proc_macro::game_handler;
 
@@ -186,6 +186,7 @@ pub struct LtMttPlayer {
     status: LtMttPlayerStatus,
     chips: u64,
     deposit_history: Vec<u64>,
+    time_cards: u8,
 }
 
 #[derive(Default, PartialEq, BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
@@ -322,7 +323,7 @@ impl GameHandler for LtMtt {
                         };
                         // send a bridge event to subgame, waiting `HoldemBridgeEvent::SitinResult` from subgame.
                         // when received the response, update self state.
-                        let sitin = MttTableSitin::new(player.player_id, player.chips);
+                        let sitin = MttTableSitin::new(player.player_id, player.chips, player.time_cards);
                         effect.bridge_event(
                             table_id,
                             HoldemBridgeEvent::SitinPlayers {
@@ -390,7 +391,7 @@ impl LtMtt {
                     .iter()
                     .map(|id| {
                         let player = self.find_player_by_id(*id);
-                        MttTableSitin::new(player.player_id, player.chips)
+                        MttTableSitin::new(player.player_id, player.chips, player.time_cards)
                     })
                     .collect();
 
@@ -469,6 +470,7 @@ impl LtMtt {
                     status: LtMttPlayerStatus::Out,
                     chips: 0,
                     deposit_history: vec![],
+                    time_cards: DEFAULT_TIME_CARDS,
                 };
 
                 self.rankings.push(ltmtt_player);
@@ -625,7 +627,7 @@ impl LtMtt {
                             ranking.status = LtMttPlayerStatus::Pending;
                         }
                     }
-                    sitins.push(MttTableSitin::new(player.id, player.chips));
+                    sitins.push(MttTableSitin::new(player.id, player.chips, player.time_cards));
                     self.table_assigns_pending.insert(player.id, to_table_id);
                 }
                 effect.bridge_event(to_table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
@@ -658,7 +660,7 @@ impl LtMtt {
         // For some optimizations, should grouped all pending players.
         for p in pending_players {
             let to_table_id = self.find_table_to_sit(1, p.chips);
-            let sitin = MttTableSitin::new(p.player_id, p.chips);
+            let sitin = MttTableSitin::new(p.player_id, p.chips, p.time_cards);
             effect.bridge_event(
                 to_table_id,
                 HoldemBridgeEvent::SitinPlayers {
@@ -691,7 +693,7 @@ impl LtMtt {
                 }
                 // add into current table
                 if let Some(table) = self.tables.get_mut(&table_id) {
-                    let mut table_player = MttTablePlayer::new(player_id, player.chips, 0);
+                    let mut table_player = MttTablePlayer::new(player_id, player.chips, 0, player.time_cards);
                     table.add_player(&mut table_player);
                     self.table_assigns.insert(player_id, table_id);
                     self.create_table_if_target_table_not_enough(effect, table_id)?;
@@ -868,36 +870,6 @@ mod tests {
     use super::*;
     use borsh::BorshDeserialize;
     use race_api::{effect::Effect, event::Event};
-
-    #[test]
-    fn test() {
-        let effect = [
-            5, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 32, 117, 56,
-            0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 8, 1, 5, 0, 0, 0,
-            2, 0, 0, 0, 115, 52, 2, 0, 0, 0, 99, 51, 2, 0, 0, 0, 104, 107, 2, 0, 0, 0, 100, 107, 2,
-            0, 0, 0, 115, 51, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 232, 3, 0, 0, 0, 0, 0, 0, 5,
-            0, 0, 0, 0, 0, 0, 0, 1, 208, 7, 0, 0, 0, 0, 0, 0, 184, 11, 0, 0, 0, 0, 0, 0, 2, 0, 0,
-            0, 4, 0, 0, 0, 0, 0, 0, 0, 4, 168, 54, 28, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 99, 54,
-            2, 0, 0, 0, 104, 51, 3, 5, 0, 0, 0, 2, 0, 0, 0, 99, 51, 2, 0, 0, 0, 115, 51, 2, 0, 0,
-            0, 104, 51, 2, 0, 0, 0, 104, 107, 2, 0, 0, 0, 100, 107, 5, 0, 0, 0, 0, 0, 0, 0, 2, 0,
-            0, 0, 2, 0, 0, 0, 104, 50, 2, 0, 0, 0, 100, 52, 7, 5, 0, 0, 0, 2, 0, 0, 0, 104, 107, 2,
-            0, 0, 0, 100, 107, 2, 0, 0, 0, 115, 52, 2, 0, 0, 0, 100, 52, 2, 0, 0, 0, 99, 51, 2, 0,
-            0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 144, 58, 28, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 2,
-            144, 58, 28, 0, 0, 0, 0, 0, 250, 117, 133, 159, 149, 1, 0, 0,
-        ];
-
-        let event = [12];
-
-        let mut effect = Effect::try_from_slice(&effect).unwrap();
-        let event = Event::try_from_slice(&event).unwrap();
-        println!("{}", event);
-
-        let mut ltmtt = effect.__handler_state::<LtMtt>();
-        ltmtt.handle_event(&mut effect, event).unwrap();
-    }
 
     // use std::time::SystemTime;
     // use super::*;

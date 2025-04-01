@@ -48,3 +48,5 @@ custom_err!(flop_cards_error);
 custom_err!(turn_card_error);
 custom_err!(river_card_error);
 custom_err!(wait_timeout_error_in_settle);
+custom_err!(time_card_already_in_use);
+custom_err!(no_time_cards);

@@ -30,7 +30,7 @@ fn test_game_result_given_3_tables_and_current_table_has_1_player_do_dispatch_no
         table: MttTableState {
             hand_id: 1,
             table_id: 3,
-            players: vec![MttTablePlayer::new(8, 20000, 1)],
+            players: vec![MttTablePlayer::new_with_defaults(8, 20000, 1)],
             next_game_start: 0,
             ..Default::default()
         },
@@ -74,7 +74,7 @@ fn test_game_result_given_2_tables_and_current_table_has_1_player_do_dispatch_no
         table: MttTableState {
             hand_id: 1,
             table_id: 2,
-            players: vec![MttTablePlayer::new(5, 20000, 1)],
+            players: vec![MttTablePlayer::new_with_defaults(5, 20000, 1)],
             next_game_start: 0,
             ..Default::default()
         },
@@ -108,9 +108,9 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
             hand_id: 1,
             table_id: 2,
             players: vec![
-                MttTablePlayer::new(4, 10000, 0),
-                MttTablePlayer::new(5, 10000, 1),
-                MttTablePlayer::new(6, 10000, 2),
+                MttTablePlayer::new_with_defaults(4, 10000, 0),
+                MttTablePlayer::new_with_defaults(5, 10000, 1),
+                MttTablePlayer::new_with_defaults(6, 10000, 2),
             ],
             ..Default::default()
         },
@@ -139,7 +139,7 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
         ),(
             3,
             HoldemBridgeEvent::SitinPlayers {
-                sitins: vec![MttTableSitin::new(4, 10000)]
+                sitins: vec![MttTableSitin::new_with_defaults(4, 10000)]
             }
         )]
     );
@@ -176,8 +176,8 @@ fn test_game_result_given_3_tables_do_close_table() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new(1, 20000, 0),
-                MttTablePlayer::new(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 20000, 0),
+                MttTablePlayer::new_with_defaults(3, 10000, 2),
             ],
             ..Default::default()
         },
@@ -207,7 +207,10 @@ fn test_game_result_given_3_tables_do_close_table() {
             (
                 3,
                 HoldemBridgeEvent::SitinPlayers {
-                    sitins: vec![MttTableSitin::new(1, 20000), MttTableSitin::new(3, 10000),],
+                    sitins: vec![
+                        MttTableSitin::new_with_defaults(1, 20000),
+                        MttTableSitin::new_with_defaults(3, 10000),
+                    ],
                 }
             )
         ]
@@ -243,7 +246,7 @@ fn test_game_result_given_2_tables_do_close_table() {
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
-            players: vec![MttTablePlayer::new(1, 20000, 0)],
+            players: vec![MttTablePlayer::new_with_defaults(1, 20000, 0)],
             ..Default::default()
         },
     };
@@ -267,7 +270,7 @@ fn test_game_result_given_2_tables_do_close_table() {
             (
                 2,
                 HoldemBridgeEvent::SitinPlayers {
-                    sitins: vec![MttTableSitin::new(1, 20000),]
+                    sitins: vec![MttTableSitin::new_with_defaults(1, 20000),]
                 }
             )
         ]
@@ -288,9 +291,9 @@ fn test_game_result_given_2_tables_move_one_player() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new(1, 10000, 0),
-                MttTablePlayer::new(2, 10000, 1),
-                MttTablePlayer::new(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 10000, 0),
+                MttTablePlayer::new_with_defaults(2, 10000, 1),
+                MttTablePlayer::new_with_defaults(3, 10000, 2),
             ],
             ..Default::default()
         },
@@ -318,7 +321,7 @@ fn test_game_result_given_2_tables_move_one_player() {
             (
                 2,
                 HoldemBridgeEvent::SitinPlayers {
-                    sitins: vec![MttTableSitin::new(1, 10000)]
+                    sitins: vec![MttTableSitin::new_with_defaults(1, 10000)]
                 }
             )
         ]
@@ -350,9 +353,9 @@ fn test_game_result_no_op_when_players_are_moving() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new(1, 10000, 0),
-                MttTablePlayer::new(2, 10000, 1),
-                MttTablePlayer::new(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 10000, 0),
+                MttTablePlayer::new_with_defaults(2, 10000, 1),
+                MttTablePlayer::new_with_defaults(3, 10000, 2),
             ],
             ..Default::default()
         },
@@ -388,21 +391,25 @@ fn test_game_result_given_moving_player_sitted_do_no_balance_table() {
     let mut mtt = helper::create_mtt_with_players(&[2, 4], 4);
     let mut effect = Effect::default();
 
-    // Simulate a player is already in the process of moving from table 1 to table 2
+    // Simulate a player is already in the process of moving from table 2 to table 1
     mtt.table_assigns_pending.insert(3, 1);
 
     // Trigger a GameResult event from table 1
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 1,
-        player_results: vec![],
+        player_results: vec![
+            PlayerResult::new(1, 10000, None, PlayerResultStatus::Normal),
+            PlayerResult::new(2, 10000, None, PlayerResultStatus::Normal),
+            PlayerResult::new(3, 10000, None, PlayerResultStatus::Normal),
+        ],
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new(1, 10000, 0),
-                MttTablePlayer::new(2, 10000, 1),
-                MttTablePlayer::new(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 10000, 0),
+                MttTablePlayer::new_with_defaults(2, 10000, 1),
+                MttTablePlayer::new_with_defaults(3, 10000, 2),
             ],
             ..Default::default()
         },
@@ -427,6 +434,8 @@ fn test_game_result_given_moving_player_sitted_do_no_balance_table() {
         }
     )]);
 
+    println!("{:?}", mtt.table_assigns_pending);
+
     assert!(mtt.table_assigns_pending.is_empty());
     assert_eq!(mtt.table_assigns.get(&3), Some(&1));
     assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
@@ -438,23 +447,29 @@ fn test_game_result_given_moving_player_sitted_do_balance_table() {
     let mut mtt = helper::create_mtt_with_players(&[4, 2], 6);
     let mut effect = Effect::default();
 
-    // Simulate a player is already in the process of moving from table 1 to table 2
+    // Simulate a player is already in the process of moving from table 2 to table 1
     mtt.table_assigns_pending.insert(5, 1);
 
     // Trigger a GameResult event from table 1
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
         table_id: 1,
-        player_results: vec![],
+        player_results: vec![
+            PlayerResult::new(1, 10000, None, PlayerResultStatus::Normal),
+            PlayerResult::new(2, 10000, None, PlayerResultStatus::Normal),
+            PlayerResult::new(3, 10000, None, PlayerResultStatus::Normal),
+            PlayerResult::new(4, 10000, None, PlayerResultStatus::Normal),
+            PlayerResult::new(5, 10000, None, PlayerResultStatus::Normal),
+        ],
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new(1, 10000, 0),
-                MttTablePlayer::new(2, 10000, 1),
-                MttTablePlayer::new(3, 10000, 2),
-                MttTablePlayer::new(4, 10000, 2),
-                MttTablePlayer::new(5, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 10000, 0),
+                MttTablePlayer::new_with_defaults(2, 10000, 1),
+                MttTablePlayer::new_with_defaults(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(4, 10000, 2),
+                MttTablePlayer::new_with_defaults(5, 10000, 2),
             ],
             ..Default::default()
         },
@@ -481,7 +496,7 @@ fn test_game_result_given_moving_player_sitted_do_balance_table() {
         ),(
             2,
             HoldemBridgeEvent::SitinPlayers {
-                sitins: vec![MttTableSitin::new(1, 10000)]
+                sitins: vec![MttTableSitin::new_with_defaults(1, 10000)]
             }
         )
     ]);

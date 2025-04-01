@@ -5,7 +5,7 @@ use race_api::prelude::{CustomEvent, HandleError};
 use std::collections::BTreeMap;
 
 pub const MAX_ACTION_TIMEOUT_COUNT: u8 = 2;
-pub const ACTION_TIMEOUT_PREFLOP: u64 = 12_000;
+pub const ACTION_TIMEOUT_PREFLOP: u64 = 7_000;
 pub const ACTION_TIMEOUT_POSTFLOP: u64 = 15_000;
 pub const ACTION_TIMEOUT_TURN: u64 = 20_000;
 pub const ACTION_TIMEOUT_RIVER: u64 = 30_000;
@@ -15,7 +15,8 @@ pub const WAIT_TIMEOUT_LAST_PLAYER: u64 = 5_000;
 pub const WAIT_TIMEOUT_SHOWDOWN: u64 = 10_000;
 pub const WAIT_TIMEOUT_RUNNER: u64 = 13_000;
 
-pub const RAKE_SLOT_ID: u8 = 0;
+pub const TIME_CARD_EXTRA_SECS: u64 = 30;
+pub const DEFAULT_TIME_CARDS: u8 = 5;
 
 /// Holdem Modes in which a specific table type is defined
 #[derive(BorshSerialize, BorshDeserialize, Default, PartialEq, Debug, Clone, Copy)]
@@ -57,9 +58,16 @@ pub struct Player {
     pub status: PlayerStatus,
     pub timeout: u8,  // count the times of action timeout
     pub deposit: u64, // The deposited amount
+    pub time_cards: u8, // The number of time cards, each gives extra TIME_CARD_EXTRA_SECS for action.
 }
 
 impl Player {
+    pub fn new(id: u64, chips: u64, position: u16, status: PlayerStatus, timeout: u8, deposit: u64, time_cards: u8) -> Player {
+        Self {
+            id, chips, position: position as usize, status, timeout, deposit, time_cards
+        }
+    }
+
     pub fn new_with_timeout(id: u64, chips: u64, position: u16, timeout: u8) -> Player {
         Self {
             id,
@@ -68,10 +76,13 @@ impl Player {
             status: PlayerStatus::default(),
             timeout,
             deposit: 0,
+            time_cards: DEFAULT_TIME_CARDS,
         }
     }
 
-    pub fn new_with_timeout_and_status(
+    /// Give timeout, deposit and time_cards a default value.
+    /// For testing.
+    pub fn new_with_defaults(
         id: u64,
         chips: u64,
         position: usize,
@@ -84,6 +95,7 @@ impl Player {
             status,
             timeout: 0,
             deposit: 0,
+            time_cards: DEFAULT_TIME_CARDS,
         }
     }
 
@@ -95,6 +107,7 @@ impl Player {
             status: PlayerStatus::Init,
             timeout: 0,
             deposit: 0,
+            time_cards: DEFAULT_TIME_CARDS,
         }
     }
 
@@ -136,7 +149,19 @@ impl Player {
 pub struct ActingPlayer {
     pub id: u64,
     pub position: usize,
+    pub action_start: u64,
     pub clock: u64, // action clock
+    pub time_card_clock: Option<u64>, // Some when a time card is in use
+}
+
+impl ActingPlayer {
+    pub fn new(id: u64, position: usize, action_start: u64, clock: u64) -> ActingPlayer {
+        Self { id, position, action_start, clock, time_card_clock: None }
+    }
+
+    pub fn new_with_time_card(id: u64, position: usize, action_start: u64, clock: u64) -> ActingPlayer {
+        Self { id, position, action_start, clock, time_card_clock: Some(clock + TIME_CARD_EXTRA_SECS * 1000) }
+    }
 }
 
 /// Representation of Holdem pot
@@ -222,6 +247,7 @@ pub enum GameEvent {
     Fold,
     Raise(u64),
     SitOut,
+    UseTimeCard, // Activate a time card, the time card will only be consumed when the extra time is used.
 }
 
 impl CustomEvent for GameEvent {}
