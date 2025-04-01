@@ -1089,12 +1089,10 @@ impl Holdem {
         };
         // When the player used at least one time card
         if acting_player.time_card_clock.is_some() && effect.timestamp() > acting_player.clock {
-            let extra_time_cost = effect.timestamp() -  acting_player.clock;
-            let time_card_used = extra_time_cost / (TIME_CARD_EXTRA_SECS * 1000) + 1;
             let Some(player) = self.player_map.get_mut(&acting_player.id) else {
                 return Err(errors::internal_player_not_found())?;
             };
-            player.time_cards -= time_card_used as u8;
+            player.time_cards -= 1;
         }
         Ok(())
     }
