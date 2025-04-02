@@ -352,7 +352,6 @@ impl Holdem {
         }
 
         let mut total_ante = 0;
-
         for player_id in self.player_order.clone() {
             let (allin, real_ante) = self.take_bet(player_id, self.ante)?;
             total_ante += real_ante;
@@ -403,10 +402,12 @@ impl Holdem {
         }
 
         let hh = &mut self.hand_history;
-        hh.set_blinds_infos(vec![
-            BlindBet::new(sb_id, BlindType::Sb, real_sb),
-            BlindBet::new(bb_id, BlindType::Bb, real_bb),
-        ]);
+        hh.add_blinds_info(BlindBet::new(sb_id, BlindType::Sb, real_sb));
+        hh.add_blinds_info(BlindBet::new(bb_id, BlindType::Bb, real_bb));
+        // hh.set_blinds_infos(vec![
+        //     BlindBet::new(sb_id, BlindType::Sb, real_sb),
+        //     BlindBet::new(bb_id, BlindType::Bb, real_bb),
+        // ]);
         hh.set_pot(Street::Preflop, real_sb + real_bb + total_ante);
 
         // Select next to act
