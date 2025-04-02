@@ -21,6 +21,7 @@ pub struct Holdem {
     pub max_deposit: u64,
     pub sb: u64,
     pub bb: u64,
+    pub ante: u64,
     pub min_raise: u64,
     pub btn: usize,
     pub rake: u16,
@@ -345,7 +346,27 @@ impl Holdem {
         Ok(())
     }
 
-    pub fn blind_bets(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+    fn blind_bets_ante(&mut self) -> Result<u64, HandleError> {
+        if self.ante == 0 {
+            return Ok(0);
+        }
+
+        let mut total_ante = 0;
+
+        for player_id in self.player_order.clone() {
+            let (allin, real_ante) = self.take_bet(player_id, self.ante)?;
+            total_ante += real_ante;
+            if allin {
+                self.set_player_status(player_id, PlayerStatus::Allin)?;
+            }
+            self.hand_history
+                .add_blinds_info(BlindBet::new(player_id, BlindType::Ante, real_ante));
+        }
+
+        Ok(total_ante)
+    }
+
+    pub fn blind_bets(&mut self, effect: &mut Effect, total_ante: u64) -> Result<(), HandleError> {
         let (sb_id, bb_id) = if self.player_order.len() == 2 {
             let bb_id = self
                 .player_order
@@ -386,7 +407,7 @@ impl Holdem {
             BlindBet::new(sb_id, BlindType::Sb, real_sb),
             BlindBet::new(bb_id, BlindType::Bb, real_bb),
         ]);
-        hh.set_pot(Street::Preflop, real_sb + real_bb);
+        hh.set_pot(Street::Preflop, real_sb + real_bb + total_ante);
 
         // Select next to act
         if self.player_order.len() == 2 {
@@ -992,7 +1013,8 @@ impl Holdem {
         // Blind bets
         else if self.street == Street::Preflop && self.bet_map.is_empty() {
             println!("[Next State]: Blind bets");
-            self.blind_bets(effect)?;
+            let total_ante = self.blind_bets_ante()?;
+            self.blind_bets(effect, total_ante)?;
             Ok(())
         }
         // Ask next player to act
@@ -1449,6 +1471,7 @@ impl GameHandler for Holdem {
         let HoldemAccount {
             sb,
             bb,
+            ante,
             max_deposit,
             rake,
             rake_cap,
@@ -1463,6 +1486,7 @@ impl GameHandler for Holdem {
             max_deposit,
             sb,
             bb,
+            ante,
             min_raise: bb,
             btn,
             rake,

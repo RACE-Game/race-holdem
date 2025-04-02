@@ -106,6 +106,10 @@ impl HandHistory {
         self.blinds = blinds
     }
 
+    pub fn add_blinds_info(&mut self, blind: BlindBet) {
+        self.blinds.push(blind)
+    }
+
     pub fn set_pot(&mut self, street: Street, pot: u64) {
         match street {
             Street::Init | Street::Showdown => (),
