@@ -346,7 +346,7 @@ impl Holdem {
         Ok(())
     }
 
-    fn blind_bets_ante(&mut self) -> Result<u64, HandleError> {
+    fn ante_bets(&mut self) -> Result<u64, HandleError> {
         if self.ante == 0 {
             return Ok(0);
         }
@@ -365,7 +365,13 @@ impl Holdem {
         Ok(total_ante)
     }
 
-    pub fn blind_bets(&mut self, effect: &mut Effect, total_ante: u64) -> Result<(), HandleError> {
+    pub fn blind_bets(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        let mut real_ante = 0;
+        if self.ante > 0 {
+            real_ante = self.ante_bets()?;
+            self.collect_bets()?;
+        }
+
         let (sb_id, bb_id) = if self.player_order.len() == 2 {
             let bb_id = self
                 .player_order
@@ -404,11 +410,7 @@ impl Holdem {
         let hh = &mut self.hand_history;
         hh.add_blinds_info(BlindBet::new(sb_id, BlindType::Sb, real_sb));
         hh.add_blinds_info(BlindBet::new(bb_id, BlindType::Bb, real_bb));
-        // hh.set_blinds_infos(vec![
-        //     BlindBet::new(sb_id, BlindType::Sb, real_sb),
-        //     BlindBet::new(bb_id, BlindType::Bb, real_bb),
-        // ]);
-        hh.set_pot(Street::Preflop, real_sb + real_bb + total_ante);
+        hh.set_pot(Street::Preflop, real_sb + real_bb + real_ante);
 
         // Select next to act
         if self.player_order.len() == 2 {
@@ -1014,8 +1016,7 @@ impl Holdem {
         // Blind bets
         else if self.street == Street::Preflop && self.bet_map.is_empty() {
             println!("[Next State]: Blind bets");
-            let total_ante = self.blind_bets_ante()?;
-            self.blind_bets(effect, total_ante)?;
+            self.blind_bets(effect)?;
             Ok(())
         }
         // Ask next player to act
