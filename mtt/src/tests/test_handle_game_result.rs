@@ -129,19 +129,22 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
     assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 1);
     assert_eq!(
         effect.list_bridge_events().unwrap(),
-        vec![(
-            2,
-            HoldemBridgeEvent::StartGame {
-                sb: DEFAULT_SB,
-                bb: DEFAULT_BB,
-                sitout_players: vec![4],
-            },
-        ),(
-            3,
-            HoldemBridgeEvent::SitinPlayers {
-                sitins: vec![MttTableSitin::new_with_defaults(4, 10000)]
-            }
-        )]
+        vec![
+            (
+                2,
+                HoldemBridgeEvent::StartGame {
+                    sb: DEFAULT_SB,
+                    bb: DEFAULT_BB,
+                    sitout_players: vec![4],
+                },
+            ),
+            (
+                3,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new_with_defaults(4, 10000)]
+                }
+            )
+        ]
     );
 }
 
@@ -371,14 +374,17 @@ fn test_game_result_no_op_when_players_are_moving() {
     effect.print_logs();
 
     // Assert that no relocation or other actions are taken while a player is moving
-    assert_eq!(effect.list_bridge_events().unwrap(), vec![(
-        1,
-        HoldemBridgeEvent::StartGame {
-            sitout_players: vec![],
-            sb: DEFAULT_SB,
-            bb: DEFAULT_BB,
-        }
-    )]);
+    assert_eq!(
+        effect.list_bridge_events().unwrap(),
+        vec![(
+            1,
+            HoldemBridgeEvent::StartGame {
+                sitout_players: vec![],
+                sb: DEFAULT_SB,
+                bb: DEFAULT_BB,
+            }
+        )]
+    );
 
     assert_eq!(mtt.table_assigns_pending.get(&4), Some(&1));
     assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
@@ -425,14 +431,17 @@ fn test_game_result_given_moving_player_sitted_do_no_balance_table() {
     effect.print_logs();
 
     // Assert that no relocation or other actions are taken while a player is moving
-    assert_eq!(effect.list_bridge_events().unwrap(), vec![(
-        1,
-        HoldemBridgeEvent::StartGame {
-            sitout_players: vec![],
-            sb: DEFAULT_SB,
-            bb: DEFAULT_BB,
-        }
-    )]);
+    assert_eq!(
+        effect.list_bridge_events().unwrap(),
+        vec![(
+            1,
+            HoldemBridgeEvent::StartGame {
+                sitout_players: vec![],
+                sb: DEFAULT_SB,
+                bb: DEFAULT_BB,
+            }
+        )]
+    );
 
     println!("{:?}", mtt.table_assigns_pending);
 
@@ -485,25 +494,176 @@ fn test_game_result_given_moving_player_sitted_do_balance_table() {
     effect.print_logs();
 
     // Assert that no relocation or other actions are taken while a player is moving
-    assert_eq!(effect.list_bridge_events().unwrap(), vec![
-        (
-            1,
-            HoldemBridgeEvent::StartGame {
-                sitout_players: vec![1],
-                sb: DEFAULT_SB,
-                bb: DEFAULT_BB,
-            }
-        ),(
-            2,
-            HoldemBridgeEvent::SitinPlayers {
-                sitins: vec![MttTableSitin::new_with_defaults(1, 10000)]
-            }
-        )
-    ]);
+    assert_eq!(
+        effect.list_bridge_events().unwrap(),
+        vec![
+            (
+                1,
+                HoldemBridgeEvent::StartGame {
+                    sitout_players: vec![1],
+                    sb: DEFAULT_SB,
+                    bb: DEFAULT_BB,
+                }
+            ),
+            (
+                2,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new_with_defaults(1, 10000)]
+                }
+            )
+        ]
+    );
 
     assert_eq!(mtt.table_assigns_pending.get(&1), Some(&2));
     assert_eq!(mtt.table_assigns_pending.get(&5), None);
     assert_eq!(mtt.table_assigns.get(&5), Some(&1));
     assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 4);
     assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
+}
+
+#[test]
+fn test_game_result_with_table_reservation_pre_entry_close() {
+    // Define the MTT with tables having some players and with entry still open
+    let mut mtt = helper::create_mtt_with_players(&[3, 3, 2], 3);
+    let mut effect = Effect::default();
+
+    // Simulate time before entry close time
+    mtt.entry_close_time = effect.timestamp() + 1000;
+
+    // Eliminate one player making table distribution 2, 3, 2
+    // Normally this would be a candidate for table merging
+    let game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
+        table_id: 1,
+        player_results: vec![
+            PlayerResult::new(
+                1,
+                0,
+                Some(ChipsChange::Sub(10000)),
+                PlayerResultStatus::Eliminated,
+            ),
+            PlayerResult::new(
+                2,
+                20000,
+                Some(ChipsChange::Add(10000)),
+                PlayerResultStatus::Normal,
+            ),
+        ],
+        table: MttTableState {
+            hand_id: 1,
+            table_id: 1,
+            players: vec![
+                MttTablePlayer::new_with_defaults(2, 20000, 0),
+                MttTablePlayer::new_with_defaults(3, 10000, 2),
+            ],
+            ..Default::default()
+        },
+    };
+
+    let game_result_event = Event::Bridge {
+        dest_game_id: 0,
+        from_game_id: 1,
+        raw: borsh::to_vec(&game_result).unwrap(),
+    };
+
+    mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+    // Since the entry is still open, table reservations are needed
+    // Therefore, the table count and allocations should remain same
+
+    println!(
+        "{:?}",
+        effect.list_bridge_events::<HoldemBridgeEvent>().unwrap()
+    );
+
+    assert_eq!(mtt.tables.len(), 3); // Still three tables
+    assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 2);
+    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 3);
+    assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 2);
+    assert_eq!(
+        effect.list_bridge_events::<HoldemBridgeEvent>().unwrap(),
+        vec![(
+            1,
+            HoldemBridgeEvent::StartGame {
+                sb: 50,
+                bb: 100,
+                sitout_players: vec![]
+            }
+        )]
+    );
+}
+
+#[test]
+fn test_game_result_given_enough_reservation_do_close_table() {
+    // Define the MTT with tables having some players and with entry still open
+    let mut mtt = helper::create_mtt_with_players(&[3, 2, 3, 2], 3);
+    let mut effect = Effect::default();
+
+    // Simulate time before entry close time
+    mtt.entry_close_time = effect.timestamp() + 1000;
+
+    // Eliminate one player making table distribution 2, 3, 2
+    // Normally this would be a candidate for table merging
+    let game_result = HoldemBridgeEvent::GameResult {
+        hand_id: 1,
+        table_id: 4,
+        player_results: vec![
+            PlayerResult::new(
+                9,
+                0,
+                Some(ChipsChange::Sub(10000)),
+                PlayerResultStatus::Eliminated,
+            ),
+            PlayerResult::new(
+                10,
+                20000,
+                Some(ChipsChange::Add(10000)),
+                PlayerResultStatus::Normal,
+            ),
+        ],
+        table: MttTableState {
+            hand_id: 1,
+            table_id: 1,
+            players: vec![
+                MttTablePlayer::new_with_defaults(10, 10000, 1),
+            ],
+            ..Default::default()
+        },
+    };
+
+    let game_result_event = Event::Bridge {
+        dest_game_id: 0,
+        from_game_id: 1,
+        raw: borsh::to_vec(&game_result).unwrap(),
+    };
+
+    mtt.handle_event(&mut effect, game_result_event).unwrap();
+
+    // Since the entry is still open, table reservations are needed
+    // Therefore, the table count and allocations should remain same
+
+    println!(
+        "{:?}",
+        effect.list_bridge_events::<HoldemBridgeEvent>().unwrap()
+    );
+
+    assert_eq!(mtt.tables.len(), 3);
+    assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
+    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
+    assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 3);
+    assert_eq!(
+        effect.list_bridge_events::<HoldemBridgeEvent>().unwrap(),
+        vec![
+            (
+                4,
+                HoldemBridgeEvent::CloseTable
+            ),
+            (
+                2,
+                HoldemBridgeEvent::SitinPlayers {
+                    sitins: vec![MttTableSitin::new(10, 20000, 5)]
+                }
+            )
+        ]
+    );
 }

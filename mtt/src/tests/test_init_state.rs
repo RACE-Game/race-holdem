@@ -10,6 +10,7 @@ fn test_init_state_valid() {
         ticket: 100,
         table_size: 9,
         start_chips: 5000,
+        early_bird_chips: 1000,
         blind_info: BlindInfo::default(),
         prize_rules: vec![50, 30, 20], // Sums to 100
         min_players: 2,

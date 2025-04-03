@@ -552,8 +552,14 @@ impl Mtt {
 
     fn create_tables(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         let num_of_players = self.ranks.len();
+        let table_size_with_reserve = if self.table_size > 2 {
+            self.table_size as usize - 1
+        } else {
+            self.table_size as usize
+        };
         let num_of_tables =
-            (self.table_size as usize + num_of_players - 1) / self.table_size as usize;
+            (table_size_with_reserve as usize + num_of_players - 1) / table_size_with_reserve;
+
         for i in 0..num_of_tables {
             let mut players = Vec::<MttTablePlayer>::new();
             let mut j = i;
@@ -870,7 +876,13 @@ impl Mtt {
             })
             .sum::<usize>();
 
-        if current_table_players_count <= total_empty_seats {
+        let reserved_seats_after_close = if effect.timestamp() > self.entry_close_time {
+            self.tables.len() - 1
+        } else {
+            0
+        };
+
+        if current_table_players_count <= total_empty_seats.saturating_sub(reserved_seats_after_close) {
             self.close_table_and_move_players_to_other_tables(effect, table_id)?;
         } else if table_id == largest_table_id
             && largest_table_players_count > smallest_table_players_count + 1
