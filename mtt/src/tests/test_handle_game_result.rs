@@ -596,13 +596,13 @@ fn test_game_result_with_table_reservation_pre_entry_close() {
 #[test]
 fn test_game_result_given_enough_reservation_do_close_table() {
     // Define the MTT with tables having some players and with entry still open
-    let mut mtt = helper::create_mtt_with_players(&[3, 2, 3, 2], 3);
+    let mut mtt = helper::create_mtt_with_players(&[3, 2, 3, 2], 4);
     let mut effect = Effect::default();
 
     // Simulate time before entry close time
     mtt.entry_close_time = effect.timestamp() + 1000;
 
-    // Eliminate one player making table distribution 2, 3, 2
+    // Eliminate one player making table distribution 3, 2, 3, 1
     // Normally this would be a candidate for table merging
     let game_result = HoldemBridgeEvent::GameResult {
         hand_id: 1,
@@ -639,6 +639,8 @@ fn test_game_result_given_enough_reservation_do_close_table() {
 
     mtt.handle_event(&mut effect, game_result_event).unwrap();
 
+
+    effect.print_logs();
     // Since the entry is still open, table reservations are needed
     // Therefore, the table count and allocations should remain same
 

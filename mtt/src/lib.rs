@@ -876,13 +876,15 @@ impl Mtt {
             })
             .sum::<usize>();
 
-        let reserved_seats_after_close = if effect.timestamp() > self.entry_close_time {
+        let reserved_seats = if effect.timestamp() < self.entry_close_time {
             self.tables.len() - 1
         } else {
             0
         };
+            effect.info(format!("Trigger close table, current_table_players_count: {}, total_empty_seats: {}, reserved_seats: {}",
+                current_table_players_count, total_empty_seats, reserved_seats));
 
-        if current_table_players_count <= total_empty_seats.saturating_sub(reserved_seats_after_close) {
+        if current_table_players_count <= total_empty_seats.saturating_sub(reserved_seats) {
             self.close_table_and_move_players_to_other_tables(effect, table_id)?;
         } else if table_id == largest_table_id
             && largest_table_players_count > smallest_table_players_count + 1
