@@ -157,6 +157,7 @@ pub struct MttAccountData {
     ticket: u64,
     table_size: u8,
     start_chips: u64,
+    early_bird_chips: u64,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     min_players: u16,
@@ -189,6 +190,7 @@ pub struct Mtt {
     time_elapsed: u64,
     timestamp: u64,
     start_chips: u64,
+    early_bird_chips: u64,
     blind_info: BlindInfo,
     prize_rules: Vec<u8>,
     total_prize: u64,
@@ -228,6 +230,7 @@ impl GameHandler for Mtt {
             ticket,
             table_size,
             start_chips,
+            early_bird_chips,
             mut blind_info,
             prize_rules,
             min_players,
@@ -267,6 +270,7 @@ impl GameHandler for Mtt {
             entry_close_time,
             table_size,
             start_chips,
+            early_bird_chips,
             blind_info,
             prize_rules,
             ticket,
@@ -380,6 +384,9 @@ impl GameHandler for Mtt {
 
                                 rank.deposit_history.push(d.balance());
                                 rank.chips = self.start_chips;
+                                if self.stage == MttStage::Init {
+                                    rank.chips += self.early_bird_chips;
+                                }
                                 rank.status = PlayerRankStatus::Pending;
                                 rank.time_cards = DEFAULT_TIME_CARDS;
                                 rank.bounty_reward += bounty_reward;
