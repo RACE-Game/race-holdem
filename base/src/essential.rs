@@ -9,6 +9,7 @@ pub const ACTION_TIMEOUT_PREFLOP: u64 = 7_000;
 pub const ACTION_TIMEOUT_POSTFLOP: u64 = 15_000;
 pub const ACTION_TIMEOUT_TURN: u64 = 20_000;
 pub const ACTION_TIMEOUT_RIVER: u64 = 30_000;
+pub const ACTION_TIMEOUT_AFK: u64 = 3_000;
 
 pub const WAIT_TIMEOUT_DEFAULT: u64 = 5_000;
 pub const WAIT_TIMEOUT_LAST_PLAYER: u64 = 5_000;
@@ -54,17 +55,18 @@ pub struct InternalPlayerJoin {
 pub struct Player {
     pub id: u64,
     pub chips: u64,
-    pub position: usize, // zero indexed
+    pub position: usize,      // Zero indexed
     pub status: PlayerStatus,
-    pub timeout: u8,  // count the times of action timeout
-    pub deposit: u64, // The deposited amount
-    pub time_cards: u8, // The number of time cards, each gives extra TIME_CARD_EXTRA_SECS for action.
+    pub timeout: u8,          // Count the times of action timeout.
+    pub deposit: u64,         // The deposited amount.
+    pub time_cards: u8,       // The number of time cards, each gives extra TIME_CARD_EXTRA_SECS for action.
+    pub is_afk: bool,         // Is player away from keyboard.
 }
 
 impl Player {
     pub fn new(id: u64, chips: u64, position: u16, status: PlayerStatus, timeout: u8, deposit: u64, time_cards: u8) -> Player {
         Self {
-            id, chips, position: position as usize, status, timeout, deposit, time_cards
+            id, chips, position: position as usize, status, timeout, deposit, time_cards, is_afk: false,
         }
     }
 
@@ -77,6 +79,7 @@ impl Player {
             timeout,
             deposit: 0,
             time_cards: DEFAULT_TIME_CARDS,
+            is_afk: false,
         }
     }
 
@@ -96,6 +99,7 @@ impl Player {
             timeout: 0,
             deposit: 0,
             time_cards: DEFAULT_TIME_CARDS,
+            is_afk: false,
         }
     }
 
@@ -108,6 +112,7 @@ impl Player {
             timeout: 0,
             deposit: 0,
             time_cards: DEFAULT_TIME_CARDS,
+            is_afk: false,
         }
     }
 
@@ -246,6 +251,7 @@ pub enum GameEvent {
     Call,
     Fold,
     Raise(u64),
+    SitIn,       // One condition is back from AFK status
     SitOut,
     UseTimeCard, // Activate a time card, the time card will only be consumed when the extra time is used.
 }

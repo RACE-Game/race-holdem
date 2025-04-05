@@ -6,9 +6,9 @@ use std::mem::take;
 use crate::errors;
 use crate::essential::{
     ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemAccount, HoldemStage,
-    InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_POSTFLOP,
-    ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT,
-    TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT,
+    InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_AFK,
+    ACTION_TIMEOUT_POSTFLOP, ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN,
+    MAX_ACTION_TIMEOUT_COUNT, TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT,
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
@@ -294,13 +294,19 @@ impl Holdem {
         player_id: u64,
         effect: &mut Effect,
     ) -> Result<(), HandleError> {
-        let timeout = self.get_action_time();
+        let mut timeout = self.get_action_time();
+
         if let Some(player) = self.player_map.get_mut(&player_id) {
             effect.info(format!("Asking {} to act", player.id));
+            if player.is_afk {
+                timeout = ACTION_TIMEOUT_AFK;
+            }
+
             let action_start = effect.timestamp();
             let clock = action_start + timeout;
-            if (self.street == Street::Preflop && player.status == PlayerStatus::Wait)
+            if player.is_afk
                 || player.time_cards == 0
+                || (self.street == Street::Preflop && player.status == PlayerStatus::Wait)
             {
                 self.acting_player = Some(ActingPlayer::new(
                     player.id,
@@ -1131,6 +1137,15 @@ impl Holdem {
                 self.set_action_timeout(effect)?;
                 Ok(())
             }
+
+            GameEvent::SitIn => {
+                let Some(player) = self.player_map.get_mut(&sender) else {
+                    return Err(HandleError::InvalidPlayer);
+                };
+                player.is_afk = false;
+
+                Ok(())
+            }
         }
     }
 
@@ -1531,10 +1546,28 @@ impl GameHandler for Holdem {
                 let Some(player) = self.player_map.get_mut(&player_id) else {
                     return Err(errors::internal_player_not_found());
                 };
+                player.timeout += 1;
 
                 let street = self.street;
                 // In Cash game, mark those who've reached T/O for
                 // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
+                if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
+                    if self.mode == GameMode::Cash {
+                        self.set_player_status(player_id, PlayerStatus::Leave)?;
+                        self.hand_history.add_action(
+                            street,
+                            PlayerAction {
+                                id: player_id,
+                                event: GameEvent::Fold,
+                            },
+                        )?;
+                        self.next_state(effect)?;
+                        return Ok(());
+                    } else {
+                        player.is_afk = true;
+                    }
+                }
+
                 if self.mode == GameMode::Cash {
                     if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
                         self.set_player_status(player_id, PlayerStatus::Leave)?;
