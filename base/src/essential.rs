@@ -5,11 +5,11 @@ use race_api::prelude::{CustomEvent, HandleError};
 use std::collections::BTreeMap;
 
 pub const MAX_ACTION_TIMEOUT_COUNT: u8 = 2;
-pub const ACTION_TIMEOUT_PREFLOP: u64 = 7_000;
+pub const ACTION_TIMEOUT_PREFLOP: u64 = 10_000;
 pub const ACTION_TIMEOUT_POSTFLOP: u64 = 15_000;
 pub const ACTION_TIMEOUT_TURN: u64 = 20_000;
 pub const ACTION_TIMEOUT_RIVER: u64 = 30_000;
-pub const ACTION_TIMEOUT_AFK: u64 = 3_000;
+pub const ACTION_TIMEOUT_AFK: u64 = 1_000;
 
 pub const WAIT_TIMEOUT_DEFAULT: u64 = 5_000;
 pub const WAIT_TIMEOUT_LAST_PLAYER: u64 = 5_000;

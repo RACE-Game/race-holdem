@@ -55,7 +55,7 @@ impl Holdem {
         let collet_chips_time = 500;
         let dealing_card_time = 1_500;
         let settle_pot_time = 4_000;
-        let observe_result_time = 5_000;
+        let observe_result_time = 4_000;
 
         match self.stage {
             HoldemStage::Runner => {
