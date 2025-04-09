@@ -30,6 +30,7 @@ impl GameHandler for MttTable {
         let MttTableState {
             sb,
             bb,
+            ante,
             players,
             table_id,
             btn,
@@ -50,6 +51,7 @@ impl GameHandler for MttTable {
             btn,
             sb,
             bb,
+            ante,
             table_size: init_account.max_players as _,
             mode: GameMode::Mtt,
             player_map,
@@ -134,6 +136,7 @@ impl MttTable {
             hand_id: self.holdem.hand_id,
             sb: self.holdem.sb,
             bb: self.holdem.bb,
+            ante: self.holdem.ante,
             next_game_start: self.holdem.next_game_start,
             players,
         }
@@ -148,10 +151,12 @@ impl MttTable {
             HoldemBridgeEvent::StartGame {
                 sb,
                 bb,
+                ante,
                 sitout_players,
             } => {
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
+                self.holdem.ante = ante;
                 for id in sitout_players.iter() {
                     match self.holdem.player_map.entry(*id) {
                         Entry::Vacant(_) => return Err(errors::invalid_player_in_start_game()),
@@ -280,6 +285,7 @@ mod tests {
         let invalid_player_id_event = HoldemBridgeEvent::StartGame {
             sb: 100,
             bb: 200,
+            ante: 0,
             sitout_players: vec![999], // Invalid player ID
         };
         let result = mtt_table.handle_bridge_event(&mut effect, invalid_player_id_event);
@@ -295,6 +301,7 @@ mod tests {
         let bridge_event = HoldemBridgeEvent::StartGame {
             sb: 100,
             bb: 200,
+            ante: 0,
             sitout_players: vec![1, 2],
         };
 
@@ -460,6 +467,7 @@ mod tests {
                 hand_id: 0,
                 sb: 100,
                 bb: 200,
+                ante: 0,
                 next_game_start: 0,
                 players: default_players(3),
             },

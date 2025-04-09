@@ -614,6 +614,7 @@ impl LtMtt {
                     HoldemBridgeEvent::StartGame {
                         sb: origin_table.sb,
                         bb: origin_table.bb,
+                        ante: origin_table.ante,
                         sitout_players: up_ids,
                     },
                 )?;
@@ -642,6 +643,7 @@ impl LtMtt {
             HoldemBridgeEvent::StartGame {
                 sb: origin_table.sb,
                 bb: origin_table.bb,
+                ante: origin_table.ante,
                 sitout_players: vec![],
             },
         )?;
@@ -854,6 +856,7 @@ impl LtMtt {
             btn: 0,
             sb,
             bb,
+            ante: 0,
             players: Vec::new(),
             next_game_start: 0,
             hand_id: 0,

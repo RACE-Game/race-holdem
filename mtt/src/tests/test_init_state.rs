@@ -91,8 +91,7 @@ fn test_init_state_start_chips_too_low() {
     let data = MttAccountData {
         start_chips: 100, // Too low for 50BB
         blind_info: BlindInfo {
-            blind_base: 10,
-            blind_rules: vec![BlindRuleItem::new(5, 10)], // 50BB would be 500
+            blind_rules: vec![BlindRuleItem::new(5, 10, 0)], // 50BB would be 500
             ..Default::default()
         },
         ..Default::default()

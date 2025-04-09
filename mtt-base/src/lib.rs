@@ -58,18 +58,20 @@ pub struct MttTableState {
     pub btn: usize,
     pub sb: u64,
     pub bb: u64,
+    pub ante: u64,
     pub players: Vec<MttTablePlayer>,
     pub next_game_start: u64,
 }
 
 impl MttTableState {
-    pub fn new(table_id: GameId, sb: u64, bb: u64, players: Vec<MttTablePlayer>) -> Self {
+    pub fn new(table_id: GameId, sb: u64, bb: u64, ante: u64, players: Vec<MttTablePlayer>) -> Self {
         Self {
             table_id,
             hand_id: 0,
             btn: 0,
             sb,
             bb,
+            ante,
             players,
             next_game_start: 0,
         }
@@ -172,6 +174,7 @@ pub enum HoldemBridgeEvent {
     StartGame {
         sb: u64,
         bb: u64,
+        ante: u64,
         sitout_players: Vec<u64>,
     },
     /// This event is sent by master game.

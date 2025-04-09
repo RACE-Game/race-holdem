@@ -135,6 +135,7 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
                 HoldemBridgeEvent::StartGame {
                     sb: DEFAULT_SB,
                     bb: DEFAULT_BB,
+                    ante: DEFAULT_ANTE,
                     sitout_players: vec![4],
                 },
             ),
@@ -319,6 +320,7 @@ fn test_game_result_given_2_tables_move_one_player() {
                     sitout_players: vec![1],
                     sb: DEFAULT_SB,
                     bb: DEFAULT_BB,
+                    ante: DEFAULT_ANTE,
                 }
             ),
             (
@@ -382,6 +384,7 @@ fn test_game_result_no_op_when_players_are_moving() {
                 sitout_players: vec![],
                 sb: DEFAULT_SB,
                 bb: DEFAULT_BB,
+                ante: DEFAULT_ANTE,
             }
         )]
     );
@@ -439,6 +442,7 @@ fn test_game_result_given_moving_player_sitted_do_no_balance_table() {
                 sitout_players: vec![],
                 sb: DEFAULT_SB,
                 bb: DEFAULT_BB,
+                ante: DEFAULT_ANTE,
             }
         )]
     );
@@ -503,6 +507,7 @@ fn test_game_result_given_moving_player_sitted_do_balance_table() {
                     sitout_players: vec![1],
                     sb: DEFAULT_SB,
                     bb: DEFAULT_BB,
+                    ante: DEFAULT_ANTE,
                 }
             ),
             (
@@ -585,8 +590,9 @@ fn test_game_result_with_table_reservation_pre_entry_close() {
         vec![(
             1,
             HoldemBridgeEvent::StartGame {
-                sb: 50,
-                bb: 100,
+                sb: DEFAULT_SB,
+                bb: DEFAULT_BB,
+                ante: DEFAULT_ANTE,
                 sitout_players: vec![]
             }
         )]

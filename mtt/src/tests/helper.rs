@@ -2,6 +2,7 @@ use super::*;
 
 pub const DEFAULT_SB: u64 = 50;
 pub const DEFAULT_BB: u64 = 100;
+pub const DEFAULT_ANTE: u64 = 0;
 
 // Create Mtt with a number of players. If `with_tables` is
 // true, also create MttTable states.

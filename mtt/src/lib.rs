@@ -38,8 +38,7 @@ use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
     ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
-    PlayerResultStatus,
-    DEFAULT_TIME_CARDS,
+    PlayerResultStatus, DEFAULT_TIME_CARDS,
 };
 use race_proc_macro::game_handler;
 use std::collections::{btree_map::Entry, BTreeMap};
@@ -97,27 +96,65 @@ impl PlayerRank {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq, Clone)]
 pub struct BlindRuleItem {
-    sb_x: u32,
-    bb_x: u32,
+    sb: u64,
+    bb: u64,
+    ante: u64,
 }
 
 impl BlindRuleItem {
-    fn new(sb_x: u32, bb_x: u32) -> Self {
-        Self { sb_x, bb_x }
+    fn new(sb: u64, bb: u64, ante: u64) -> Self {
+        Self { sb, bb, ante }
     }
 }
 
 fn default_blind_rules() -> Vec<BlindRuleItem> {
     [
-        5, 10, 15, 20, 30, 40, 60, 80, 100, 120, 160, 200, 240, 280, 360, 440, 520, 600, 750, 900,
-        1050, 1200, 1500, 1800, 2100, 2400, 3000, 3600, 4200, 5000, 5800, 6600, 7200, 8000, 9000,
-        10000, 11000, 12000, 14000, 16000, 18000, 20000, 24000, 28000, 32000, 36000, 40000, 44000,
-        50000, 56000, 62000, 68000, 80000, 100000,
+        (50, 100, 0),
+        (100, 200, 0),
+        (150, 300, 0),
+        (200, 400, 0),
+        (250, 500, 0),
+        (300, 600, 0),
+        (400, 800, 100),
+        (500, 1000, 100),
+        (600, 1200, 150),
+        (750, 1500, 200),
+        (1000, 2000, 250),
+        (1250, 2500, 300),
+        (1500, 3000, 400),
+        (2000, 4000, 500),
+        (2500, 5000, 600),
+        (3000, 6000, 750),
+        (4000, 8000, 1000),
+        (5000, 10000, 1250),
+        (6000, 12000, 1500),
+        (8000, 16000, 2000),
+        (10000, 20000, 2500),
+        (12000, 24000, 3000),
+        (15000, 30000, 3750),
+        (20000, 40000, 5000),
+        (25000, 50000, 6000),
+        (30000, 60000, 7500),
+        (40000, 80000, 10000),
+        (50000, 100000, 12500),
+        (60000, 120000, 15000),
+        (80000, 160000, 20000),
+        (100000, 200000, 25000),
+        (120000, 240000, 30000),
+        (150000, 300000, 37500),
+        (200000, 400000, 50000),
+        (250000, 500000, 60000),
+        (300000, 600000, 75000),
+        (400000, 800000, 100000),
+        (500000, 1000000, 125000),
+        (600000, 1200000, 150000),
+        (800000, 1600000, 200000),
+        (1000000, 2000000, 250000),
     ]
     .into_iter()
-    .map(|sb| BlindRuleItem::new(sb, 2 * sb))
+    .map(|(sb, bb, ante)| BlindRuleItem::new(sb, bb, ante))
     .collect()
 }
 
@@ -127,7 +164,6 @@ fn take_amount_by_portion(amount: u64, portion: u16) -> u64 {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct BlindInfo {
-    blind_base: u64,
     blind_interval: u64,
     blind_rules: Vec<BlindRuleItem>,
 }
@@ -135,7 +171,6 @@ pub struct BlindInfo {
 impl Default for BlindInfo {
     fn default() -> Self {
         Self {
-            blind_base: 10,
             blind_interval: 60_000,
             blind_rules: default_blind_rules(),
         }
@@ -260,7 +295,7 @@ impl GameHandler for Mtt {
 
         if let Some(first_level) = blind_info.blind_rules.first() {
             // Start chips is less than 50BBs
-            if start_chips < first_level.bb_x as u64 * 50 * blind_info.blind_base {
+            if start_chips < first_level.bb as u64 * 50 {
                 return Err(errors::error_start_chips_too_low());
             }
         }
@@ -462,7 +497,6 @@ impl GameHandler for Mtt {
                                 self.table_assigns.remove(&player.player_id);
                                 self.table_assigns_pending.remove(&player.player_id);
                             }
-
                         }
 
                         self.handle_bounty(&player_results, effect)?;
@@ -574,13 +608,14 @@ impl Mtt {
                 self.table_assigns.insert(r.id, table_id as _);
                 j += num_of_tables;
             }
-            let (sb, bb) = self.calc_blinds()?;
+            let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
             let table_id = effect.next_sub_game_id();
             let table = MttTableState {
                 table_id: table_id.into(),
                 btn: 0,
                 sb,
                 bb,
+                ante,
                 players,
                 next_game_start: 0,
                 hand_id: 0,
@@ -705,7 +740,7 @@ impl Mtt {
         self.ranks.sort_by(|r1, r2| r2.chips.cmp(&r1.chips));
     }
 
-    fn calc_blinds(&self) -> Result<(u64, u64), HandleError> {
+    fn calc_blinds(&self) -> Result<BlindRuleItem, HandleError> {
         let time_elapsed = self.time_elapsed;
         let level = time_elapsed / self.blind_info.blind_interval;
         let mut blind_rule = self.blind_info.blind_rules.get(level as usize);
@@ -713,9 +748,7 @@ impl Mtt {
             blind_rule = self.blind_info.blind_rules.last();
         }
         let blind_rule = blind_rule.ok_or(errors::error_empty_blind_rules())?;
-        let sb = blind_rule.sb_x as u64 * self.blind_info.blind_base;
-        let bb = blind_rule.bb_x as u64 * self.blind_info.blind_base;
-        Ok((sb, bb))
+        Ok(blind_rule.clone())
     }
 
     /// Return the tables with least players and most players in a
@@ -785,7 +818,7 @@ impl Mtt {
             .drain(0..num_to_move)
             .collect();
 
-        let (sb, bb) = self.calc_blinds()?;
+        let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
         let sitout_players: Vec<u64> = players_to_move.iter().map(|p| p.id).collect();
         sitout_players.iter().for_each(|pid| {
             self.table_assigns.remove(&pid);
@@ -797,6 +830,7 @@ impl Mtt {
             HoldemBridgeEvent::StartGame {
                 sb,
                 bb,
+                ante,
                 sitout_players,
             },
         )?;
@@ -835,7 +869,7 @@ impl Mtt {
         let Some(current_table) = self.tables.get(&table_id) else {
             Err(errors::error_invalid_table_id())?
         };
-        let (sb, bb) = self.calc_blinds()?;
+        let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
 
         // No-op for final table
         // No-op if we have players moving at the moment
@@ -847,6 +881,7 @@ impl Mtt {
                     HoldemBridgeEvent::StartGame {
                         sb,
                         bb,
+                        ante,
                         sitout_players: vec![],
                     },
                 )?;
@@ -881,7 +916,7 @@ impl Mtt {
         } else {
             0
         };
-            effect.info(format!("Trigger close table, current_table_players_count: {}, total_empty_seats: {}, reserved_seats: {}",
+        effect.info(format!("Trigger close table, current_table_players_count: {}, total_empty_seats: {}, reserved_seats: {}",
                 current_table_players_count, total_empty_seats, reserved_seats));
 
         if current_table_players_count <= total_empty_seats.saturating_sub(reserved_seats) {
@@ -904,12 +939,13 @@ impl Mtt {
             // Otherwise this table should wait another table for
             // merging.
             if table.players.len() > 1 {
-                let (sb, bb) = self.calc_blinds()?;
+                let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
                 effect.bridge_event(
                     table_id as _,
                     HoldemBridgeEvent::StartGame {
                         sb,
                         bb,
+                        ante,
                         sitout_players: Vec::with_capacity(0),
                     },
                 )?;
@@ -986,7 +1022,7 @@ impl Mtt {
         let mut table_id_to_sitins = BTreeMap::<usize, Vec<MttTableSitin>>::new();
         let mut tables_to_launch = Vec::<MttTableState>::new();
 
-        let (sb, bb) = self.calc_blinds()?;
+        let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
 
         for player_id in player_ids {
             let last_table_to_launch = tables_to_launch.last_mut();
@@ -1030,7 +1066,7 @@ impl Mtt {
                 effect.info(format!("Create {} table for player {}", table_id, rank.id));
                 let player = MttTablePlayer::new(rank.id, rank.chips, 0, rank.time_cards);
                 let players = vec![player];
-                let table = MttTableState::new(table_id, sb, bb, players);
+                let table = MttTableState::new(table_id, sb, bb, ante, players);
                 tables_to_launch.push(table);
             }
         }
@@ -1109,10 +1145,10 @@ mod tests {
     mod misc;
     use helper::*;
 
-    mod test_init_state;
+    mod regressions;
     mod test_handle_bounty;
     mod test_handle_game_result;
+    mod test_init_state;
     mod test_sit_players;
     mod test_start_game;
-    mod regressions;
 }
