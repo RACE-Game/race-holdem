@@ -3,7 +3,7 @@
 mod helper;
 
 use helper::{create_sync_event, setup_holdem_game};
-use race_api::error::Result;
+use race_api::error::HandleResult;
 use race_holdem_base::essential::*;
 use race_test::prelude::*;
 
@@ -11,7 +11,7 @@ use race_test::prelude::*;
 // The third player joins in the preflop
 // Then both players keep checking to showdown
 #[test]
-fn test_join_on_preflop() -> Result<()> {
+fn test_join_on_preflop() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -25,7 +25,7 @@ fn test_join_on_preflop() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(
             state.player_order,
@@ -41,7 +41,7 @@ fn test_join_on_preflop() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert!(state
             .player_map
             .get(&carol.id())
@@ -74,7 +74,7 @@ fn test_join_on_preflop() -> Result<()> {
 // The third player joins in the preflop
 // Then both players keep checking to showdown
 #[test]
-fn test_on_preflop_then_runner() -> Result<()> {
+fn test_on_preflop_then_runner() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -89,7 +89,7 @@ fn test_on_preflop_then_runner() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(
             state.player_order,
@@ -105,7 +105,7 @@ fn test_on_preflop_then_runner() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert!(state
             .player_map
             .get(&carol.id())
@@ -127,7 +127,7 @@ fn test_on_preflop_then_runner() -> Result<()> {
     }
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Runner);
     }
     Ok(())

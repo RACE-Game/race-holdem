@@ -7,12 +7,12 @@ use std::collections::HashMap;
 
 use race_holdem_base::essential::*;
 use helper::{create_sync_event, setup_holdem_game};
-use race_api::{error::Result, event::Event};
+use race_api::{error::HandleResult, event::Event};
 use race_test::prelude::*;
 
 // Two players leave one after another
 #[test]
-fn test_players_leave() -> Result<()> {
+fn test_players_leave() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -25,18 +25,14 @@ fn test_players_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.player_order,
             vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: bob.id(),
-                position: 1,
-                clock: ACTION_TIMEOUT_POSTFLOP
-            })
+            Some(ActingPlayer::new(bob.id(), 1, 0, ACTION_TIMEOUT_POSTFLOP))
         );
         println!("-- Display {:?}", state.display);
         assert_eq!(state.display.len(), 1);
@@ -54,7 +50,7 @@ fn test_players_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         println!("-- Display {:?}", state.display);
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.acting_player, None);
@@ -78,7 +74,7 @@ fn test_players_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Init);
         // println!("-- State {:?}", state);
         // println!("-- Display {:?}", state.display);
@@ -94,7 +90,7 @@ fn test_players_leave() -> Result<()> {
 // Bob leaves the game
 // Expect Bob to leave instantly
 #[test]
-fn test_settle_leave() -> Result<()> {
+fn test_settle_leave() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -107,18 +103,14 @@ fn test_settle_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.player_order,
             vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: bob.id(),
-                position: 1,
-                clock: ACTION_TIMEOUT_POSTFLOP
-            })
+            Some(ActingPlayer::new(bob.id(), 1, 0, ACTION_TIMEOUT_POSTFLOP))
         );
     }
 
@@ -132,7 +124,7 @@ fn test_settle_leave() -> Result<()> {
 
     // Alice (BB) should be Winner and game is in Settle
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
@@ -152,7 +144,7 @@ fn test_settle_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.acting_player, None);
         assert_eq!(state.player_map.len(), 1);
@@ -169,7 +161,7 @@ fn test_settle_leave() -> Result<()> {
 // Alice leaves the game while the stage is Runner.
 // Expect alice to leave instantly.
 #[test]
-fn test_runner_leave() -> Result<()> {
+fn test_runner_leave() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -196,18 +188,14 @@ fn test_runner_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.player_order,
             vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: bob.id(),
-                position: 1,
-                clock: ACTION_TIMEOUT_POSTFLOP
-            })
+            Some(ActingPlayer::new(bob.id(), 1, 0, ACTION_TIMEOUT_POSTFLOP))
         );
     }
     ctx.add_revealed_random(1, revealed)?;
@@ -221,7 +209,7 @@ fn test_runner_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
@@ -239,7 +227,7 @@ fn test_runner_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.street, Street::Showdown);
         assert_eq!(state.stage, HoldemStage::Runner);
         assert_eq!(state.acting_player, None);
@@ -257,7 +245,7 @@ fn test_runner_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Runner);
         assert_eq!(state.acting_player, None);
         assert_eq!(state.player_map.len(), 0);
@@ -269,7 +257,7 @@ fn test_runner_leave() -> Result<()> {
 
 // Test player leaving in showdown
 #[test]
-fn test_showdown_leave() -> Result<()> {
+fn test_showdown_leave() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -282,18 +270,14 @@ fn test_showdown_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.player_order,
             vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: bob.id(),
-                position: 1,
-                clock: ACTION_TIMEOUT_POSTFLOP
-            })
+            Some(ActingPlayer::new(bob.id(), 1, 0, ACTION_TIMEOUT_POSTFLOP))
         );
     }
 
@@ -306,7 +290,7 @@ fn test_showdown_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(state.player_map.len(), 2);
@@ -325,7 +309,7 @@ fn test_showdown_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.street, Street::Flop);
         // Acting player is now Alice
@@ -352,7 +336,7 @@ fn test_showdown_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.street, Street::Turn);
         assert_eq!(
@@ -375,16 +359,12 @@ fn test_showdown_leave() -> Result<()> {
         vec![&mut alice, &mut bob, &mut transactor],
     )?;
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Play);
         assert_eq!(state.street, Street::River);
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: alice.id(),
-                position: 0,
-                clock: 30_000
-            })
+            Some(ActingPlayer::new(alice.id(), 0, 0, ACTION_TIMEOUT_POSTFLOP))
         );
     }
 
@@ -402,7 +382,7 @@ fn test_showdown_leave() -> Result<()> {
         vec![&mut alice, &mut bob, &mut transactor],
     )?;
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Showdown);
         assert_eq!(state.street, Street::Showdown);
         assert_eq!(state.acting_player, None);
@@ -418,7 +398,7 @@ fn test_showdown_leave() -> Result<()> {
         vec![&mut alice, &mut bob, &mut transactor],
     )?;
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Showdown);
         assert_eq!(state.player_map.len(), 1);
         assert!(!state.player_map.contains_key(&alice.id()));
@@ -432,7 +412,7 @@ fn test_showdown_leave() -> Result<()> {
 /// Alice leave in the middle of the game when she's acting,
 /// Bob and Charlie check to showdown.
 #[test]
-fn test_leave_in_multiplayers() -> Result<()> {
+fn test_leave_in_multiplayers() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -446,18 +426,14 @@ fn test_leave_in_multiplayers() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.player_order,
             vec![bob.id(), charlie.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: bob.id(),
-                position: 1,
-                clock: ACTION_TIMEOUT_POSTFLOP,
-            })
+            Some(ActingPlayer::new(bob.id(), 1, 0, ACTION_TIMEOUT_POSTFLOP))
         );
     }
 
@@ -472,7 +448,7 @@ fn test_leave_in_multiplayers() -> Result<()> {
     };
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.street,
             Street::Preflop
@@ -539,7 +515,7 @@ fn test_leave_in_multiplayers() -> Result<()> {
 }
 
 #[test]
-fn test_play_leave() -> Result<()> {
+fn test_play_leave() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -552,18 +528,14 @@ fn test_play_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(
             state.player_order,
             vec![bob.id(), alice.id()]
         );
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: bob.id(),
-                position: 1,
-                clock: ACTION_TIMEOUT_POSTFLOP
-            })
+            Some(ActingPlayer::new(bob.id(), 1, 0, ACTION_TIMEOUT_POSTFLOP))
         );
     }
 
@@ -577,7 +549,7 @@ fn test_play_leave() -> Result<()> {
 
     // Alice (BB) should be Winner and game is in Settle
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.player_map.len(), 2);
         assert_eq!(
@@ -597,7 +569,7 @@ fn test_play_leave() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.stage, HoldemStage::Settle);
         assert_eq!(state.acting_player, None);
         assert_eq!(state.player_map.len(), 1);

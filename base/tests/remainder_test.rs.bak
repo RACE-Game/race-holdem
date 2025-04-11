@@ -52,7 +52,7 @@ fn test_remainder() -> Result<()> {
             (9, "h8".to_string()),
             (10, "d7".to_string()),
         ]);
-        let holdem_state = handler.get_state();
+        let holdem_state = handler.state();
         ctx.add_revealed_random(holdem_state.deck_random_id, runner_revealed)?;
     }
 
@@ -73,7 +73,7 @@ fn test_remainder() -> Result<()> {
     }
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.prize_map.get(&alice.id()), Some(&831u64));
         assert_eq!(state.prize_map.get(&bob.id()), Some(&830u64));
         assert_eq!(state.stage, HoldemStage::Runner);

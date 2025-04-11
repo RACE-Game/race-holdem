@@ -7,8 +7,10 @@ use std::collections::BTreeMap;
 
 use borsh::BorshDeserialize;
 use helper::make_uneven_betmap;
+
+use race_holdem_base::account::HoldemAccount;
 use race_holdem_base::essential::{
-    Display, GameEvent, HoldemAccount, Player, PlayerResult, PlayerStatus, Pot,
+    Display, GameEvent, Player, PlayerResult, PlayerStatus, Pot,
 };
 
 const ALICE: u64 = 0;

@@ -60,7 +60,7 @@ fn test_allin_case1() -> Result<()> {
             (11, "h9".to_string()),
             (12, "d7".to_string()),
         ]);
-        let state = handler.get_state();
+        let state = handler.state();
         ctx.add_revealed_random(state.deck_random_id, runner_revealed)?;
         println!("Player order {:?}", state.player_order);
     }
@@ -95,7 +95,7 @@ fn test_allin_case1() -> Result<()> {
     }
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.street, Street::Showdown);
     }
     Ok(())
@@ -153,7 +153,7 @@ fn test_allin_case2() -> Result<()> {
             (13, "h9".to_string()),
             (14, "d7".to_string()),
         ]);
-        let state = handler.get_state();
+        let state = handler.state();
         ctx.add_revealed_random(state.deck_random_id, runner_revealed)?;
         println!("Player order {:?}", state.player_order);
     }
@@ -182,7 +182,7 @@ fn test_allin_case2() -> Result<()> {
     }
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.street, Street::Showdown);
     }
 

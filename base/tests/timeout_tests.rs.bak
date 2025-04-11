@@ -1,13 +1,13 @@
 mod helper;
 
 use helper::{create_sync_event, setup_holdem_game};
-use race_api::{error::Result, event::Event};
+use race_api::{error::HandleResult, event::Event};
 use race_holdem_base::essential::*;
 use race_test::prelude::*;
 
 // Test one player reaches the maximum number of timeouts in heads up
 #[test]
-fn test_headsup_action_timeout() -> Result<()> {
+fn test_headsup_action_timeout() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -20,7 +20,7 @@ fn test_headsup_action_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_mut_state();
+        let state = handler.state_mut();
         state
             .player_map
             .entry(bob.id())
@@ -31,14 +31,14 @@ fn test_headsup_action_timeout() -> Result<()> {
     handler.handle_dispatch_event(&mut ctx)?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         assert_eq!(state.player_map.len(), 1);
     }
     Ok(())
 }
 
 #[test]
-fn test_multiplayers_consecutive_timeout() -> Result<()> {
+fn test_multiplayers_consecutive_timeout() -> HandleResult<()> {
     let (_, mut game_acct, mut ctx, mut handler, mut transactor) = setup_holdem_game();
     let mut alice = TestClient::player("Alice");
     let mut bob = TestClient::player("Bob");
@@ -72,7 +72,7 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         // BTN == position 1, SB == position 2, BB == position 3
         assert_eq!(state.player_map.len(), 7);
         assert_eq!(
@@ -90,11 +90,7 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
         assert_eq!(state.street, Street::Preflop);
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: eve.id(),
-                position: 4,
-                clock: 15000
-            })
+            Some(ActingPlayer::new(eve.id(), 4, 0, ACTION_TIMEOUT_POSTFLOP))
         );
 
         for p in state.player_map.values() {
@@ -122,17 +118,13 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let timeout_player = state.player_map.get(&eve.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: frank.id(),
-                position: 5,
-                clock: 12000,
-            })
+            Some(ActingPlayer::new(frank.id(), 5, 0, ACTION_TIMEOUT_PREFLOP))
         );
     }
 
@@ -155,17 +147,13 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let timeout_player = state.player_map.get(&frank.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
         assert_eq!(
             state.acting_player,
-            Some(ActingPlayer {
-                id: grace.id(),
-                position: 6,
-                clock: 12000,
-            })
+            Some(ActingPlayer::new(grace.id(), 6, 0, ACTION_TIMEOUT_PREFLOP))
         );
     }
 
@@ -188,7 +176,7 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let timeout_player = state.player_map.get(&grace.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
@@ -213,7 +201,7 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let timeout_player = state.player_map.get(&alice.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
@@ -238,7 +226,7 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let timeout_player = state.player_map.get(&bob.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
@@ -263,14 +251,14 @@ fn test_multiplayers_consecutive_timeout() -> Result<()> {
     )?;
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let timeout_player = state.player_map.get(&charlie.id()).unwrap();
         assert_eq!(timeout_player.status, PlayerStatus::Fold);
         assert_eq!(timeout_player.timeout, 1);
     }
 
     {
-        let state = handler.get_state();
+        let state = handler.state();
         let winner = state.player_map.get(&dave.id()).unwrap();
         assert_eq!(winner.status, PlayerStatus::Wait);
         assert_eq!(winner.timeout, 0);

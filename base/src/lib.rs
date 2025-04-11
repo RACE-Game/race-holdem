@@ -5,6 +5,7 @@
 //!
 
 pub mod evaluator;
+pub mod account;
 pub mod essential;
 pub mod game;
 pub mod hand_history;

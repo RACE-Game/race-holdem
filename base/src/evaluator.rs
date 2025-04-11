@@ -63,6 +63,16 @@ pub fn validate_cards(cards: &Vec<&str>) -> bool {
     }
 }
 
+fn find_kicker<'a>(cards: &[&'a str]) -> &'a str {
+    let mut best_card = cards[0];
+    for &card in cards.iter().skip(1) {
+        if compare_kinds(card, best_card) == Ordering::Less {
+            best_card = card;
+        }
+    }
+    best_card
+}
+
 /// Sort the 7 cards by the number of suited kinds.
 /// If two groups have equal number of cards, the higher-kind suit wins:
 /// Input:  ["ht", "s8", "st", "c8", "h5", "d3", "h3"]
@@ -399,7 +409,10 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
     }
     // two pairs
     else if check_same_kinds(&sorted_kinds, Category::TwoPairs) {
-        let picks = sorted_by_group[0..5].to_vec();
+        println!("{:?}", sorted_by_group);
+        let mut picks = sorted_by_group[0..4].to_vec();
+        let kicker = find_kicker(&sorted_by_group[4..]);
+        picks.push(kicker);
         let value = tag_value(&picks, 2);
         PlayerHand {
             category: Category::TwoPairs,
@@ -546,6 +559,22 @@ mod tests {
         assert_eq!(result.category, Category::FourOfAKind);
     }
 
+    #[test]
+    fn test_two_pairs() {
+        let hole_cards: [&str; 2] = ["c9", "dt"];
+        let board: [&str; 5] = ["hq", "cq", "dk", "d9", "ct"];
+        let result = evaluate_cards(create_cards(&board, &hole_cards));
+        assert_eq!(result.picks, vec!["hq", "cq", "ct", "dt", "dk"]);
+        assert_eq!(result.value, vec![2, 12, 12, 10, 10, 13]);
+        assert_eq!(result.category, Category::TwoPairs);
+
+        let hole_cards: [&str; 2] = ["c9", "da"];
+        let board: [&str; 5] = ["hq", "cq", "dk", "d9", "ct"];
+        let result = evaluate_cards(create_cards(&board, &hole_cards));
+        assert_eq!(result.picks, vec!["hq", "cq", "d9", "c9", "da"]);
+        assert_eq!(result.value, vec![2, 12, 12, 9, 9, 14]);
+        assert_eq!(result.category, Category::TwoPairs);
+    }
 
     #[test]
     fn test_royal_flush() {

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use race_api::prelude::*;
 use race_holdem_base::hand_history::HandHistory;
 use race_test::prelude::*;
+use race_holdem_base::account::HoldemAccount;
 
 use race_holdem_base::essential::*;
 use race_holdem_base::game::*;
@@ -113,8 +114,10 @@ pub fn setup_holdem_state() -> Result<Holdem> {
     let mut state = Holdem {
         hand_id: 1,
         deck_random_id: 1,
+        max_deposit: 600,
         sb: 10,
         bb: 20,
+        ante: 0,
         min_raise: 20,
         btn: 0,
         rake: 3,
@@ -137,7 +140,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         table_size: 7,
         hand_history: HandHistory::default(),
         next_game_start: 0,
-        max_deposit: 6000,
+        rake_collected: 6000,
     };
     state.arrange_players(0usize)?;
     Ok(state)
@@ -190,18 +193,12 @@ pub fn setup_real_holdem() -> Holdem {
         id: BOB,
         position: 1usize,
         clock: 30_000u64,
+        action_start: 0,
+        time_card_clock: None,
     });
     holdem
 }
 
-pub fn setup_context() -> GameContext {
-    let mut transactor = TestClient::transactor("foo");
-    let game_account = TestGameAccountBuilder::default()
-        .set_transactor(&mut transactor)
-        .build();
-    let context = GameContext::try_new(&game_account).unwrap();
-    context
-}
 
 // ====================================================
 // Helpers for testing Holdem with the race protocol
@@ -214,37 +211,14 @@ type Game = (
     TestClient,
 );
 
-pub fn setup_holdem_game() -> Game {
+pub fn setup_holdem_game(transactor: &mut TestClient) -> TestContext<Holdem> {
     let holdem_account = HoldemAccount::default();
-    let holdem_data = holdem_account.try_to_vec().unwrap();
-    let mut transactor = TestClient::transactor("foo");
-    let mut game_account = TestGameAccountBuilder::default()
+    let (test_context, _) = TestContextBuilder::default()
         .with_max_players(9)
-        .set_transactor(&mut transactor)
-        .build();
-    game_account.data = holdem_data;
+        .set_transactor(transactor)
+        .with_deposit_range(1, 1000000000)
+        .with_data(&holdem_account)
+        .build_with_init_state().unwrap();
 
-    let init_account = game_account.derive_init_account();
-    let mut context = GameContext::try_new(&game_account).unwrap();
-    let handler = TestHandler::<Holdem>::init_state(&mut context, &game_account).unwrap();
-    (init_account, game_account, context, handler, transactor)
-}
-
-pub fn create_sync_event(
-    mut ctx: &mut GameContext,
-    mut game_account: &mut GameAccount,
-    new_players: Vec<&mut TestClient>,
-    transactor: &TestClient,
-) -> Event {
-    ctx.add_node(
-        transactor.addr(),
-        ctx.access_version(),
-        ClientMode::Transactor,
-    );
-    let mut players = Vec::new();
-    new_players
-        .into_iter()
-        .for_each(|p| players.push(p.join(&mut ctx, &mut game_account, 10_000).unwrap()));
-
-    Event::Join { players }
+    test_context
 }
