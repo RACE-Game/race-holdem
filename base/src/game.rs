@@ -1278,13 +1278,17 @@ impl Holdem {
             | HoldemStage::Settle
             | HoldemStage::Runner
             | HoldemStage::Showdown => {
-                if let Some(player) = self.player_map.get(&player_id) {
-                    effect.withdraw(player_id, player.chips + player.deposit);
-                    effect.eject(player_id);
+                if let Some(player) = self.player_map.get_mut(&player_id) {
+                    effect.info(format!("Player {} leaves game", player_id));
                     effect.checkpoint();
+                    player.status = PlayerStatus::Leave;
                     self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
                     self.signal_game_end(effect)?;
-                    self.cash_table_kick_players(effect);
+                    // Eject all left players
+                    for p in self.cash_table_kick_players(effect) {
+                        effect.withdraw(p.id, p.chips + p.deposit);
+                        effect.eject(p.id);
+                    }
                 } else {
                     return Err(HandleError::InvalidPlayer)?;
                 }
@@ -1310,11 +1314,12 @@ impl Holdem {
                     && !self.is_acting_player(player_id)
                     && unfolded_cnt > 1
                 {
-                    effect.info("Game continues as the leaving player not acting");
+                    effect.info(format!("Player {} leaves before its turn, game continues", player_id));
                 } else if self.is_acting_player(player_id) {
-                    // TODO: fold the `Leave' player?
+                    effect.info(format!("Player {} folds and leaves, game continues", player_id));
                     self.next_state(effect)?;
                 } else if unfolded_cnt == 1 {
+                    effect.info(format!("Player {} leaves, game settles", player_id));
                     let winner = self
                         .player_map
                         .values()
@@ -1688,7 +1693,6 @@ impl GameHandler for Holdem {
 
             Event::Leave { player_id } => {
                 // TODO: Leaving is not allowed in SNG game
-                effect.info(format!("Player {} decides to leave game", player_id));
                 self.set_player_status(player_id, PlayerStatus::Leave)?;
                 let _ = self.handle_player_leave(effect, player_id);
 
