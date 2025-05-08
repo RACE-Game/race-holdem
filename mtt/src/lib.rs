@@ -52,6 +52,7 @@ pub enum MttStage {
     Playing,
     DistributingPrize,
     Completed,
+    Cancelled,
 }
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
@@ -464,18 +465,20 @@ impl GameHandler for Mtt {
                 if self.ranks.is_empty() {
                     effect.info("Game is empty, just complete the game");
                     // No player joined, mark game as completed
-                    self.stage = MttStage::Completed;
-                } else if self.ranks.len() == 1 {
-                    // Only 1 player joined, end game with single winner
+                    self.stage = MttStage::Cancelled;
+                } else if self.ranks.len() < self.min_players as _ {
+                    // No enough players, cancel the game
+                    // Return the ticket for each player
                     effect
-                        .info("Game has only one player, set it the winner and complete the game");
-                    self.apply_prizes(effect)?;
+                        .info("Game has no enough players, cancel game");
+                    self.refund_tickets(effect)?;
                 } else {
                     // Start game normally
                     effect.info(format!("Start game with {} players", self.ranks.len()));
                     self.stage = MttStage::Playing;
                     self.create_tables(effect)?;
                     self.update_alives();
+                    self.maybe_set_in_the_money();
                 }
                 effect.checkpoint();
             }
@@ -538,6 +541,8 @@ impl GameHandler for Mtt {
                 }
 
                 MttStage::Completed => {}
+
+                MttStage::Cancelled => {}
             },
             _ => (),
         }
@@ -725,6 +730,7 @@ impl Mtt {
         }
         self.sort_ranks();
         self.update_alives();
+        self.maybe_set_in_the_money();
         Ok(())
     }
 
@@ -1080,6 +1086,24 @@ impl Mtt {
         }
 
         Ok(())
+    }
+
+    /// Refund ticket to registered players
+    fn refund_tickets(&mut self, effect: &mut Effect) -> HandleResult<()> {
+
+        self.stage = MttStage::Cancelled;
+
+        for rank in self.ranks.iter_mut() {
+            rank.chips = 0;
+            rank.status = PlayerRankStatus::Out;
+            rank.bounty_reward = 0;
+            rank.bounty_transfer = 0;
+            effect.withdraw(rank.id, self.ticket);
+        }
+
+        self.player_balances.insert(0, 0);
+
+        return Ok(())
     }
 
     /// Apply the prizes and mark the game as completed.
