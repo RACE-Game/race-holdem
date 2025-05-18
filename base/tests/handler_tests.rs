@@ -20,9 +20,9 @@ fn test_preflop_fold() -> HandleResult<()> {
     let mut alice = TestClient::player("alice");
     let mut bob = TestClient::player("bob");
 
-    let join_and_deposit = ctx.join_multi(vec![(&mut alice, 1000), (&mut bob, 1000)]);
+    let (join, deposit) = ctx.join_multi(vec![(&mut bob, 1000), (&mut alice, 1000)]);
 
-    ctx.handle_event_multi(&join_and_deposit)?;
+    ctx.handle_multiple_events(&[join, deposit])?;
 
     {
         assert_eq!(ctx.current_dispatch(), Some(DispatchEvent::new(Event::GameStart, 0)));
@@ -36,7 +36,7 @@ fn test_preflop_fold() -> HandleResult<()> {
     {
         let state = ctx.state();
         assert_eq!(state.street, Street::Preflop);
-        assert_eq!(state.btn, 0);
+        assert_eq!(state.btn, 1);
         assert!(state.is_acting_player(alice.id()));
     }
 
@@ -49,22 +49,19 @@ fn test_preflop_fold() -> HandleResult<()> {
         let state = ctx.state();
         let alice = state.player_map.get(&alice.id()).unwrap();
         let bob = state.player_map.get(&bob.id()).unwrap();
-        // Street should remain unchanged
-        assert_eq!(state.street, Street::Preflop);
-        assert_eq!(alice.chips, 9990);
-        assert_eq!(bob.chips, 10_010);
+        assert_eq!(state.street, Street::Init);
+        assert_eq!(alice.chips, 990);
+        assert_eq!(bob.chips, 1010);
         assert_eq!(
             state.player_map.get(&bob.id()).unwrap().status,
             PlayerStatus::Wait
         );
     }
 
-    // Game should be able to start again with BTN changed
-    ctx.handle_dispatch_event()?; // WaitingTimeout
-    ctx.handle_dispatch_event()?; // GameStart
+    // Game should be started again with BTN changed.
     {
         let state = ctx.state();
-        assert_eq!(state.btn, 1);
+        assert_eq!(state.btn, 0);
     }
 
     Ok(())
