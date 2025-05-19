@@ -3,13 +3,13 @@ use race_api::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::take;
 
-use crate::errors;
 use crate::account::HoldemAccount;
+use crate::errors;
 use crate::essential::{
-    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemStage,
-    InternalPlayerJoin, Player, PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_AFK,
-    ACTION_TIMEOUT_POSTFLOP, ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN,
-    MAX_ACTION_TIMEOUT_COUNT, TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT,
+    ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player,
+    PlayerResult, PlayerStatus, Pot, Street, ACTION_TIMEOUT_AFK, ACTION_TIMEOUT_POSTFLOP,
+    ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT,
+    TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT,
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
@@ -51,7 +51,7 @@ pub struct Holdem {
 // Methods that mutate or query the game state
 impl Holdem {
     // calc timeout that should be wait after settle by state
-    fn calc_timeout_after_settle(&self) -> Result<u64, HandleError> {
+    fn calc_pre_settle_timeout(&self) -> Result<u64, HandleError> {
         // 0.5s for collect chips, 5s for players observer game result
         let collet_chips_time = 500;
         let dealing_card_time = 1_500;
@@ -79,7 +79,7 @@ impl Holdem {
     }
 
     // After settle, remove players and checkpoint
-    fn after_update_settle(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+    fn settle(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         // 1. remove players
         let removed_players = self.cash_table_kick_players(effect);
         for player in removed_players {
@@ -838,7 +838,7 @@ impl Holdem {
         self.mark_eliminated_players();
         self.hand_history.valid = true;
         // after settle, waiting timeout, for animations
-        let timeout = self.calc_timeout_after_settle()?;
+        let timeout = self.calc_pre_settle_timeout()?;
         self.wait_timeout(effect, timeout);
 
         Ok(())
@@ -859,7 +859,7 @@ impl Holdem {
         }
     }
 
-    pub fn settle(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+    pub fn update_game_result(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
         let decryption = effect.get_revealed(self.deck_random_id)?;
         // Board
         let board: Vec<&str> = self.board.iter().map(|c| c.as_str()).collect();
@@ -1274,12 +1274,12 @@ impl Holdem {
         match self.stage {
             // If current stage is not playing, the player can
             // leave with a settlement instantly.
-            HoldemStage::Init
-            | HoldemStage::Settle
-            | HoldemStage::Runner
-            | HoldemStage::Showdown => {
+            HoldemStage::Init | HoldemStage::Settle => {
                 if let Some(player) = self.player_map.get_mut(&player_id) {
-                    effect.info(format!("Player {} leaves game", player_id));
+                    effect.info(format!(
+                        "Player {} leaves game, current stage: {:?}",
+                        player_id, self.stage
+                    ));
                     effect.checkpoint();
                     player.status = PlayerStatus::Leave;
                     self.wait_timeout(effect, WAIT_TIMEOUT_DEFAULT);
@@ -1289,6 +1289,22 @@ impl Holdem {
                         effect.withdraw(p.id, p.chips + p.deposit);
                         effect.eject(p.id);
                     }
+                } else {
+                    return Err(HandleError::InvalidPlayer)?;
+                }
+            }
+
+            // If current stage is waiting for a settlement.
+            // Mark the leaving player as `Leave`.
+            // Then wait for settlement.
+            HoldemStage::Runner | HoldemStage::Showdown => {
+                if let Some(player) = self.player_map.get_mut(&player_id) {
+                    effect.info(format!(
+                        "Player {} leaves game, current stage: {:?}",
+                        player_id, self.stage
+                    ));
+                    player.status = PlayerStatus::Leave;
+                    effect.checkpoint();
                 } else {
                     return Err(HandleError::InvalidPlayer)?;
                 }
@@ -1314,9 +1330,15 @@ impl Holdem {
                     && !self.is_acting_player(player_id)
                     && unfolded_cnt > 1
                 {
-                    effect.info(format!("Player {} leaves before its turn, game continues", player_id));
+                    effect.info(format!(
+                        "Player {} leaves before its turn, game continues",
+                        player_id
+                    ));
                 } else if self.is_acting_player(player_id) {
-                    effect.info(format!("Player {} folds and leaves, game continues", player_id));
+                    effect.info(format!(
+                        "Player {} folds and leaves, game continues",
+                        player_id
+                    ));
                     self.next_state(effect)?;
                 } else if unfolded_cnt == 1 {
                     effect.info(format!("Player {} leaves, game settles", player_id));
@@ -1624,7 +1646,7 @@ impl GameHandler for Holdem {
             }
 
             Event::WaitingTimeout => {
-                self.after_update_settle(effect)?;
+                self.settle(effect)?;
                 if self.player_map.len() >= 2
                     && effect.count_nodes() >= 1
                     && self.mode != GameMode::Mtt
@@ -1806,8 +1828,8 @@ impl GameHandler for Holdem {
                         });
                     }
 
-                    self.settle(effect)?;
-                    let timeout = self.calc_timeout_after_settle()?;
+                    self.update_game_result(effect)?;
+                    let timeout = self.calc_pre_settle_timeout()?;
                     // WAIT_TIMEOUT_RUNNER
                     self.wait_timeout(effect, timeout);
 
@@ -1816,8 +1838,8 @@ impl GameHandler for Holdem {
 
                 // Ending, comparing cards
                 HoldemStage::Showdown => {
-                    self.settle(effect)?;
-                    let timeout = self.calc_timeout_after_settle()?;
+                    self.update_game_result(effect)?;
+                    let timeout = self.calc_pre_settle_timeout()?;
                     // WAIT_TIMEOUT_SHOWDOWN
                     self.wait_timeout(effect, timeout);
 
