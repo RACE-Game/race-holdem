@@ -1174,6 +1174,8 @@ impl Holdem {
             return Err(HandleError::InvalidPlayer);
         };
 
+        let player_id = player.id;
+
         match event {
             GameEvent::Bet(amount) => {
                 if !self.is_acting_player(sender) {
@@ -1192,10 +1194,11 @@ impl Holdem {
                     return Err(errors::bet_amonut_is_too_small());
                 }
 
-                let (allin, _) = self.take_bet(sender.clone(), amount)?;
+                let (allin, real_bet_amount) = self.take_bet(sender.clone(), amount)?;
                 self.set_player_acted(sender, allin)?;
                 self.min_raise = amount;
                 self.street_bet = amount;
+                self.hand_history.add_action(self.street, PlayerAction::new_bet(player_id, real_bet_amount))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1206,8 +1209,9 @@ impl Holdem {
 
                 let betted = self.get_player_bet(sender);
                 let call_amount = self.street_bet - betted;
-                let (allin, _) = self.take_bet(sender.clone(), call_amount)?;
+                let (allin, real_call_amount) = self.take_bet(sender.clone(), call_amount)?;
                 self.set_player_acted(sender, allin)?;
+                self.hand_history.add_action(self.street, PlayerAction::new_call(player_id, real_call_amount))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1222,6 +1226,7 @@ impl Holdem {
                     return Err(errors::player_cant_check());
                 }
                 self.set_player_status(sender, PlayerStatus::Acted)?;
+                self.hand_history.add_action(self.street, PlayerAction::new_check(player_id))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1230,6 +1235,7 @@ impl Holdem {
                     return Err(errors::not_the_acting_player_to_fold());
                 }
                 self.set_player_status(sender, PlayerStatus::Fold)?;
+                self.hand_history.add_action(self.street, PlayerAction::new_fold(player_id))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1246,22 +1252,19 @@ impl Holdem {
                 if amount + betted < self.street_bet + self.min_raise && amount != player.chips {
                     return Err(errors::raise_amount_is_too_small());
                 }
-                let (allin, real_bet) = self.take_bet(sender.clone(), amount)?;
+                let (allin, real_raise_amount) = self.take_bet(sender.clone(), amount)?;
                 self.set_player_acted(sender, allin)?;
-                let new_street_bet = betted + real_bet;
+                let new_street_bet = betted + real_raise_amount;
                 let new_min_raise = new_street_bet - self.street_bet;
                 self.street_bet = new_street_bet;
                 self.min_raise = new_min_raise;
+                self.hand_history.add_action(self.street, PlayerAction::new_raise(player_id, betted + real_raise_amount))?;
                 self.reduce_time_cards(effect)?;
             }
 
             _ => {}
         }
 
-        // Save action to hand history
-        let street = self.street;
-        self.hand_history
-            .add_action(street, PlayerAction::new(sender, event))?;
         self.next_state(effect)?;
         Ok(())
     }
@@ -1582,13 +1585,7 @@ impl GameHandler for Holdem {
                 if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
                     if self.mode == GameMode::Cash {
                         self.set_player_status(player_id, PlayerStatus::Leave)?;
-                        self.hand_history.add_action(
-                            street,
-                            PlayerAction {
-                                id: player_id,
-                                event: GameEvent::Fold,
-                            },
-                        )?;
+                        self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
                         self.next_state(effect)?;
                         return Ok(());
                     } else {
@@ -1599,13 +1596,7 @@ impl GameHandler for Holdem {
                 if self.mode == GameMode::Cash {
                     if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
                         self.set_player_status(player_id, PlayerStatus::Leave)?;
-                        self.hand_history.add_action(
-                            street,
-                            PlayerAction {
-                                id: player_id,
-                                event: GameEvent::Fold,
-                            },
-                        )?;
+                        self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
                         self.next_state(effect)?;
                         return Ok(());
                     } else if street != Street::Preflop {
@@ -1622,24 +1613,12 @@ impl GameHandler for Holdem {
 
                 if bet == street_bet {
                     self.set_player_status(player_id, PlayerStatus::Acted)?;
-                    self.hand_history.add_action(
-                        street,
-                        PlayerAction {
-                            id: player_id,
-                            event: GameEvent::Check,
-                        },
-                    )?;
+                    self.hand_history.add_action(street, PlayerAction::new_check(player_id))?;
                     self.next_state(effect)?;
                     Ok(())
                 } else {
                     self.set_player_status(player_id, PlayerStatus::Fold)?;
-                    self.hand_history.add_action(
-                        street,
-                        PlayerAction {
-                            id: player_id,
-                            event: GameEvent::Fold,
-                        },
-                    )?;
+                    self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
                     self.next_state(effect)?;
                     Ok(())
                 }

@@ -3,7 +3,7 @@ use race_api::prelude::HandleError;
 
 use crate::{
     errors,
-    essential::{GameEvent, Street},
+    essential::Street,
     evaluator::Category,
 };
 use std::collections::BTreeMap;
@@ -42,17 +42,35 @@ impl BlindBet {
 
 #[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub struct PlayerAction {
-    pub id: u64,
-    pub event: GameEvent,
+    id: u64,
+    event: PlayerActionEvent,
 }
 
 impl PlayerAction {
-    pub fn new(id: u64, event: GameEvent) -> Self {
-        Self {
-            id,
-            event,
-        }
+    pub fn new_bet(id: u64, real_bet_amount: u64) -> Self {
+        Self { id, event: PlayerActionEvent::Bet(real_bet_amount) }
     }
+    pub fn new_raise(id: u64, real_raise_amount: u64) -> Self {
+        Self { id, event: PlayerActionEvent::Raise(real_raise_amount) }
+    }
+    pub fn new_call(id: u64, real_call_amount: u64) -> Self {
+        Self { id, event: PlayerActionEvent::Call(real_call_amount) }
+    }
+    pub fn new_check(id: u64) -> Self {
+        Self { id, event: PlayerActionEvent::Check }
+    }
+    pub fn new_fold(id: u64) -> Self {
+        Self { id, event: PlayerActionEvent::Fold }
+    }
+}
+
+#[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
+pub enum PlayerActionEvent {
+    Bet(u64),
+    Check,
+    Call(u64),
+    Fold,
+    Raise(u64),
 }
 
 #[derive(Debug, Default, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
