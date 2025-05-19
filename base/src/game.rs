@@ -366,7 +366,7 @@ impl Holdem {
                 self.set_player_status(player_id, PlayerStatus::Allin)?;
             }
             self.hand_history
-                .add_blinds_info(BlindBet::new(player_id, BlindType::Ante, real_ante));
+                .add_blinds_info(BlindBet::new(player_id, BlindType::Ante, real_ante, allin));
         }
 
         Ok(total_ante)
@@ -405,18 +405,18 @@ impl Holdem {
             (sb_id, bb_id)
         };
 
-        let (allin, real_sb) = self.take_bet(sb_id, self.sb)?;
-        if allin {
+        let (sb_allin, real_sb) = self.take_bet(sb_id, self.sb)?;
+        if sb_allin {
             self.set_player_status(sb_id, PlayerStatus::Allin)?;
         }
-        let (allin, real_bb) = self.take_bet(bb_id, self.bb)?;
-        if allin {
+        let (bb_allin, real_bb) = self.take_bet(bb_id, self.bb)?;
+        if bb_allin {
             self.set_player_status(bb_id, PlayerStatus::Allin)?;
         }
 
         let hh = &mut self.hand_history;
-        hh.add_blinds_info(BlindBet::new(sb_id, BlindType::Sb, real_sb));
-        hh.add_blinds_info(BlindBet::new(bb_id, BlindType::Bb, real_bb));
+        hh.add_blinds_info(BlindBet::new(sb_id, BlindType::Sb, real_sb, sb_allin));
+        hh.add_blinds_info(BlindBet::new(bb_id, BlindType::Bb, real_bb, bb_allin));
         hh.set_pot(Street::Preflop, real_sb + real_bb + real_ante);
 
         // Select next to act
@@ -1198,7 +1198,7 @@ impl Holdem {
                 self.set_player_acted(sender, allin)?;
                 self.min_raise = amount;
                 self.street_bet = amount;
-                self.hand_history.add_action(self.street, PlayerAction::new_bet(player_id, real_bet_amount))?;
+                self.hand_history.add_action(self.street, PlayerAction::new_bet(player_id, real_bet_amount, allin))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1211,7 +1211,7 @@ impl Holdem {
                 let call_amount = self.street_bet - betted;
                 let (allin, real_call_amount) = self.take_bet(sender.clone(), call_amount)?;
                 self.set_player_acted(sender, allin)?;
-                self.hand_history.add_action(self.street, PlayerAction::new_call(player_id, real_call_amount))?;
+                self.hand_history.add_action(self.street, PlayerAction::new_call(player_id, real_call_amount, allin))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1258,7 +1258,7 @@ impl Holdem {
                 let new_min_raise = new_street_bet - self.street_bet;
                 self.street_bet = new_street_bet;
                 self.min_raise = new_min_raise;
-                self.hand_history.add_action(self.street, PlayerAction::new_raise(player_id, betted + real_raise_amount))?;
+                self.hand_history.add_action(self.street, PlayerAction::new_raise(player_id, betted + real_raise_amount, allin))?;
                 self.reduce_time_cards(effect)?;
             }
 

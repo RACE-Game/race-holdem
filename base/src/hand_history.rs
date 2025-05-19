@@ -28,14 +28,16 @@ pub struct BlindBet {
     pub id: u64,
     pub blind_type: BlindType,
     pub amount: u64,
+    pub is_allin: bool,
 }
 
 impl BlindBet {
-    pub fn new(id: u64, blind_type: BlindType, amount: u64) -> Self {
+    pub fn new(id: u64, blind_type: BlindType, amount: u64, is_allin: bool) -> Self {
         Self {
             id,
             blind_type,
             amount,
+            is_allin,
         }
     }
 }
@@ -47,14 +49,14 @@ pub struct PlayerAction {
 }
 
 impl PlayerAction {
-    pub fn new_bet(id: u64, real_bet_amount: u64) -> Self {
-        Self { id, event: PlayerActionEvent::Bet(real_bet_amount) }
+    pub fn new_bet(id: u64, real_bet_amount: u64, is_allin: bool) -> Self {
+        Self { id, event: PlayerActionEvent::Bet { amount: real_bet_amount, is_allin } }
     }
-    pub fn new_raise(id: u64, real_raise_amount: u64) -> Self {
-        Self { id, event: PlayerActionEvent::Raise(real_raise_amount) }
+    pub fn new_raise(id: u64, real_raise_to_amount: u64, is_allin: bool) -> Self {
+        Self { id, event: PlayerActionEvent::Raise { amount: real_raise_to_amount, is_allin } }
     }
-    pub fn new_call(id: u64, real_call_amount: u64) -> Self {
-        Self { id, event: PlayerActionEvent::Call(real_call_amount) }
+    pub fn new_call(id: u64, real_call_amount: u64, is_allin: bool) -> Self {
+        Self { id, event: PlayerActionEvent::Call { amount: real_call_amount, is_allin } }
     }
     pub fn new_check(id: u64) -> Self {
         Self { id, event: PlayerActionEvent::Check }
@@ -66,11 +68,20 @@ impl PlayerAction {
 
 #[derive(Debug, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
 pub enum PlayerActionEvent {
-    Bet(u64),
+    Bet {
+        amount: u64,
+        is_allin: bool,
+    },
     Check,
-    Call(u64),
+    Call{
+        amount: u64,
+        is_allin: bool,
+    },
     Fold,
-    Raise(u64),
+    Raise{
+        amount: u64,
+        is_allin: bool,
+    },
 }
 
 #[derive(Debug, Default, BorshDeserialize, BorshSerialize, PartialEq, Clone)]
