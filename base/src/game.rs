@@ -1277,7 +1277,7 @@ impl Holdem {
         match self.stage {
             // If current stage is not playing, the player can
             // leave with a settlement instantly.
-            HoldemStage::Init | HoldemStage::Settle => {
+            HoldemStage::Init => {
                 if let Some(player) = self.player_map.get_mut(&player_id) {
                     effect.info(format!(
                         "Player {} leaves game, current stage: {:?}",
@@ -1300,7 +1300,7 @@ impl Holdem {
             // If current stage is waiting for a settlement.
             // Mark the leaving player as `Leave`.
             // Then wait for settlement.
-            HoldemStage::Runner | HoldemStage::Showdown => {
+            HoldemStage::Settle | HoldemStage::Runner | HoldemStage::Showdown => {
                 if let Some(player) = self.player_map.get_mut(&player_id) {
                     effect.info(format!(
                         "Player {} leaves game, current stage: {:?}",
