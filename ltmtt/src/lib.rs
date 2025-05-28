@@ -1,21 +1,17 @@
 mod errors;
 
-use std::vec;
-use std::{cmp::Reverse, collections::BTreeMap};
-
-// use crate::errors::error_leave_not_allowed;
 use borsh::{BorshDeserialize, BorshSerialize};
-// use race_api::engine::GameHandler;
 use race_api::{
     prelude::*,
     types::{EntryLock, GameDeposit},
 };
-
 use race_holdem_mtt_base::{
     HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
     PlayerResultStatus, DEFAULT_TIME_CARDS,
 };
 use race_proc_macro::game_handler;
+use std::vec;
+use std::{cmp::Reverse, collections::BTreeMap};
 
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct LtMttAccountData {
@@ -173,8 +169,6 @@ pub enum LtMttPlayerStatus {
     #[default]
     // player not join in game.
     Out,
-    // player intend to sitin a table.
-    Pending,
     // player is playing in a table.
     Playing,
 }
@@ -226,8 +220,6 @@ pub struct LtMtt {
     tables: BTreeMap<usize, MttTableState>,
     // player_id -> table_id
     table_assigns: BTreeMap<u64, usize>,
-    // players who request sit in a table but not receive a confirmation.
-    table_assigns_pending: BTreeMap<u64, usize>,
     // theme: Option<String>,
     player_balances: BTreeMap<u64, u64>,
 }
@@ -323,14 +315,15 @@ impl GameHandler for LtMtt {
                         };
                         // send a bridge event to subgame, waiting `HoldemBridgeEvent::SitinResult` from subgame.
                         // when received the response, update self state.
-                        let sitin = MttTableSitin::new(player.player_id, player.chips, player.time_cards);
+                        let sitin =
+                            MttTableSitin::new(player.player_id, player.chips, player.time_cards);
                         effect.bridge_event(
                             table_id,
                             HoldemBridgeEvent::SitinPlayers {
                                 sitins: vec![sitin],
                             },
                         )?;
-                        self.table_assigns_pending.insert(player.player_id, table_id);
+                        self.table_assigns.insert(player.player_id, table_id);
                     }
 
                     _ => (),
@@ -376,10 +369,10 @@ impl LtMtt {
     fn on_ready(&mut self, effect: &mut Effect) -> HandleResult<()> {
         effect.info("callback on_ready...");
 
-        if !self.table_assigns_pending.is_empty() {
+        if !self.table_assigns.is_empty() {
             let mut grouped_players: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
 
-            for (player_id, table_id) in self.table_assigns_pending.clone() {
+            for (player_id, table_id) in self.table_assigns.clone() {
                 grouped_players
                     .entry(table_id)
                     .or_insert_with(Vec::new)
@@ -626,11 +619,15 @@ impl LtMtt {
                 for player in level_up_players.iter() {
                     for ranking in self.rankings.iter_mut() {
                         if ranking.player_id == player.id {
-                            ranking.status = LtMttPlayerStatus::Pending;
+                            ranking.status = LtMttPlayerStatus::Playing;
                         }
                     }
-                    sitins.push(MttTableSitin::new(player.id, player.chips, player.time_cards));
-                    self.table_assigns_pending.insert(player.id, to_table_id);
+                    sitins.push(MttTableSitin::new(
+                        player.id,
+                        player.chips,
+                        player.time_cards,
+                    ));
+                    self.table_assigns.insert(player.id, to_table_id);
                 }
                 effect.bridge_event(to_table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
 
@@ -649,30 +646,6 @@ impl LtMtt {
         )?;
 
         return Ok(());
-    }
-
-    #[allow(unused)]
-    fn match_table_for_pending_users(&mut self, effect: &mut Effect) -> HandleResult<()> {
-        let pending_players: Vec<_> = self
-            .rankings
-            .iter()
-            // .filter(|r| r.status == LtMttPlayerStatus::Pending())
-            .collect();
-
-        // It's a simple match rule, do sit in one by one.
-        // For some optimizations, should grouped all pending players.
-        for p in pending_players {
-            let to_table_id = self.find_table_to_sit(1, p.chips);
-            let sitin = MttTableSitin::new(p.player_id, p.chips, p.time_cards);
-            effect.bridge_event(
-                to_table_id,
-                HoldemBridgeEvent::SitinPlayers {
-                    sitins: vec![sitin],
-                },
-            )?;
-        }
-
-        Ok(())
     }
 
     /// Internal update helper function, ignore its result.
@@ -696,7 +669,8 @@ impl LtMtt {
                 }
                 // add into current table
                 if let Some(table) = self.tables.get_mut(&table_id) {
-                    let mut table_player = MttTablePlayer::new(player_id, player.chips, 0, player.time_cards);
+                    let mut table_player =
+                        MttTablePlayer::new(player_id, player.chips, 0, player.time_cards);
                     table.add_player(&mut table_player);
                     self.table_assigns.insert(player_id, table_id);
                     self.create_table_if_target_table_not_enough(effect, table_id)?;
@@ -727,7 +701,6 @@ impl LtMtt {
             }
         }
 
-        self.table_assigns_pending.remove(&player_id);
         Ok(())
     }
 
