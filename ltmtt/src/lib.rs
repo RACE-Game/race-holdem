@@ -392,6 +392,7 @@ impl LtMtt {
             }
         }
 
+        effect.checkpoint();
         effect.start_game();
         Ok(())
     }
@@ -562,6 +563,7 @@ impl LtMtt {
             }
 
             self.start_next_game(effect, table_id)?;
+            effect.checkpoint();
             Ok(())
         } else {
             Ok(())
