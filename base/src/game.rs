@@ -1256,7 +1256,9 @@ impl Holdem {
                 self.set_player_acted(sender, allin)?;
                 let new_street_bet = betted + real_raise_amount;
                 let new_min_raise = new_street_bet - self.street_bet;
-                self.street_bet = new_street_bet;
+                if new_street_bet > self.street_bet {
+                    self.street_bet = new_street_bet;
+                }
                 self.min_raise = new_min_raise;
                 self.hand_history.add_action(self.street, PlayerAction::new_raise(player_id, betted + real_raise_amount, allin))?;
                 self.reduce_time_cards(effect)?;
