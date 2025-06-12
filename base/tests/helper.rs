@@ -108,7 +108,7 @@ pub fn make_pots() -> Vec<Pot> {
     ]
 }
 
-// Set up a holdem state with multi players joined
+// Set up a initial holdem state with multi players joined
 pub fn setup_holdem_state() -> Result<Holdem> {
     let players_map = initial_players();
     let mut state = Holdem {

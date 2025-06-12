@@ -98,7 +98,7 @@ impl Holdem {
     }
 
     // Mark all eliminated players.
-    // An eliminated player is one with zero chips.
+    // An eliminated player is the one with zero chips.
     fn mark_eliminated_players(&mut self) {
         for p in self.player_map.values_mut() {
             if p.status != PlayerStatus::Leave && p.chips + p.deposit == 0 {
@@ -231,7 +231,7 @@ impl Holdem {
         }
     }
 
-    // BTN moves clockwise.  The next BTN is calculated base on the current one
+    // BTN moves clockwise.  The next BTN is calculated based on the current one
     pub fn get_next_btn(&mut self) -> Result<usize, HandleError> {
         let mut player_positions: Vec<usize> =
             self.player_map.values().map(|p| p.position).collect();

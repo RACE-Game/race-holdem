@@ -35,7 +35,7 @@ pub enum PlayerStatus {
     Wait,       // the player is waiting for others' action
     Acted,      // the player has acted on current street
     Acting,     // the player is acting
-    Allin,      // the player is allin
+    Allin,      // the player goes allin
     Fold,       // the player has folded
     Init,       // the player just joined the game, waiting for next hand to start
     Leave,      // the player just sent the Leave event
