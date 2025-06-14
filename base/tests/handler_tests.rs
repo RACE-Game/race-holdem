@@ -53,7 +53,7 @@ fn test_preflop_fold() -> HandleResult<()> {
         assert_eq!(alice.chips, 990);
         assert_eq!(bob.chips, 1010);
         assert_eq!(
-            state.player_map.get(&bob.id()).unwrap().status,
+            state.player_map.get(&bob.id).unwrap().status,
             PlayerStatus::Wait
         );
     }
