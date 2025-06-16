@@ -18,9 +18,9 @@ use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdo
 macro_rules! id_pos {
     ($p:ident, $last_pos:ident) => {
         if $p.position > $last_pos {
-            ($p.id, $p.position - $last_pos)
+            ($p.id, $p.position, $p.position - $last_pos)
         } else {
-            ($p.id, $p.position + 100)
+            ($p.id, $p.position, $p.position + 100)
         }
     }
 }
@@ -349,33 +349,79 @@ impl Holdem {
     /// According to players position, place them in the following order:
     /// SB, BB, UTG (1st-to-act), MID (2nd-to-act), ..., BTN (last-to-act).
     pub fn arrange_players(&mut self, last_pos: usize) -> Result<(), HandleError> {
-        let waitbbs: Vec<(u64, usize)> = self
-            .player_map.values()
-            .filter(|p| matches!(p.status, PlayerStatus::Waitbb))
-            .map(|p| id_pos!(p, last_pos))
-            .collect();
-
         let mut player_pos: Vec<(u64, usize)> = self
             .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
-            .map(|p| id_pos!(p, last_pos))
+            .map(|p| {
+                if p.position > last_pos {
+                    (p.id, p.position - last_pos)
+                } else {
+                    (p.id, p.position + 100)
+                }
+            })
             .collect();
         player_pos.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
-        println!("Player order without Waitbbs {player_pos:?}");
+        let player_order: Vec<u64> = player_pos.into_iter().map(|(id, _)| id ).collect();
+        println!("Sorted players: {player_order:?}");
+        self.player_order = player_order;
+        Ok(())
+    }
 
-        if player_pos.len() >= 2 { // should always be true?
-           for p in waitbbs {
-               if p.1 > player_pos[0].1 && p.1 < player_pos[1].1 {
-                   player_pos.insert(1, p);
-                   break;
-               }
+    // Similar to arrange_player, but runs only once after new btn is known
+    fn arrange_waitbbs(&mut self, new_btn: usize) -> Result<(), HandleError> {
+        // tuple: (id, original_pos, modified_pos)
+        let waitbbs: Vec<(u64, usize, usize)> = self
+            .player_map.values()
+            .filter(|p| matches!(p.status, PlayerStatus::Waitbb))
+            .map(|p| id_pos!(p, new_btn))
+            .collect();
+
+        let mut player_pos: Vec<(u64, usize, usize)> = self
+            .player_map
+            .values()
+            .filter(|p| p.status != PlayerStatus::Waitbb)
+            .map(|p| id_pos!(p, new_btn))
+            .collect();
+        player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
+        println!("Sorted playters without Waitbbs {player_pos:?}");
+
+        let num = self.player_map.len();
+        let (_, sb_pos, _) = player_pos.first().clone()
+            .ok_or_else(|| errors::sb_not_found_in_player_order())?;
+        let (_, bb_pos, _) = player_pos.get(1).clone()
+            .ok_or_else(|| errors::bb_not_found_in_player_order())?;
+        for p @ (id, wpos, _) in waitbbs {
+            if wpos == num - 1 {  // waitbb at last pos
+                if *sb_pos == wpos - 1 && *bb_pos == 0 {
+                    player_pos.push(p);
+                    let wp = self.player_map.get_mut(&id)
+                        .ok_or(errors::internal_player_not_found())?;
+                    wp.status = PlayerStatus::Init;
+                    break;
+                }
+            } else if wpos == 0 { // waitbb at first pos
+                if *sb_pos == num - 1 && *bb_pos == 1 {
+                    player_pos.push(p);
+                    let wp = self.player_map.get_mut(&id)
+                        .ok_or(errors::internal_player_not_found())?;
+                    wp.status = PlayerStatus::Wait;
+                    break;
+                }
+            } else {             // waitbb in the middle
+                if *sb_pos == wpos - 1  && *bb_pos == wpos + 1 {
+                    player_pos.push(p);
+                    let wp = self.player_map.get_mut(&id)
+                        .ok_or(errors::internal_player_not_found())?;
+                    wp.status = PlayerStatus::Wait;
+                    break;
+                }
             }
         }
+        player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
+        println!("Sorted players with one potential new bb {player_pos:?}");
 
-        let player_order: Vec<u64> = player_pos.into_iter().map(|(id, _)| id).collect();
-
-        println!("Player order finalized {player_order:?}");
+        let player_order: Vec<u64> = player_pos.into_iter().map(|(id, ..)| id).collect();
         self.player_order = player_order;
         Ok(())
     }
@@ -453,18 +499,18 @@ impl Holdem {
             self.player_order.rotate_left(2);
         }
 
-        let mut action_addr = None;
-        for addr in self.player_order.iter() {
-            if let Some(player) = self.player_map.get_mut(addr) {
+        let mut action_id = None;
+        for id in self.player_order.iter() {
+            if let Some(player) = self.player_map.get_mut(id) {
                 if player.next_to_act() {
-                    action_addr = Some(addr);
+                    action_id = Some(*id);
                     break;
                 }
             }
         }
 
-        match action_addr {
-            Some(addr) => self.ask_for_action(addr.to_owned(), effect)?,
+        match action_id {
+            Some(id) => self.ask_for_action(id, effect)?,
             None => self.next_state(effect)?, // players all go all in
         }
 
@@ -744,9 +790,7 @@ impl Holdem {
                     player.chips += *prize;
                     println!("Player {} won {} chips", player.id, *prize);
                 }
-                None => {
-                    println!("Player {} lost the bet", player.id);
-                }
+                None => {}
             }
         }
         Ok(())
@@ -1527,12 +1571,16 @@ impl Holdem {
             .count()
             >= 2
         {
+            // Process Waitbb players
+            self.arrange_waitbbs(next_btn)?;
+
             // Prepare randomness (shuffling cards)
             let rnd_spec = RandomSpec::deck_of_cards();
             self.deck_random_id = effect.init_random_state(rnd_spec);
         }
         self.hand_id += 1;
-
+        effect.info(format!("Shuffling done, hand_id = {}", self.hand_id));
+        // effect.print_logs();
         Ok(())
     }
 }
@@ -1677,13 +1725,12 @@ impl GameHandler for Holdem {
 
                 if self.player_map.len() <= 1 {
                     for p in players.into_iter() {
-                        let mut player = Player::init(p.id(), 0, p.position());
-                        player.status = PlayerStatus::Init;
+                        let player = Player::init(p.id(), 0, p.position(), PlayerStatus::Init);
                         self.player_map.insert(player.id, player);
                     }
                 } else {
                     for p in players.into_iter() {
-                        let player = Player::init(p.id(), 0, p.position());
+                        let player = Player::init(p.id(), 0, p.position(), PlayerStatus::Waitbb);
                         self.player_map.insert(player.id, player);
                     }
                 }
@@ -1823,6 +1870,7 @@ impl GameHandler for Holdem {
                 HoldemStage::Init => {
                     match self.street {
                         Street::Init => {
+                            effect.print_logs();
                             self.street = Street::Preflop;
                             self.stage = HoldemStage::Play;
                             self.next_state(effect)?;

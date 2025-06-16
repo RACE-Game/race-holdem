@@ -105,12 +105,12 @@ impl Player {
     }
 
     // New players joined game all init to the status `Waitbb`
-    pub fn init(id: u64, chips: u64, position: u16) -> Player {
+    pub fn init(id: u64, chips: u64, position: u16, status: PlayerStatus) -> Player {
         Self {
             id,
             chips,
             position: position as usize,
-            status: PlayerStatus::Waitbb,
+            status,
             timeout: 0,
             deposit: 0,
             time_cards: DEFAULT_TIME_CARDS,

@@ -1,12 +1,9 @@
 //! Test setup specificaly for issue #138: game freeze if allin < blind bet
 //! For more, see: https://github.com/RACE-Game/racepoker/issues/138
 
-mod helper;
-
 use race_api::prelude::*;
 use race_test::prelude::*;
 use std::collections::BTreeMap;
-use helper::setup_holdem_game;
 use race_holdem_base::essential::*;
 use race_holdem_base::game::Holdem;
 use race_holdem_base::hand_history::HandHistory;
@@ -87,7 +84,7 @@ fn allin_smaller_than_blinds() -> Result<()> {
     {
         let sb_event = GameEvent::Fold;
         let mut effect = Effect::default();
-        game.handle_custom_event(&mut effect, sb_event, 3);
+        game.handle_custom_event(&mut effect, sb_event, 3).unwrap();
 
         let bb_event = GameEvent::Call; // bb can't call and expect error
         game.handle_custom_event(&mut effect, bb_event, 4).unwrap();
