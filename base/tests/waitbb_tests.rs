@@ -3,9 +3,12 @@
 
 mod helper;
 use helper::setup_holdem_game;
-use race_api::{error::HandleResult, prelude::Event};
+use race_holdem_base::game::Holdem;
+use race_api::prelude::*;
 use race_holdem_base::essential::*;
 use race_test::prelude::*;
+use race_holdem_base::hand_history::HandHistory;
+use std::collections::BTreeMap;
 
 // All players join the game sequentially and no one leaves or gets kicked out.
 // Thus the new players (with status Waitbb) always take positions after the
@@ -83,6 +86,194 @@ fn test_sequential_waitbb() -> HandleResult<()> {
         assert_eq!(dave.status, PlayerStatus::Wait);
         assert_eq!(state.street, Street::Preflop);
         assert!(state.is_acting_player(alice.id()));
+    }
+
+    Ok(())
+}
+
+// SB < NP < BB, so NP should become the actual BB
+#[test]
+fn test_waitbb_inbetween() -> HandleResult<()> {
+    //  players
+    let alice = Player { id: 1, position: 1, status: PlayerStatus::Wait, ..Player::default() }; // sb
+    let bob = Player { id: 6, position: 6, status: PlayerStatus::Wait, ..Player::default() }; // calculated bb
+    let carol = Player { id: 2,position: 0, status: PlayerStatus::Wait, ..Player::default() }; // next btn
+    let dave = Player { id: 7, position: 3, status: PlayerStatus::Waitbb, .. Player::default() };   // actual bb
+
+    let player_map = BTreeMap::from([
+        (0, alice),
+        (1, bob),
+        (2, carol),
+        (7, dave)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 7,
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![3,4,0,1,2],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 9,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        let dave = game.player_map.get(&7).unwrap();
+        assert_eq!(dave.status, PlayerStatus::Wait);
+        assert_eq!(game.player_order, vec![1, 7, 6, 2]);
+    }
+
+    Ok(())
+}
+
+// NP > SB > BB: new player sits at the position after (to the left of) SB,
+// thus NP should become the actual BB
+#[test]
+fn test_waitbb_after_sb() -> HandleResult<()> {
+    //  players
+    let alice = Player { id: 6, position: 6, status: PlayerStatus::Wait, ..Player::default() }; // sb
+    let bob = Player { id: 1, position: 1, status: PlayerStatus::Wait, ..Player::default() }; // calculated bb
+    let carol = Player { id: 5,position: 5, status: PlayerStatus::Wait, ..Player::default() }; // next btn
+    let dave = Player { id: 7, position: 7, status: PlayerStatus::Waitbb, .. Player::default() };   // actual bb
+
+    let player_map = BTreeMap::from([
+        (6, alice),
+        (1, bob),
+        (5, carol),
+        (7, dave)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 4,
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 9,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        let dave = game.player_map.get(&7).unwrap();
+        assert_eq!(dave.status, PlayerStatus::Wait);
+        assert_eq!(game.player_order, vec![6, 7, 1, 5]);
+    }
+
+    Ok(())
+}
+
+// SB > BB > NP: new player sits at the position before (to the right of) BB
+// thus NP should become the actual BB
+#[test]
+fn test_waitbb_before_bb() -> HandleResult<()> {
+    //  players
+    let alice = Player { id: 6, position: 6, status: PlayerStatus::Wait, ..Player::default() }; // sb
+    let bob = Player { id: 3, position: 3, status: PlayerStatus::Wait, ..Player::default() }; // calculated bb
+    let carol = Player { id: 5,position: 5, status: PlayerStatus::Wait, ..Player::default() }; // next btn
+    let dave = Player { id: 7, position: 1, status: PlayerStatus::Waitbb, .. Player::default() };   // actual bb
+
+    let player_map = BTreeMap::from([
+        (6, alice),
+        (1, bob),
+        (5, carol),
+        (7, dave)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 4,
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 9,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        let dave = game.player_map.get(&7).unwrap();
+        assert_eq!(dave.status, PlayerStatus::Wait);
+        assert_eq!(game.player_order, vec![6, 7, 3, 5]);
     }
 
     Ok(())
