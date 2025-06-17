@@ -1571,8 +1571,6 @@ impl Holdem {
             self.deck_random_id = effect.init_random_state(rnd_spec);
         }
         self.hand_id += 1;
-        effect.info(format!("Shuffling done, hand_id = {}", self.hand_id));
-        // effect.print_logs();
         Ok(())
     }
 }
@@ -1862,7 +1860,6 @@ impl GameHandler for Holdem {
                 HoldemStage::Init => {
                     match self.street {
                         Street::Init => {
-                            effect.print_logs();
                             self.street = Street::Preflop;
                             self.stage = HoldemStage::Play;
                             self.next_state(effect)?;
