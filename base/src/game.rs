@@ -368,7 +368,11 @@ impl Holdem {
         Ok(())
     }
 
-    // Similar to arrange_player, but runs only once after new btn is known
+    /// Similar to arrange_player, but runs only once after new btn is known.
+    /// It checks if the new player can be the actual BB based on positions:
+    /// 1. SB < NP < BB, then NP should be the actual BB
+    /// 2. NP > SB > BB, then NP should be the actual BB (a ring)
+    /// 3. SB > BB > NP, then NP should be the actual BB (a ring)
     fn arrange_waitbbs(&mut self, new_btn: usize) -> Result<(), HandleError> {
         // tuple: (id, original_pos, modified_pos)
         let waitbbs: Vec<(u64, usize, usize)> = self
@@ -386,36 +390,24 @@ impl Holdem {
         player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
         println!("Sorted playters without Waitbbs {player_pos:?}");
 
-        let num = self.player_map.len();
         let (_, sb_pos, _) = player_pos.first().clone()
             .ok_or_else(|| errors::sb_not_found_in_player_order())?;
         let (_, bb_pos, _) = player_pos.get(1).clone()
             .ok_or_else(|| errors::bb_not_found_in_player_order())?;
         for p @ (id, wpos, _) in waitbbs {
-            if wpos == num - 1 {  // waitbb at last pos
-                if *sb_pos == wpos - 1 && *bb_pos == 0 {
-                    player_pos.push(p);
-                    let wp = self.player_map.get_mut(&id)
-                        .ok_or(errors::internal_player_not_found())?;
-                    wp.status = PlayerStatus::Init;
-                    break;
-                }
-            } else if wpos == 0 { // waitbb at first pos
-                if *sb_pos == num - 1 && *bb_pos == 1 {
-                    player_pos.push(p);
-                    let wp = self.player_map.get_mut(&id)
-                        .ok_or(errors::internal_player_not_found())?;
-                    wp.status = PlayerStatus::Wait;
-                    break;
-                }
-            } else {             // waitbb in the middle
-                if *sb_pos == wpos - 1  && *bb_pos == wpos + 1 {
-                    player_pos.push(p);
-                    let wp = self.player_map.get_mut(&id)
-                        .ok_or(errors::internal_player_not_found())?;
-                    wp.status = PlayerStatus::Wait;
-                    break;
-                }
+            if *sb_pos < wpos && wpos < *bb_pos  {
+                player_pos.push(p);
+                let wp = self.player_map.get_mut(&id)
+                    .ok_or(errors::internal_player_not_found())?;
+                wp.status = PlayerStatus::Wait;
+                break;
+            }
+            if *sb_pos > *bb_pos && (wpos > *sb_pos || wpos < *bb_pos) {
+                player_pos.push(p);
+                let wp = self.player_map.get_mut(&id)
+                    .ok_or(errors::internal_player_not_found())?;
+                wp.status = PlayerStatus::Wait;
+                break;
             }
         }
         player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));

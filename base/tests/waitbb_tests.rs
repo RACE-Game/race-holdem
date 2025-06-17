@@ -41,35 +41,49 @@ fn test_sequential_waitbb() -> HandleResult<()> {
     let bob_fold = bob.custom_event(GameEvent::Fold);
     let carol_fold = carol.custom_event(GameEvent::Fold);
     ctx.handle_multiple_events(&[bob_fold, carol_fold])?;
-    println!("Dispatch: {:?}", ctx.current_dispatch());
     ctx.handle_dispatch_until_no_events(vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut tx])?;
 
-
+    // Dave needs to wait because SB < BB < NP
     {
-        println!("Random state: {:?}", ctx.random_state(1)?);
         let state = ctx.state();
-        println!("State: {state:?}");
         let dave = state.player_map.get(&dave.id()).unwrap();
         assert_eq!(state.btn, 2);
         assert_eq!(dave.status, PlayerStatus::Waitbb);
-        println!("Players: {:?}", state.player_map);
-
-        // assert_eq!(state.stage, HoldemStage::Init);
-        // assert_eq!(state.street, Street::Init);
-        assert!(state.acting_player.is_some());
+        assert_eq!(state.street, Street::Preflop);
+        assert!(state.is_acting_player(carol.id()));
     }
 
     // BTN(carol) folds, SB(alice) folds and BB(bob) wins
-    // let carol_fold2 = carol.custom_event(GameEvent::Fold);
-    // let alice_fold2 = alice.custom_event(GameEvent::Fold);
-    // ctx.handle_multiple_events(&[carol_fold2, alice_fold2])?;
-    // ctx.handle_dispatch_until_no_events(vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut tx])?;
-    //
-    // {
-    //     let state = ctx.state();
-    //     let dave = state.player_map.get(&dave.id()).unwrap();
-    //     assert_eq!(dave.status, PlayerStatus::Waitbb);
-    // }
+    let carol_fold2 = carol.custom_event(GameEvent::Fold);
+    let alice_fold2 = alice.custom_event(GameEvent::Fold);
+    ctx.handle_multiple_events(&[carol_fold2, alice_fold2])?;
+    ctx.handle_dispatch_until_no_events(vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut tx])?;
+
+    // Dave still needs to wait because SB < BB < NP
+    {
+        let state = ctx.state();
+        let dave = state.player_map.get(&dave.id()).unwrap();
+        assert_eq!(state.btn, 0);
+        assert_eq!(dave.status, PlayerStatus::Waitbb);
+        assert_eq!(state.street, Street::Preflop);
+        assert!(state.is_acting_player(alice.id()));
+    }
+
+    // BTN(alice) folds, SB(bob) folds and BB(bob) wins
+    let alice_fold3 = alice.custom_event(GameEvent::Fold);
+    let bob_fold3 = bob.custom_event(GameEvent::Fold);
+    ctx.handle_multiple_events(&[alice_fold3, bob_fold3])?;
+    ctx.handle_dispatch_until_no_events(vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut tx])?;
+
+    // Dave now should join and become the actual BB because: SB > BB && NP > SB
+    {
+        let state = ctx.state();
+        let dave = state.player_map.get(&dave.id()).unwrap();
+        assert_eq!(state.btn, 1);
+        assert_eq!(dave.status, PlayerStatus::Wait);
+        assert_eq!(state.street, Street::Preflop);
+        assert!(state.is_acting_player(alice.id()));
+    }
 
     Ok(())
 }
