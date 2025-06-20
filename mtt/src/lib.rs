@@ -516,6 +516,16 @@ impl GameHandler for Mtt {
                 game_id, init_data, ..
             } => {
                 let table = MttTableState::try_from_slice(&init_data)?;
+                effect.bridge_event(
+                    table.table_id,
+                    HoldemBridgeEvent::StartGame {
+                        sb: table.sb,
+                        bb: table.bb,
+                        ante: table.ante,
+                        sitout_players: vec![],
+                    },
+                )?;
+
                 self.launched_table_ids.push(game_id);
                 for p in table.players.iter() {
                     self.table_assigns.insert(p.id, table.table_id);
