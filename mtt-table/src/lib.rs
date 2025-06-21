@@ -193,6 +193,8 @@ impl MttTable {
                                 return Err(errors::duplicated_player_in_relocate())
                             }
                         };
+                    } else {
+                        effect.error(format!("sit player error {:?}", sitin));
                     }
                 }
 

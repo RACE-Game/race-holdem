@@ -1052,6 +1052,13 @@ impl Mtt {
                     }
                 };
                 self.table_assigns.insert(rank.id, table_id);
+                let Some(table) = self.tables.get_mut(&table_id) else {
+                    return Err(errors::error_table_not_fonud())?;
+                };
+
+                let position = table.players.len();
+                let player = MttTablePlayer::new(rank.id, rank.chips, position, rank.time_cards);
+                table.players.push(player);
             } else if last_table_to_launch
                 .as_ref()
                 .is_some_and(|t| t.players.len() < self.table_size as _)
@@ -1059,6 +1066,7 @@ impl Mtt {
                 let Some(table) = last_table_to_launch else {
                     return Err(errors::error_table_not_fonud())?;
                 };
+
                 effect.info(format!(
                     "Sit player {} to the table just created {}",
                     rank.id, table.table_id
