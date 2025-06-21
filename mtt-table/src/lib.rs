@@ -8,7 +8,8 @@ use race_api::prelude::*;
 use race_holdem_base::essential::{GameMode, Player, PlayerStatus};
 use race_holdem_base::game::Holdem;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult, PlayerResultStatus
+    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
+    PlayerResultStatus,
 };
 use race_proc_macro::game_handler;
 
@@ -88,8 +89,12 @@ impl GameHandler for MttTable {
                         };
                         let chips_change = match self.holdem.hand_history.chips_change.get(&p.id) {
                             Some(race_holdem_base::hand_history::ChipsChange::NoUpdate) => None,
-                            Some(race_holdem_base::hand_history::ChipsChange::Add(amt)) => Some(ChipsChange::Add(*amt)),
-                            Some(race_holdem_base::hand_history::ChipsChange::Sub(amt)) => Some(ChipsChange::Sub(*amt)),
+                            Some(race_holdem_base::hand_history::ChipsChange::Add(amt)) => {
+                                Some(ChipsChange::Add(*amt))
+                            }
+                            Some(race_holdem_base::hand_history::ChipsChange::Sub(amt)) => {
+                                Some(ChipsChange::Sub(*amt))
+                            }
                             None => None,
                         };
                         player_results.push(PlayerResult::new(p.id, p.chips, chips_change, status));
@@ -120,14 +125,7 @@ impl MttTable {
             .holdem
             .player_map
             .values()
-            .map(|p| {
-                MttTablePlayer::new(
-                    p.id,
-                    p.chips,
-                    p.position as _,
-                    p.time_cards,
-                )
-            })
+            .map(|p| MttTablePlayer::new(p.id, p.chips, p.position as _, p.time_cards))
             .collect();
 
         MttTableState {
@@ -171,11 +169,14 @@ impl MttTable {
             }
             // Add players from other tables
             HoldemBridgeEvent::SitinPlayers { sitins } => {
-
                 let origin_num_of_players = self.holdem.player_map.len();
 
                 for sitin in sitins.into_iter() {
-                    let MttTableSitin { id, chips, time_cards } = sitin;
+                    let MttTableSitin {
+                        id,
+                        chips,
+                        time_cards,
+                    } = sitin;
 
                     if let Some(position) = self.holdem.find_position() {
                         match self.holdem.player_map.entry(id) {
@@ -199,17 +200,30 @@ impl MttTable {
                     // The game is supposed to be halted.
                     // We send a GameResult to trigger the StartGame instead of start directly here.
                     effect.checkpoint();
-                    effect.bridge_event(0, HoldemBridgeEvent::GameResult {
-                        hand_id: self.holdem.hand_id,
-                        table_id: self.table_id,
-                        player_results: vec![],
-                        table: self.make_mtt_table_state(),
-                    })?;
+                    effect.bridge_event(
+                        0,
+                        HoldemBridgeEvent::GameResult {
+                            hand_id: self.holdem.hand_id,
+                            table_id: self.table_id,
+                            player_results: vec![],
+                            table: self.make_mtt_table_state(),
+                        },
+                    )?;
                 }
             }
             HoldemBridgeEvent::CloseTable => {
                 self.holdem.player_map.clear();
                 effect.checkpoint();
+                // effect.bridge_event(
+                //     0,
+                //     HoldemBridgeEvent::GameResult {
+                //         hand_id: self.holdem.hand_id,
+                //         table_id: self.table_id,
+                //         player_results: vec![],
+                //         table: self.make_mtt_table_state(),
+                //     },
+                // )?;
+                effect.stop_game();
             }
             _ => return Err(errors::internal_invalid_bridge_event()),
         };
@@ -225,7 +239,9 @@ mod tests {
     use race_holdem_mtt_base::{HoldemBridgeEvent, MttTablePlayer, MttTableState};
 
     fn default_players(num_of_players: usize) -> Vec<MttTablePlayer> {
-        (1..=num_of_players).map(|n| MttTablePlayer::new_with_defaults(n as u64, (n + 1) as u64 * 500, n - 1)).collect()
+        (1..=num_of_players)
+            .map(|n| MttTablePlayer::new_with_defaults(n as u64, (n + 1) as u64 * 500, n - 1))
+            .collect()
     }
 
     fn default_mtt_table_state(num_of_players: usize) -> MttTableState {
@@ -347,10 +363,7 @@ mod tests {
         let result = mtt_table.handle_bridge_event(&mut effect, bridge_event);
 
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            errors::duplicated_player_in_relocate()
-        );
+        assert_eq!(result.unwrap_err(), errors::duplicated_player_in_relocate());
     }
 
     #[test]
@@ -373,7 +386,10 @@ mod tests {
         assert!(mtt_table.holdem.player_map.contains_key(&4));
         assert!(mtt_table.holdem.player_map.contains_key(&5));
         assert_eq!(effect.wait_timeout, None);
-        assert_eq!(effect.list_bridge_events::<HoldemBridgeEvent>().unwrap(), vec![]);
+        assert_eq!(
+            effect.list_bridge_events::<HoldemBridgeEvent>().unwrap(),
+            vec![]
+        );
     }
 
     #[test]
@@ -381,9 +397,7 @@ mod tests {
         let mut mtt_table = mtt_table_with_players(0);
         let mut effect = Effect::default();
 
-        let sitins = vec![
-            MttTableSitin::new_with_defaults(1, 500),
-        ];
+        let sitins = vec![MttTableSitin::new_with_defaults(1, 500)];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
 
@@ -395,14 +409,18 @@ mod tests {
         assert!(mtt_table.holdem.player_map.contains_key(&1));
         assert!(effect.is_checkpoint());
         assert_eq!(effect.wait_timeout, None);
-        assert_eq!(effect.list_bridge_events().unwrap(), vec![
-            (0, HoldemBridgeEvent::GameResult {
-                hand_id:mtt_table.holdem.hand_id,
-                table_id:mtt_table.table_id,
-                player_results: vec![],
-                table: mtt_table.make_mtt_table_state(),
-            })
-        ]);
+        assert_eq!(
+            effect.list_bridge_events().unwrap(),
+            vec![(
+                0,
+                HoldemBridgeEvent::GameResult {
+                    hand_id: mtt_table.holdem.hand_id,
+                    table_id: mtt_table.table_id,
+                    player_results: vec![],
+                    table: mtt_table.make_mtt_table_state(),
+                }
+            )]
+        );
     }
 
     #[test]
@@ -410,9 +428,7 @@ mod tests {
         let mut mtt_table = mtt_table_with_players(1);
         let mut effect = Effect::default();
 
-        let sitins = vec![
-            MttTableSitin::new_with_defaults(2, 500),
-        ];
+        let sitins = vec![MttTableSitin::new_with_defaults(2, 500)];
 
         let bridge_event = HoldemBridgeEvent::SitinPlayers { sitins };
 
@@ -420,19 +436,22 @@ mod tests {
             .handle_bridge_event(&mut effect, bridge_event)
             .unwrap();
 
-
         assert_eq!(mtt_table.holdem.player_map.len(), 2);
         assert!(mtt_table.holdem.player_map.contains_key(&1));
         assert!(mtt_table.holdem.player_map.contains_key(&2));
         assert!(effect.is_checkpoint());
-        assert_eq!(effect.list_bridge_events().unwrap(), vec![
-            (0, HoldemBridgeEvent::GameResult {
-                hand_id:mtt_table.holdem.hand_id,
-                table_id:mtt_table.table_id,
-                player_results: vec![],
-                table: mtt_table.make_mtt_table_state(),
-            })
-        ]);
+        assert_eq!(
+            effect.list_bridge_events().unwrap(),
+            vec![(
+                0,
+                HoldemBridgeEvent::GameResult {
+                    hand_id: mtt_table.holdem.hand_id,
+                    table_id: mtt_table.table_id,
+                    player_results: vec![],
+                    table: mtt_table.make_mtt_table_state(),
+                }
+            )]
+        );
     }
 
     #[test]
