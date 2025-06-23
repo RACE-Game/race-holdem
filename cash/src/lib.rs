@@ -11,8 +11,8 @@ impl GameHandler for Cash {
         self.0.balances()
     }
 
-    fn init_state(init_account: InitAccount) -> Result<Self, HandleError> {
-        Ok(Self(Holdem::init_state(init_account)?))
+    fn init_state(effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
+        Ok(Self(Holdem::init_state(effect, init_account)?))
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {

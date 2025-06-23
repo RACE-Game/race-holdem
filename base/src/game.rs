@@ -1585,7 +1585,7 @@ impl GameHandler for Holdem {
             .collect()
     }
 
-    fn init_state(init_account: InitAccount) -> Result<Self, HandleError> {
+    fn init_state(_effect: &mut Effect, init_account: InitAccount) -> Result<Self, HandleError> {
         let HoldemAccount {
             sb,
             bb,
@@ -1700,13 +1700,6 @@ impl GameHandler for Holdem {
                     && effect.count_nodes() >= 1
                     && self.mode != GameMode::Mtt
                 {
-                    effect.start_game();
-                }
-                Ok(())
-            }
-
-            Event::Ready => {
-                if self.player_map.len() >= 2 && effect.count_nodes() >= 1 {
                     effect.start_game();
                 }
                 Ok(())

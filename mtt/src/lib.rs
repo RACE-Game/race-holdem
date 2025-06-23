@@ -219,7 +219,7 @@ pub struct Mtt {
     alives: usize, // The number of alive players
     stage: MttStage,
     table_assigns: BTreeMap<u64, GameId>,
-    table_assigns_pending: BTreeMap<u64, GameId>,
+    // table_assigns_pending: BTreeMap<u64, GameId>,
     ranks: Vec<PlayerRank>,
     tables: BTreeMap<GameId, MttTableState>,
     table_size: u8,
@@ -259,7 +259,7 @@ impl GameHandler for Mtt {
             .collect()
     }
 
-    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
+    fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let MttAccountData {
             start_time,
             entry_close_time,
@@ -275,6 +275,12 @@ impl GameHandler for Mtt {
             theme,
             subgame_bundle,
         } = init_account.data()?;
+
+        if start_time > effect.timestamp() {
+            effect.wait_timeout(start_time - effect.timestamp());
+        } else {
+            effect.start_game();
+        }
 
         blind_info.with_default_blind_rules();
 
@@ -332,28 +338,6 @@ impl GameHandler for Mtt {
         match event {
             Event::Custom { .. } => {
                 return Err(errors::error_custom_event_not_allowed())?;
-            }
-
-            Event::Ready => {
-                match self.stage {
-                    // Schedule game start or start directly
-                    MttStage::Init => {
-                        if self.start_time > effect.timestamp {
-                            effect.wait_timeout(self.start_time - effect.timestamp);
-                        } else {
-                            effect.start_game();
-                        }
-                    }
-                    MttStage::Playing => {
-                        // Why we have to launch table here
-                        // for (id, table) in self.tables.iter() {
-                        //     if !self.launched_table_ids.contains(&id) {
-                        //         self.launch_table(effect, &mut table)?;
-                        //     }
-                        // }
-                    }
-                    _ => {}
-                }
             }
 
             Event::Join { players } => match self.stage {
@@ -469,8 +453,7 @@ impl GameHandler for Mtt {
                 } else if self.ranks.len() < self.min_players as _ {
                     // No enough players, cancel the game
                     // Return the ticket for each player
-                    effect
-                        .info("Game has no enough players, cancel game");
+                    effect.info("Game has no enough players, cancel game");
                     self.refund_tickets(effect)?;
                 } else {
                     // Start game normally
@@ -495,10 +478,8 @@ impl GameHandler for Mtt {
                         for player in player_results.iter() {
                             if player.status == PlayerResultStatus::Normal {
                                 self.table_assigns.insert(player.player_id, table_id);
-                                self.table_assigns_pending.remove(&player.player_id);
                             } else {
                                 self.table_assigns.remove(&player.player_id);
-                                self.table_assigns_pending.remove(&player.player_id);
                             }
                         }
 
@@ -519,10 +500,19 @@ impl GameHandler for Mtt {
                 game_id, init_data, ..
             } => {
                 let table = MttTableState::try_from_slice(&init_data)?;
+                effect.bridge_event(
+                    table.table_id,
+                    HoldemBridgeEvent::StartGame {
+                        sb: table.sb,
+                        bb: table.bb,
+                        ante: table.ante,
+                        sitout_players: vec![],
+                    },
+                )?;
+
                 self.launched_table_ids.push(game_id);
                 for p in table.players.iter() {
                     self.table_assigns.insert(p.id, table.table_id);
-                    self.table_assigns_pending.remove(&p.id);
                 }
                 self.tables.insert(table.table_id, table);
                 effect.checkpoint();
@@ -827,8 +817,7 @@ impl Mtt {
         let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
         let sitout_players: Vec<u64> = players_to_move.iter().map(|p| p.id).collect();
         sitout_players.iter().for_each(|pid| {
-            self.table_assigns.remove(&pid);
-            self.table_assigns_pending.insert(*pid, to_table_id);
+            self.table_assigns.insert(*pid, to_table_id);
         });
 
         effect.bridge_event(
@@ -879,7 +868,7 @@ impl Mtt {
 
         // No-op for final table
         // No-op if we have players moving at the moment
-        if self.tables.len() == 1 || !self.table_assigns_pending.is_empty() {
+        if self.tables.len() == 1 {
             if current_table.players.len() > 1 {
                 effect.info(format!("Send start game to table {}", table_id));
                 effect.bridge_event(
@@ -993,11 +982,6 @@ impl Mtt {
             .get(&table_id)
             .map(|t| t.players.len())
             .unwrap_or(0)
-            + self
-                .table_assigns_pending
-                .values()
-                .filter(|tid| **tid == table_id)
-                .count()
     }
 
     fn find_sparse_non_empty_table(&self) -> Option<GameId> {
@@ -1051,7 +1035,14 @@ impl Mtt {
                         occupied_entry.get_mut().push(sitin);
                     }
                 };
-                self.table_assigns_pending.insert(rank.id, table_id);
+                self.table_assigns.insert(rank.id, table_id);
+                let Some(table) = self.tables.get_mut(&table_id) else {
+                    return Err(errors::error_table_not_fonud())?;
+                };
+
+                let position = table.players.len();
+                let player = MttTablePlayer::new(rank.id, rank.chips, position, rank.time_cards);
+                table.players.push(player);
             } else if last_table_to_launch
                 .as_ref()
                 .is_some_and(|t| t.players.len() < self.table_size as _)
@@ -1059,6 +1050,7 @@ impl Mtt {
                 let Some(table) = last_table_to_launch else {
                     return Err(errors::error_table_not_fonud())?;
                 };
+
                 effect.info(format!(
                     "Sit player {} to the table just created {}",
                     rank.id, table.table_id
@@ -1090,7 +1082,6 @@ impl Mtt {
 
     /// Refund ticket to registered players
     fn refund_tickets(&mut self, effect: &mut Effect) -> HandleResult<()> {
-
         self.stage = MttStage::Cancelled;
 
         for rank in self.ranks.iter_mut() {
@@ -1103,7 +1094,7 @@ impl Mtt {
 
         self.player_balances.insert(0, 0);
 
-        return Ok(())
+        return Ok(());
     }
 
     /// Apply the prizes and mark the game as completed.
