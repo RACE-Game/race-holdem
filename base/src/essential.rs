@@ -33,9 +33,10 @@ pub enum GameMode {
 pub enum PlayerStatus {
     #[default]
     Wait,       // the player is waiting for others' action
+    Waitbb,     // the player (newly joined) is waiting to become the big blind
     Acted,      // the player has acted on current street
     Acting,     // the player is acting
-    Allin,      // the player is allin
+    Allin,      // the player goes allin
     Fold,       // the player has folded
     Init,       // the player just joined the game, waiting for next hand to start
     Leave,      // the player just sent the Leave event
@@ -103,12 +104,13 @@ impl Player {
         }
     }
 
-    pub fn init(id: u64, chips: u64, position: u16) -> Player {
+    // New players joined game all init to the status `Waitbb`
+    pub fn init(id: u64, chips: u64, position: u16, status: PlayerStatus) -> Player {
         Self {
             id,
             chips,
             position: position as usize,
-            status: PlayerStatus::Init,
+            status,
             timeout: 0,
             deposit: 0,
             time_cards: DEFAULT_TIME_CARDS,
@@ -116,15 +118,12 @@ impl Player {
         }
     }
 
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-
     pub fn next_to_act(&self) -> bool {
         match self.status {
             PlayerStatus::Allin
             | PlayerStatus::Fold
             | PlayerStatus::Init
+            | PlayerStatus::Waitbb
             | PlayerStatus::Leave
             | PlayerStatus::Out => false,
             _ => true,

@@ -50,3 +50,5 @@ custom_err!(river_card_error);
 custom_err!(wait_timeout_error_in_settle);
 custom_err!(time_card_already_in_use);
 custom_err!(no_time_cards);
+custom_err!(sb_not_found_in_player_order);
+custom_err!(bb_not_found_in_player_order);
