@@ -259,7 +259,7 @@ impl GameHandler for Mtt {
             .collect()
     }
 
-    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
+    fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let MttAccountData {
             start_time,
             entry_close_time,
@@ -275,6 +275,12 @@ impl GameHandler for Mtt {
             theme,
             subgame_bundle,
         } = init_account.data()?;
+
+        if start_time > effect.timestamp() {
+            effect.wait_timeout(start_time - effect.timestamp());
+        } else {
+            effect.start_game();
+        }
 
         blind_info.with_default_blind_rules();
 
@@ -332,28 +338,6 @@ impl GameHandler for Mtt {
         match event {
             Event::Custom { .. } => {
                 return Err(errors::error_custom_event_not_allowed())?;
-            }
-
-            Event::Ready => {
-                match self.stage {
-                    // Schedule game start or start directly
-                    MttStage::Init => {
-                        if self.start_time > effect.timestamp {
-                            effect.wait_timeout(self.start_time - effect.timestamp);
-                        } else {
-                            effect.start_game();
-                        }
-                    }
-                    MttStage::Playing => {
-                        // Why we have to launch table here
-                        // for (id, table) in self.tables.iter() {
-                        //     if !self.launched_table_ids.contains(&id) {
-                        //         self.launch_table(effect, &mut table)?;
-                        //     }
-                        // }
-                    }
-                    _ => {}
-                }
             }
 
             Event::Join { players } => match self.stage {

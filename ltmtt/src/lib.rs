@@ -237,7 +237,7 @@ impl GameHandler for LtMtt {
         }]
     }
 
-    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
+    fn init_state(effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let LtMttAccountData {
             entry_open_time,
             entry_close_time,
@@ -276,12 +276,12 @@ impl GameHandler for LtMtt {
             ..Default::default()
         };
 
+        effect.start_game();
         Ok(state)
     }
 
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> HandleResult<()> {
         match event {
-            Event::Ready => self.on_ready(effect)?,
             Event::GameStart => self.on_game_start(effect)?,
             Event::WaitingTimeout => self.on_waiting_timeout(effect)?,
             // Only first register will receive this event.
@@ -364,37 +364,6 @@ impl LtMtt {
             LtMttStage::EntryClosed => Some(self.settle_time.saturating_sub(effect.timestamp())),
             LtMttStage::Settled => None,
         }
-    }
-
-    fn on_ready(&mut self, effect: &mut Effect) -> HandleResult<()> {
-        effect.info("callback on_ready...");
-
-        if !self.table_assigns.is_empty() {
-            let mut grouped_players: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
-
-            for (player_id, table_id) in self.table_assigns.clone() {
-                grouped_players
-                    .entry(table_id)
-                    .or_insert_with(Vec::new)
-                    .push(player_id)
-            }
-
-            for (table_id, player_ids) in grouped_players {
-                let sitins: Vec<MttTableSitin> = player_ids
-                    .iter()
-                    .map(|id| {
-                        let player = self.find_player_by_id(*id);
-                        MttTableSitin::new(player.player_id, player.chips, player.time_cards)
-                    })
-                    .collect();
-
-                effect.bridge_event(table_id, HoldemBridgeEvent::SitinPlayers { sitins })?;
-            }
-        }
-
-        effect.checkpoint();
-        effect.start_game();
-        Ok(())
     }
 
     // Reset game state, swap secret

@@ -27,7 +27,7 @@ impl GameHandler for MttTable {
         self.holdem.balances()
     }
 
-    fn init_state(init_account: InitAccount) -> HandleResult<Self> {
+    fn init_state(_effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let MttTableState {
             sb,
             bb,
@@ -475,7 +475,6 @@ mod tests {
     fn test_handle_event_with_checkpoint() {
         let mut mtt_table = mtt_table_with_players(3);
         let mut effect = Effect::default();
-        let event = Event::Ready; // The event doesn't really matter here.
         effect.checkpoint(); // Set checkpoint
 
         mtt_table.handle_event(&mut effect, event).unwrap();
