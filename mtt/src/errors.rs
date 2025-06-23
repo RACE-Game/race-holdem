@@ -20,4 +20,3 @@ custom_err!(error_invalid_table_id);
 custom_err!(error_leave_not_allowed);
 custom_err!(error_invalid_rake_and_bounty);
 custom_err!(error_start_chips_too_low);
-custom_err!(error_invalid_prize_rule);

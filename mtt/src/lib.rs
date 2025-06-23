@@ -186,6 +186,12 @@ impl BlindInfo {
     }
 }
 
+#[derive(Debug, Default, BorshSerialize, BorshDeserialize)]
+pub struct PrizeRule {
+    min_players: u16,
+    prizes: Vec<u8>,
+}
+
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct MttAccountData {
     start_time: u64,
@@ -195,7 +201,7 @@ pub struct MttAccountData {
     start_chips: u64,
     early_bird_chips: u64,
     blind_info: BlindInfo,
-    prize_rules: Vec<u8>,
+    prize_rules: Vec<PrizeRule>,
     min_players: u16,
     rake: u16,             // an integer representing the rake (per thousand)
     bounty: u16,           // an integer representing the bounty (per thousand)
@@ -228,7 +234,7 @@ pub struct Mtt {
     start_chips: u64,
     early_bird_chips: u64,
     blind_info: BlindInfo,
-    prize_rules: Vec<u8>,
+    prize_rules: Vec<PrizeRule>,
     total_prize: u64,
     total_rake: u64,
     total_bounty: u64,
@@ -284,12 +290,10 @@ impl GameHandler for Mtt {
 
         blind_info.with_default_blind_rules();
 
-        if prize_rules.is_empty() || prize_rules.iter().sum::<u8>() != 100 {
-            return Err(errors::error_invalid_prize_rules());
-        }
-
-        if prize_rules.iter().any(|p| *p == 0) {
-            return Err(errors::error_invalid_prize_rule());
+        for prize_rule in prize_rules.iter() {
+            if prize_rule.prizes.is_empty() || prize_rule.prizes.iter().sum::<u8>() != 100 {
+                return Err(errors::error_invalid_prize_rules());
+            }
         }
 
         if entry_close_time < start_time {
@@ -959,7 +963,8 @@ impl Mtt {
     }
 
     fn maybe_set_in_the_money(&mut self) {
-        if self.alives <= self.prize_rules.len() {
+        let prizes = self.get_prizes();
+        if self.alives <= prizes.len() {
             self.in_the_money = true;
         }
     }
@@ -1097,6 +1102,14 @@ impl Mtt {
         return Ok(());
     }
 
+    fn get_prizes(&self) -> &[u8] {
+        if let Some(prize_rule) = self.prize_rules.iter().rfind(|pr| pr.min_players <= self.ranks.len() as u16) {
+            &prize_rule.prizes
+        } else {
+            &self.prize_rules.first().expect("Prize rules can't be empty").prizes
+        }
+    }
+
     /// Apply the prizes and mark the game as completed.
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
@@ -1104,10 +1117,10 @@ impl Mtt {
             return Ok(());
         }
 
-        let total_shares: u8 = self.prize_rules.iter().take(self.ranks.len()).sum();
-        let prize_share: u64 = self.total_prize / total_shares as u64;
+        let prizes: Vec<u8> = self.get_prizes().into();
 
-        self.player_balances.insert(0, 0);
+        let total_shares: u8 = prizes.iter().take(self.ranks.len()).sum();
+        let prize_share: u64 = self.total_prize / total_shares as u64;
 
         // Collect the remaining
         let mut bounty_remaining = 0;
@@ -1115,7 +1128,7 @@ impl Mtt {
         // Get eligible ids for prizes
         for (i, rank) in self.ranks.iter_mut().enumerate() {
             let id = rank.id;
-            if let Some(rule) = self.prize_rules.get(i) {
+            if let Some(rule) = prizes.get(i) {
                 let prize: u64 = prize_share * *rule as u64;
                 self.winners.push(MttWinner {
                     player_id: id,
@@ -1129,6 +1142,8 @@ impl Mtt {
         }
 
         self.stage = MttStage::DistributingPrize;
+        self.player_balances.insert(0, 0);
+
         effect.info("Schedule bonus distribution");
         effect.wait_timeout(BONUS_DISTRIBUTION_DELAY);
 
