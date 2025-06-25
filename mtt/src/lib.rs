@@ -215,6 +215,14 @@ pub struct MttWinner {
     prize: u64,
 }
 
+#[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
+pub enum MttEvent {
+    #[default]
+    Unregister,
+}
+
+impl CustomEvent for MttEvent {}
+
 #[game_handler]
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
 pub struct Mtt {
@@ -340,8 +348,36 @@ impl GameHandler for Mtt {
         }
 
         match event {
-            Event::Custom { .. } => {
-                return Err(errors::error_custom_event_not_allowed())?;
+            Event::Custom { sender, raw } => {
+                let event: MttEvent = MttEvent::try_parse(&raw)?;
+                match event {
+                    MttEvent::Unregister => {
+                        if self.stage == MttStage::Init {
+                            // Remove the player from rankings
+                            let mut found: Option<usize> = None;
+                            for (index, rank) in self.ranks.iter().enumerate() {
+                                if rank.id == sender {
+                                    let amount_to_rake = take_amount_by_portion(self.ticket, self.rake);
+                                    let amount_to_bounty = take_amount_by_portion(self.ticket, self.bounty);
+                                    let amount_to_prize = self.ticket - amount_to_rake - amount_to_bounty;
+                                    self.total_prize -= amount_to_prize;
+                                    self.total_bounty -= amount_to_bounty;
+                                    self.total_rake -= amount_to_rake;
+                                    effect.withdraw(sender, self.ticket);
+                                    found = Some(index);
+                                    break;
+                                }
+                            }
+                            if let Some(pos) = found {
+                                self.ranks.remove(pos);
+                            } else {
+                                return Err(errors::error_player_not_found());
+                            }
+                        } else {
+                            return Err(errors::error_cant_unregister());
+                        }
+                    }
+                }
             }
 
             Event::Join { players } => match self.stage {
@@ -404,7 +440,7 @@ impl GameHandler for Mtt {
                                 let amount_to_bounty = take_amount_by_portion(amount, self.bounty);
                                 let amount_to_prize = amount - amount_to_rake - amount_to_bounty;
                                 let bounty_reward = take_amount_by_portion(amount_to_bounty, 500);
-                                let bounty_tranfer = amount_to_bounty - bounty_reward;
+                                let bounty_transfer = amount_to_bounty - bounty_reward;
 
                                 rank.deposit_history.push(d.balance());
                                 rank.chips = self.start_chips;
@@ -414,7 +450,7 @@ impl GameHandler for Mtt {
                                 rank.status = PlayerRankStatus::Pending;
                                 rank.time_cards = DEFAULT_TIME_CARDS;
                                 rank.bounty_reward += bounty_reward;
-                                rank.bounty_transfer += bounty_tranfer;
+                                rank.bounty_transfer += bounty_transfer;
                                 effect.info(format!("Accept player deposit: {}", d.id()));
                                 effect.accept_deposit(&d)?;
                                 self.total_prize += amount_to_prize;
@@ -1180,5 +1216,5 @@ mod tests {
     mod test_handle_game_result;
     mod test_init_state;
     mod test_sit_players;
-    mod test_start_game;
+    mod test_unregister;
 }

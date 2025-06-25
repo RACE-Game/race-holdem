@@ -12,7 +12,9 @@ fn test_init_state_valid() {
         start_chips: 5000,
         early_bird_chips: 1000,
         blind_info: BlindInfo::default(),
-        prize_rules: vec![50, 30, 20], // Sums to 100
+        prize_rules: vec![PrizeRule {
+            min_players: 0, prizes: vec![50, 30, 20]
+        }],
         min_players: 2,
         rake: 50,
         bounty: 20,
@@ -25,7 +27,8 @@ fn test_init_state_valid() {
         data: borsh::to_vec(&data).unwrap(),
     };
 
-    let result = Mtt::init_state(init_account);
+    let mut e = Effect::default();
+    let result = Mtt::init_state(&mut e, init_account);
     assert!(result.is_ok());
     let state = result.unwrap();
     assert_eq!(state.start_time, 1000);
@@ -33,7 +36,7 @@ fn test_init_state_valid() {
     assert_eq!(state.ticket, 100);
     assert_eq!(state.table_size, 9);
     assert_eq!(state.start_chips, 5000);
-    assert_eq!(state.prize_rules, vec![50, 30, 20]);
+    assert_eq!(state.prize_rules[0].prizes, vec![50, 30, 20]);
     assert_eq!(state.min_players, 2);
     assert_eq!(state.rake, 50);
     assert_eq!(state.bounty, 20);
@@ -42,7 +45,10 @@ fn test_init_state_valid() {
 #[test]
 fn test_init_state_invalid_prize_rules() {
     let data = MttAccountData {
-        prize_rules: vec![50, 30], // Doesn't sum to 100
+        prize_rules: vec![PrizeRule {
+            min_players: 0,
+            prizes: vec![50, 30], // Doesn't sum to 100
+        }],
         ..Default::default()
     };
     let init_account = InitAccount {
@@ -50,7 +56,8 @@ fn test_init_state_invalid_prize_rules() {
         data: borsh::to_vec(&data).unwrap(),
     };
 
-    let result = Mtt::init_state(init_account);
+    let mut e = Effect::default();
+    let result = Mtt::init_state(&mut e, init_account);
     assert!(result.is_err());
 }
 
@@ -66,7 +73,8 @@ fn test_init_state_invalid_entry_close_time() {
         data: borsh::to_vec(&data).unwrap(),
     };
 
-    let result = Mtt::init_state(init_account);
+    let mut e = Effect::default();
+    let result = Mtt::init_state(&mut e, init_account);
     assert!(result.is_err());
 }
 
@@ -82,7 +90,8 @@ fn test_init_state_invalid_rake_bounty() {
         data: borsh::to_vec(&data).unwrap(),
     };
 
-    let result = Mtt::init_state(init_account);
+    let mut e = Effect::default();
+    let result = Mtt::init_state(&mut e, init_account);
     assert!(result.is_err());
 }
 
@@ -101,6 +110,7 @@ fn test_init_state_start_chips_too_low() {
         data: borsh::to_vec(&data).unwrap(),
     };
 
-    let result = Mtt::init_state(init_account);
+    let mut e = Effect::default();
+    let result = Mtt::init_state(&mut e, init_account);
     assert!(result.is_err());
 }
