@@ -32,6 +32,7 @@ custom_err!(not_the_acting_player_to_fold);
 custom_err!(not_the_acting_player_to_call);
 custom_err!(not_the_acting_player);
 custom_err!(player_cant_bet);
+custom_err!(player_cant_call);
 custom_err!(bet_amonut_is_too_small);
 custom_err!(raise_amount_is_too_small);
 custom_err!(player_already_betted);

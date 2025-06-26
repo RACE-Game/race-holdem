@@ -976,37 +976,22 @@ impl Holdem {
                 ));
             }
         }
+
         player_hands.sort_by(|(_, h1), (_, h2)| compare_hands(&h2.value, &h1.value));
+
 
         println!("Player Hands from strong to weak {:?}", player_hands);
 
         // Winners example: [[w1], [w2, w3], ... ] where w2 == w3, i.e. a draw/tie
         let mut winners: Vec<Vec<u64>> = Vec::new();
-        let mut weaker: Vec<Vec<u64>> = Vec::new();
-        // Players in a draw will be in the same set
-        let mut draws = Vec::<u64>::new();
-        // Each hand is either equal to or weaker than winner (1st)
-        let Some((winner, highest_hand)) = player_hands.first() else {
-            return Err(errors::strongest_hand_not_found());
-        };
+        let mut current_value = None;
 
-        for (player, hand) in player_hands.iter().skip(1) {
-            if highest_hand.value.iter().eq(hand.value.iter()) {
-                draws.push(player.clone());
-            } else {
-                weaker.push(vec![player.clone()]);
+        for (id, hand) in player_hands.into_iter() {
+            if Some(&hand.value) != current_value.as_ref() {
+                current_value = Some(hand.value.clone());
+                winners.push(vec![]);
             }
-        }
-
-        if draws.len() > 0 {
-            draws.push(winner.clone());
-            winners.extend_from_slice(&vec![draws]);
-        } else {
-            winners.push(vec![winner.clone()]);
-        }
-
-        if weaker.len() > 0 {
-            winners.extend_from_slice(&weaker);
+            winners.last_mut().ok_or(errors::strongest_hand_not_found())?.push(id);
         }
 
         println!("Player rankings in order: {:?}", winners);
@@ -1274,6 +1259,9 @@ impl Holdem {
                 }
 
                 let betted = self.get_player_bet(sender);
+                if betted > self.street_bet {
+                    return Err(errors::player_cant_call());
+                }
                 let call_amount = self.street_bet - betted;
                 let (allin, real_call_amount) = self.take_bet(sender.clone(), call_amount)?;
                 self.set_player_acted(sender, allin)?;

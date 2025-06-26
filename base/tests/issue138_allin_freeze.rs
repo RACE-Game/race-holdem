@@ -2,14 +2,13 @@
 //! For more, see: https://github.com/RACE-Game/racepoker/issues/138
 
 use race_api::prelude::*;
-use race_test::prelude::*;
 use std::collections::BTreeMap;
 use race_holdem_base::essential::*;
 use race_holdem_base::game::Holdem;
 use race_holdem_base::hand_history::HandHistory;
 
 #[test]
-fn allin_smaller_than_blinds() -> Result<()> {
+fn allin_smaller_than_blinds() {
 
     // snapshot of players
     let chad = Player { id: 0, deposit: 10000, chips: 13300, position: 0, status: PlayerStatus::Acted, ..Player::default() };
@@ -87,9 +86,7 @@ fn allin_smaller_than_blinds() -> Result<()> {
         game.handle_custom_event(&mut effect, sb_event, 3).unwrap();
 
         let bb_event = GameEvent::Call; // bb can't call and expect error
-        game.handle_custom_event(&mut effect, bb_event, 4).unwrap();
-        println!("Street: {:?}", game.street);
-        println!("Stage: {:?}", game.stage);
+        let r = game.handle_custom_event(&mut effect, bb_event, 4);
+        assert!(r.is_err());
     }
-    Ok(())
 }

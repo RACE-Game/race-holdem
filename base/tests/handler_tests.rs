@@ -49,12 +49,12 @@ fn test_preflop_fold() -> HandleResult<()> {
         let state = ctx.state();
         let alice = state.player_map.get(&alice.id()).unwrap();
         let bob = state.player_map.get(&bob.id()).unwrap();
-        assert_eq!(state.street, Street::Init);
-        assert_eq!(alice.chips, 990);
-        assert_eq!(bob.chips, 1010);
+        assert_eq!(state.street, Street::Preflop);
+        assert_eq!(alice.chips, 970);
+        assert_eq!(bob.chips, 1000);
         assert_eq!(
             state.player_map.get(&bob.id).unwrap().status,
-            PlayerStatus::Wait
+            PlayerStatus::Acting
         );
     }
 
