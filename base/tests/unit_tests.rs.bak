@@ -395,3 +395,35 @@ fn test_blind_bets() -> Result<(), HandleError> {
     assert_eq!(state.bet_map.get(&CAROL), Some(&state.bb));
     Ok(())
 }
+
+#[test]
+fn setup_players() -> BTreeMap<u64, Player> {
+    let mut player_map = BTreeMap::new();
+    player_map.insert(1, Player::new_with_defaults(1, 0, 0, PlayerStatus::Leave));
+    player_map.insert(2, Player::new_with_defaults(2, 0, 0, PlayerStatus::Out));
+    player_map.insert(
+        3,
+        Player::new_with_defaults(3, 100, 0, PlayerStatus::Acting),
+    );
+    player_map
+}
+
+#[test]
+fn test_remove_leave_and_out_players() {
+    let mut holdem = Holdem {
+        player_map: setup_players(),
+        ..Default::default()
+    };
+    let mut effect = Effect::default();
+    let removed = holdem.kick_players(&mut effect);
+
+    assert_eq!(removed.len(), 2);
+    assert!(removed
+            .iter()
+            .any(|p| p.id == 1 && p.status == PlayerStatus::Leave));
+    assert!(removed
+            .iter()
+            .any(|p| p.id == 2 && p.status == PlayerStatus::Out));
+    assert_eq!(holdem.player_map.len(), 1);
+    assert!(holdem.player_map.contains_key(&3));
+}

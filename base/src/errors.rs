@@ -53,3 +53,5 @@ custom_err!(time_card_already_in_use);
 custom_err!(no_time_cards);
 custom_err!(sb_not_found_in_player_order);
 custom_err!(bb_not_found_in_player_order);
+custom_err!(btn_not_found_in_player_order);
+custom_err!(bb_not_found_in_waitbbs);

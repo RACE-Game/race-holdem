@@ -677,7 +677,6 @@ version = "0.2.6"
 dependencies = [
  "race-api",
  "race-core",
- "rand",
 ]
 
 [[package]]
