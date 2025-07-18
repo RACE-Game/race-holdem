@@ -68,13 +68,13 @@ fn test_only_one_wait_player() -> HandleResult<()> {
     ctx.handle_multiple_events(&leaves)?;
     ctx.handle_dispatch_until_no_events(vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut tx])?;
 
-    // Dave still needs to wait because SB < BB < NP
+    // Two players left, bob and dave. bob will be BTN(SB) and act first.
     {
         let state = ctx.state();
         let dave = state.player_map.get(&dave.id()).unwrap();
-        assert_eq!(dave.status, PlayerStatus::Waitbb);
+        assert_eq!(dave.status, PlayerStatus::Wait);
         assert_eq!(state.street, Street::Preflop);
-        assert!(state.is_acting_player(alice.id()));
+        assert!(state.is_acting_player(bob.id()));
     }
 
     Ok(())
