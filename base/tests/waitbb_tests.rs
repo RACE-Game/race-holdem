@@ -348,7 +348,7 @@ fn test_wait_waitbb_headsup() -> HandleResult<()> {
 // 1. one player with `Wait` status
 // 2. two or more players with `Waitbb` status
 // The only `Wait` player should become the next btn
-// Other `Waitbb` players should be all added to the game and
+// All `Waitbb` players should be added to the game and
 // sb and bb are selected from them
 #[test]
 fn test_one_wait_multi_waitbbs() -> HandleResult<()> {
@@ -477,6 +477,67 @@ fn test_multi_waitbbs_without_wait() -> HandleResult<()> {
         assert!(game.player_map.values().all(|p| matches!(p.status, PlayerStatus::Wait)));
         assert_eq!(game.btn, 4);
         // TODO: test who are sb and bb, respectively?
+    }
+
+    Ok(())
+}
+
+// No `Waitbb` players so `Wait` players move on as usual
+#[test]
+fn test_multi_wait_without_waitbb() -> HandleResult<()> {
+    // players
+    let alice = Player { id: 3, position: 6, status: PlayerStatus::Wait, ..Player::default() };
+    let bob = Player { id: 6, position: 3, status: PlayerStatus::Wait, ..Player::default() };
+    let carol = Player { id: 8,position: 0, status: PlayerStatus::Wait, ..Player::default() };
+    let dave = Player { id: 9, position: 4, status: PlayerStatus::Wait, .. Player::default() };
+
+    let player_map = BTreeMap::from([
+        (3, alice),
+        (6, bob),
+        (8, carol),
+        (9, dave),
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 4,
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 6,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        assert!(game.player_map.values().all(|p| matches!(p.status, PlayerStatus::Wait)));
+        assert_eq!(game.btn, 6);
     }
 
     Ok(())

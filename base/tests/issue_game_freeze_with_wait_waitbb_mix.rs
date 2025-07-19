@@ -1,6 +1,8 @@
-//! Test for the scenario where game does not start with 2 players:
-//! player A with status `Waitbb` and player B with status `Wait`
-//! A extra player has just left (or got kicked out of) the game
+//! Test for the scenario where game has only 2 players:
+//! 1. player A with status `Waitbb`
+//! 2. player B with status `Wait`
+//! This can happen due to the fact that other players have
+//! just left (or got kicked out of) the game
 
 mod helper;
 use helper::setup_holdem_game;
@@ -8,15 +10,14 @@ use race_holdem_base::game::Holdem;
 use race_api::prelude::*;
 use race_holdem_base::essential::*;
 use race_test::prelude::*;
-use race_holdem_base::hand_history::HandHistory;
 use std::collections::BTreeMap;
 
 // In the previous buggy version, we shoud expect this to panic because
 // when there is only one player with `Wait` status (as sb), accessing bb
 // will cause out of bound error.
 //
-// In the fixed version, this test still fails (intentionlly) as the player
-// with `Waitbb` status should be updated to `Wait`
+// In the fixed version, this test should make `Wait` player the sb/btn,
+// and update `Waitbb` player with `Wait` and make him the bb
 #[test]
 fn test_only_one_wait_player() -> HandleResult<()> {
     let mut tx = TestClient::transactor("tx");
@@ -69,11 +70,16 @@ fn test_only_one_wait_player() -> HandleResult<()> {
     ctx.handle_dispatch_until_no_events(vec![&mut alice, &mut bob, &mut carol, &mut dave, &mut tx])?;
 
     // Two players left, bob and dave. bob will be BTN(SB) and act first.
+    // dave should be the bb
     {
         let state = ctx.state();
-        let dave = state.player_map.get(&dave.id()).unwrap();
-        assert_eq!(dave.status, PlayerStatus::Wait);
+        let player_bob = state.player_map.get(&bob.id()).unwrap();
+        let player_dave = state.player_map.get(&dave.id()).unwrap();
+        assert_eq!(player_dave.status, PlayerStatus::Wait);
         assert_eq!(state.street, Street::Preflop);
+        assert_eq!(state.bet_map.get(&dave.id()), Some(&20));
+        assert_eq!(state.bet_map.get(&bob.id()), Some(&10));
+        assert_eq!(state.btn, player_bob.position);
         assert!(state.is_acting_player(bob.id()));
     }
 

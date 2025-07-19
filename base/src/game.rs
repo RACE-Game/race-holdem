@@ -2,7 +2,6 @@
 use race_api::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::take;
-
 use crate::account::HoldemAccount;
 use crate::errors;
 use crate::essential::{
@@ -256,19 +255,19 @@ impl Holdem {
 
         player_positions.sort();
 
-        let next_positions: Vec<usize> = player_positions
+        let next_btn_candidates: Vec<usize> = player_positions
             .iter()
             .filter(|pos| **pos > self.btn)
             .map(|p| *p)
             .collect();
 
-        if next_positions.is_empty() {
+        if next_btn_candidates.is_empty() {
             let Some(next_btn) = player_positions.first() else {
                 return Err(errors::next_button_player_not_found());
             };
             Ok(*next_btn)
         } else {
-            if let Some(next_btn) = next_positions.first() {
+            if let Some(next_btn) = next_btn_candidates.first() {
                 Ok(*next_btn)
             } else {
                 return Err(errors::next_button_position_not_found());
@@ -378,7 +377,7 @@ impl Holdem {
     /// 2. NP > SB > BB, then NP should be the actual BB (a ring)
     /// 3. SB > BB > NP, then NP should be the actual BB (a ring)
     fn arrange_waitbbs(&mut self, next_btn: usize) -> Result<(), HandleError> {
-        // tuple: (id, original_pos, modified_pos)
+        // tuple: (id, player_pos, modified_pos)
         let mut waitbbs: Vec<(u64, usize, usize)> = self
             .player_map.values()
             .filter(|p| matches!(p.status, PlayerStatus::Waitbb))
