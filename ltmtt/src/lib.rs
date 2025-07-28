@@ -641,7 +641,7 @@ impl LtMtt {
                 // add into current table
                 if let Some(table) = self.tables.get_mut(&table_id) {
                     let mut table_player =
-                        MttTablePlayer::new(player_id, player.chips, 0, player.time_cards);
+                        MttTablePlayer::new(player_id, player.chips, player.time_cards);
                     table.add_player(&mut table_player);
                     self.table_assigns.insert(player_id, table_id);
                     self.create_table_if_target_table_not_enough(effect, table_id)?;

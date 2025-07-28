@@ -30,7 +30,7 @@ fn test_game_result_given_3_tables_and_current_table_has_1_player_do_dispatch_no
         table: MttTableState {
             hand_id: 1,
             table_id: 3,
-            players: vec![MttTablePlayer::new_with_defaults(8, 20000, 1)],
+            players: vec![MttTablePlayer::new_with_defaults(8, 20000)],
             next_game_start: 0,
             ..Default::default()
         },
@@ -74,7 +74,7 @@ fn test_game_result_given_2_tables_and_current_table_has_1_player_do_dispatch_no
         table: MttTableState {
             hand_id: 1,
             table_id: 2,
-            players: vec![MttTablePlayer::new_with_defaults(5, 20000, 1)],
+            players: vec![MttTablePlayer::new_with_defaults(5, 20000)],
             next_game_start: 0,
             ..Default::default()
         },
@@ -108,9 +108,9 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
             hand_id: 1,
             table_id: 2,
             players: vec![
-                MttTablePlayer::new_with_defaults(4, 10000, 0),
-                MttTablePlayer::new_with_defaults(5, 10000, 1),
-                MttTablePlayer::new_with_defaults(6, 10000, 2),
+                MttTablePlayer::new_with_defaults(4, 10000),
+                MttTablePlayer::new_with_defaults(5, 10000),
+                MttTablePlayer::new_with_defaults(6, 10000),
             ],
             ..Default::default()
         },
@@ -126,7 +126,7 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
 
     assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
     assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
-    assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 1);
+    assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 2);
     assert_eq!(
         effect.list_bridge_events().unwrap(),
         vec![
@@ -180,8 +180,8 @@ fn test_game_result_given_3_tables_do_close_table() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new_with_defaults(1, 20000, 0),
-                MttTablePlayer::new_with_defaults(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 20000),
+                MttTablePlayer::new_with_defaults(3, 10000),
             ],
             ..Default::default()
         },
@@ -203,7 +203,7 @@ fn test_game_result_given_3_tables_do_close_table() {
     assert_eq!(mtt.get_rank(1).unwrap().chips, 20000);
     assert_eq!(mtt.tables.get(&1), None);
     assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 3);
-    assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 1);
+    assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 3);
     assert_eq!(
         effect.list_bridge_events().unwrap(),
         vec![
@@ -250,7 +250,7 @@ fn test_game_result_given_2_tables_do_close_table() {
         table: MttTableState {
             hand_id: 1,
             table_id: 1,
-            players: vec![MttTablePlayer::new_with_defaults(1, 20000, 0)],
+            players: vec![MttTablePlayer::new_with_defaults(1, 20000)],
             ..Default::default()
         },
     };
@@ -283,7 +283,7 @@ fn test_game_result_given_2_tables_do_close_table() {
 
 #[test]
 fn test_game_result_given_2_tables_move_one_player() {
-    // Create three tables with number of players: 3, 1
+    // Create 2 tables with number of players: 3, 1
     let mut mtt = helper::create_mtt_with_players(&[3, 1], 3);
     let mut effect = Effect::default();
 
@@ -295,9 +295,9 @@ fn test_game_result_given_2_tables_move_one_player() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new_with_defaults(1, 10000, 0),
-                MttTablePlayer::new_with_defaults(2, 10000, 1),
-                MttTablePlayer::new_with_defaults(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(1, 10000),
+                MttTablePlayer::new_with_defaults(2, 10000),
+                MttTablePlayer::new_with_defaults(3, 10000),
             ],
             ..Default::default()
         },
@@ -336,7 +336,7 @@ fn test_game_result_given_2_tables_move_one_player() {
     assert_eq!(mtt.table_assigns.get(&3), Some(&1));
     assert_eq!(mtt.table_assigns.get(&4), Some(&2));
     assert_eq!(mtt.tables.get(&1).map(|t| t.players.len()), Some(2));
-    assert_eq!(mtt.tables.get(&2).map(|t| t.players.len()), Some(1));
+    assert_eq!(mtt.tables.get(&2).map(|t| t.players.len()), Some(2));
 }
 
 #[test]
@@ -371,8 +371,8 @@ fn test_game_result_with_table_reservation_pre_entry_close() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new_with_defaults(2, 20000, 0),
-                MttTablePlayer::new_with_defaults(3, 10000, 2),
+                MttTablePlayer::new_with_defaults(2, 20000),
+                MttTablePlayer::new_with_defaults(3, 10000),
             ],
             ..Default::default()
         },
@@ -444,7 +444,7 @@ fn test_game_result_given_enough_reservation_do_close_table() {
             hand_id: 1,
             table_id: 1,
             players: vec![
-                MttTablePlayer::new_with_defaults(10, 10000, 1),
+                MttTablePlayer::new_with_defaults(10, 10000),
             ],
             ..Default::default()
         },
@@ -470,7 +470,7 @@ fn test_game_result_given_enough_reservation_do_close_table() {
 
     assert_eq!(mtt.tables.len(), 3);
     assert_eq!(mtt.tables.get(&1).unwrap().players.len(), 3);
-    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 2);
+    assert_eq!(mtt.tables.get(&2).unwrap().players.len(), 3);
     assert_eq!(mtt.tables.get(&3).unwrap().players.len(), 3);
     assert_eq!(
         effect.list_bridge_events::<HoldemBridgeEvent>().unwrap(),

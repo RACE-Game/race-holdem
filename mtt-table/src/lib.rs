@@ -40,10 +40,11 @@ impl GameHandler for MttTable {
 
         let player_map = players
             .into_iter()
-            .map(|p| {
+            .enumerate()
+            .map(|(idx, p)| {
                 (
                     p.id,
-                    Player::new_with_timeout(p.id, p.chips, p.table_position as _, 0),
+                    Player::new_with_timeout(p.id, p.chips, idx as u16, 0),
                 )
             })
             .collect();
@@ -125,7 +126,7 @@ impl MttTable {
             .holdem
             .player_map
             .values()
-            .map(|p| MttTablePlayer::new(p.id, p.chips, p.position as _, p.time_cards))
+            .map(|p| MttTablePlayer::new(p.id, p.chips, p.time_cards))
             .collect();
 
         MttTableState {
