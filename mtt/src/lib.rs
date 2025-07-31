@@ -637,7 +637,6 @@ impl Mtt {
                 players.push(MttTablePlayer::new(
                     r.id,
                     r.chips,
-                    (j / num_of_tables) as usize, // player's table position
                     r.time_cards,
                 ));
                 self.table_assigns.insert(r.id, table_id as _);
@@ -860,6 +859,13 @@ impl Mtt {
             self.table_assigns.insert(*pid, to_table_id);
         });
 
+        // Should we add player to table here?
+        if let Some(target_table) = self.tables.get_mut(&to_table_id) {
+            players_to_move.iter().for_each(|p| {
+                target_table.players.push(p.clone());
+            });
+        }
+
         effect.bridge_event(
             from_table_id as _,
             HoldemBridgeEvent::StartGame {
@@ -951,7 +957,7 @@ impl Mtt {
         } else {
             0
         };
-        effect.info(format!("Trigger close table, current_table_players_count: {}, total_empty_seats: {}, reserved_seats: {}",
+        effect.info(format!("Check table player numbers, current_table_players_count: {}, total_empty_seats: {}, reserved_seats: {}",
                 current_table_players_count, total_empty_seats, reserved_seats));
 
         if current_table_players_count <= total_empty_seats.saturating_sub(reserved_seats) {
@@ -1081,8 +1087,7 @@ impl Mtt {
                     return Err(errors::error_table_not_fonud())?;
                 };
 
-                let position = table.players.len();
-                let player = MttTablePlayer::new(rank.id, rank.chips, position, rank.time_cards);
+                let player = MttTablePlayer::new(rank.id, rank.chips, rank.time_cards);
                 table.players.push(player);
             } else if last_table_to_launch
                 .as_ref()
@@ -1096,14 +1101,13 @@ impl Mtt {
                     "Sit player {} to the table just created {}",
                     rank.id, table.table_id
                 ));
-                let position = table.players.len();
-                let player = MttTablePlayer::new(rank.id, rank.chips, position, rank.time_cards);
+                let player = MttTablePlayer::new(rank.id, rank.chips, rank.time_cards);
                 table.players.push(player);
             } else {
                 // Table is full, create a new table with this player.
                 let table_id = effect.next_sub_game_id();
                 effect.info(format!("Create {} table for player {}", table_id, rank.id));
-                let player = MttTablePlayer::new(rank.id, rank.chips, 0, rank.time_cards);
+                let player = MttTablePlayer::new(rank.id, rank.chips, rank.time_cards);
                 let players = vec![player];
                 let table = MttTableState::new(table_id, sb, bb, ante, players);
                 tables_to_launch.push(table);

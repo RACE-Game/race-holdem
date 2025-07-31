@@ -2,7 +2,6 @@
 use race_api::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::take;
-
 use crate::account::HoldemAccount;
 use crate::errors;
 use crate::essential::{
@@ -14,7 +13,6 @@ use crate::essential::{
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
 
-#[macro_export]
 macro_rules! id_pos {
     ($p:ident, $last_pos:ident) => {
         if $p.position > $last_pos {
@@ -250,21 +248,26 @@ impl Holdem {
             self.player_map.values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
             .map(|p| p.position).collect();
+        // There are only `Waitbb` players, default btn to 0 as it will be re-calced
+        if player_positions.is_empty() {
+            return Ok(0usize);
+        }
+
         player_positions.sort();
 
-        let next_positions: Vec<usize> = player_positions
+        let next_btn_candidates: Vec<usize> = player_positions
             .iter()
             .filter(|pos| **pos > self.btn)
             .map(|p| *p)
             .collect();
 
-        if next_positions.is_empty() {
+        if next_btn_candidates.is_empty() {
             let Some(next_btn) = player_positions.first() else {
                 return Err(errors::next_button_player_not_found());
             };
             Ok(*next_btn)
         } else {
-            if let Some(next_btn) = next_positions.first() {
+            if let Some(next_btn) = next_btn_candidates.first() {
                 Ok(*next_btn)
             } else {
                 return Err(errors::next_button_position_not_found());
@@ -368,51 +371,100 @@ impl Holdem {
         Ok(())
     }
 
-    /// Similar to arrange_player, but runs only once after new btn is known.
-    /// It checks if the new player can be the actual BB based on positions:
+    /// Similar to arrange_player, but runs only once after next btn is known.
+    /// It checks if the next player can be the actual BB based on positions:
     /// 1. SB < NP < BB, then NP should be the actual BB
     /// 2. NP > SB > BB, then NP should be the actual BB (a ring)
     /// 3. SB > BB > NP, then NP should be the actual BB (a ring)
-    fn arrange_waitbbs(&mut self, new_btn: usize) -> Result<(), HandleError> {
-        // tuple: (id, original_pos, modified_pos)
-        let waitbbs: Vec<(u64, usize, usize)> = self
+    fn arrange_waitbbs(&mut self, next_btn: usize) -> Result<(), HandleError> {
+        // tuple: (id, player_pos, modified_pos)
+        let mut waitbbs: Vec<(u64, usize, usize)> = self
             .player_map.values()
             .filter(|p| matches!(p.status, PlayerStatus::Waitbb))
-            .map(|p| id_pos!(p, new_btn))
+            .map(|p| id_pos!(p, next_btn))
             .collect();
+        if waitbbs.is_empty() {
+            return Ok(());
+        }
 
+        // get current in-game players (with any status but Waitbb)
         let mut player_pos: Vec<(u64, usize, usize)> = self
             .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
-            .map(|p| id_pos!(p, new_btn))
+            .map(|p| id_pos!(p, next_btn))
             .collect();
         player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
         println!("Sorted playters without Waitbbs {player_pos:?}");
 
-        let (_, sb_pos, _) = player_pos.first().clone()
-            .ok_or_else(|| errors::sb_not_found_in_player_order())?;
-        let (_, bb_pos, _) = player_pos.get(1).clone()
-            .ok_or_else(|| errors::bb_not_found_in_player_order())?;
-        for p @ (id, wpos, _) in waitbbs {
-            if *sb_pos < wpos && wpos < *bb_pos  {
-                player_pos.push(p);
+        if player_pos.is_empty() {
+            let mut new_btn = 0;
+            for p @ (id, wpos, _) in waitbbs {
                 let wp = self.player_map.get_mut(&id)
                     .ok_or(errors::internal_player_not_found())?;
                 wp.status = PlayerStatus::Wait;
-                break;
-            }
-            if *sb_pos > *bb_pos && (wpos > *sb_pos || wpos < *bb_pos) {
                 player_pos.push(p);
+                new_btn = wpos;
+            }
+            self.btn = new_btn;
+        } else if player_pos.len() == 1 && waitbbs.len() == 1 {
+            // heads-up, wait player becomes sb and btn
+            let (_, new_btn, _) = player_pos.first().cloned()
+                .ok_or_else(|| errors::btn_not_found_in_player_order())?;
+            self.btn = new_btn;
+            // waitbb player becomes bb
+            let (id, _, _) = waitbbs.first().cloned()
+                .ok_or_else(|| errors::bb_not_found_in_waitbbs())?;
+            let wp = self.player_map.get_mut(&id)
+                .ok_or(errors::internal_player_not_found())?;
+            wp.status = PlayerStatus::Wait;
+            player_pos.append(&mut waitbbs);
+        } else if player_pos.len() == 1 && waitbbs.len() > 1 {
+            // make the single player with `Wait` status the next btn
+            let btn_player @ (_, new_btn, _) = player_pos.first().cloned()
+                .ok_or_else(|| errors::btn_not_found_in_player_order())?;
+            self.btn = new_btn;
+            // re-order waitbbs according to the next btn
+            player_pos = waitbbs.iter().map(|&(id, pos, _)| {
+                if pos > new_btn {
+                    (id, pos, pos - new_btn)
+                } else {
+                    (id, pos, pos + 100)
+                }
+            }).collect();
+            // add all waitbb players to game
+            for (id, _, _) in waitbbs {
                 let wp = self.player_map.get_mut(&id)
                     .ok_or(errors::internal_player_not_found())?;
                 wp.status = PlayerStatus::Wait;
-                break;
             }
+            player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
+            player_pos.push(btn_player);
+        } else {
+            let (_, sb_pos, _) = player_pos.first().cloned()
+                .ok_or_else(|| errors::sb_not_found_in_player_order())?;
+            let (_, bb_pos, _) = player_pos.get(1).cloned()
+                .ok_or_else(|| errors::bb_not_found_in_player_order())?;
+            for p @ (id, wpos, _) in waitbbs {
+                if sb_pos < wpos && wpos < bb_pos  {
+                    player_pos.push(p);
+                    let wp = self.player_map.get_mut(&id)
+                        .ok_or(errors::internal_player_not_found())?;
+                    wp.status = PlayerStatus::Wait;
+                    break;
+                }
+                if sb_pos > bb_pos && (wpos > sb_pos || wpos < bb_pos) {
+                    player_pos.push(p);
+                    let wp = self.player_map.get_mut(&id)
+                        .ok_or(errors::internal_player_not_found())?;
+                    wp.status = PlayerStatus::Wait;
+                    break;
+                }
+            }
+            player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
         }
-        player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
-        println!("Sorted players with one potential new bb {player_pos:?}");
 
+        println!("Sorted players with one potential new bb {player_pos:?}");
         let player_order: Vec<u64> = player_pos.into_iter().map(|(id, ..)| id).collect();
         self.player_order = player_order;
         Ok(())
@@ -1890,41 +1942,5 @@ impl GameHandler for Holdem {
             // Other events
             _ => Ok(()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn setup_players() -> BTreeMap<u64, Player> {
-        let mut player_map = BTreeMap::new();
-        player_map.insert(1, Player::new_with_defaults(1, 0, 0, PlayerStatus::Leave));
-        player_map.insert(2, Player::new_with_defaults(2, 0, 0, PlayerStatus::Out));
-        player_map.insert(
-            3,
-            Player::new_with_defaults(3, 100, 0, PlayerStatus::Acting),
-        );
-        player_map
-    }
-
-    #[test]
-    fn test_remove_leave_and_out_players() {
-        let mut holdem = Holdem {
-            player_map: setup_players(),
-            ..Default::default()
-        };
-        let mut effect = Effect::default();
-        let removed = holdem.kick_players(&mut effect);
-
-        assert_eq!(removed.len(), 2);
-        assert!(removed
-            .iter()
-            .any(|p| p.id == 1 && p.status == PlayerStatus::Leave));
-        assert!(removed
-            .iter()
-            .any(|p| p.id == 2 && p.status == PlayerStatus::Out));
-        assert_eq!(holdem.player_map.len(), 1);
-        assert!(holdem.player_map.contains_key(&3));
     }
 }

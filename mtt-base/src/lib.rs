@@ -7,24 +7,22 @@ pub const DEFAULT_TIME_CARDS: u8 = 5;
 pub struct MttTablePlayer {
     pub id: u64,
     pub chips: u64,
-    pub table_position: usize,
     pub time_cards: u8,
 }
 
 impl MttTablePlayer {
-    pub fn new(id: u64, chips: u64, table_position: usize, time_cards: u8) -> Self {
+    pub fn new(id: u64, chips: u64, time_cards: u8) -> Self {
         Self {
             id,
             chips,
-            table_position,
             time_cards,
         }
     }
 
     /// Give time_cards a default value.
     /// For testing
-    pub fn new_with_defaults(id: u64, chips: u64, table_position: usize) -> Self {
-        Self::new(id, chips, table_position, DEFAULT_TIME_CARDS)
+    pub fn new_with_defaults(id: u64, chips: u64) -> Self {
+        Self::new(id, chips, DEFAULT_TIME_CARDS)
     }
 }
 
@@ -77,50 +75,18 @@ impl MttTableState {
         }
     }
 
-    pub fn find_position(&self) -> usize {
-        let mut table_position = 0;
-        for i in 0.. {
-            if self
-                .players
-                .iter()
-                .find(|p| p.table_position == i)
-                .is_none()
-            {
-                table_position = i;
-                break;
-            }
-        }
-        return table_position;
-    }
-
     /// If player already on table, returns false represents add failed.
-    pub fn add_player(&mut self, player: &mut MttTablePlayer) -> bool {
+    pub fn add_player(&mut self, player: &MttTablePlayer) -> bool {
         let exists = self.players.iter().any(|p| p.id == player.id);
 
         if exists {
             return false;
         } else {
-            let mut table_position = 0;
-            for i in 0.. {
-                if self
-                    .players
-                    .iter()
-                    .find(|p| p.table_position == i)
-                    .is_none()
-                {
-                    table_position = i;
-                    break;
-                }
-            }
-
             self.players.push(MttTablePlayer::new(
                 player.id,
                 player.chips,
-                table_position,
                 player.time_cards,
             ));
-            // Update relocated player's table position as well
-            player.table_position = table_position;
 
             return true;
         }

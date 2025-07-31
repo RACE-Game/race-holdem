@@ -85,7 +85,7 @@ fn sit_multiple_players_when_all_tables_are_full_creates_new_tables() {
     effect.print_logs();
 
     let BlindRuleItem { sb, bb, ante } = mtt.calc_blinds().unwrap();
-    let table_created = MttTableState::new(0, sb, bb, ante, vec![MttTablePlayer::new_with_defaults(10, 1000, 0), MttTablePlayer::new_with_defaults(11, 1000, 1)]);
+    let table_created = MttTableState::new(0, sb, bb, ante, vec![MttTablePlayer::new_with_defaults(10, 1000), MttTablePlayer::new_with_defaults(11, 1000)]);
     assert_eq!(
         effect.launch_sub_games,
         vec![
@@ -174,10 +174,10 @@ fn sit_players_in_existing_and_new_tables() {
 
     let BlindRuleItem { sb, bb, ante } = mtt.calc_blinds().unwrap();
     let table_created = MttTableState::new(0, sb, bb, ante, vec![
-        MttTablePlayer::new_with_defaults(13, 1000, 0),
-        MttTablePlayer::new_with_defaults(14, 1000, 1),
-        MttTablePlayer::new_with_defaults(15, 1000, 2),
-        MttTablePlayer::new_with_defaults(16, 1000, 3),
+        MttTablePlayer::new_with_defaults(13, 1000),
+        MttTablePlayer::new_with_defaults(14, 1000),
+        MttTablePlayer::new_with_defaults(15, 1000),
+        MttTablePlayer::new_with_defaults(16, 1000),
     ]);
 
     assert_eq!(effect.launch_sub_games, vec![
