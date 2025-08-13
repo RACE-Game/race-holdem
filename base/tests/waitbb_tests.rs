@@ -403,10 +403,10 @@ fn test_one_wait_multi_waitbbs() -> HandleResult<()> {
         let mut effect = Effect::default();
         game.handle_event(&mut effect, event).unwrap();
 
-        let alice = game.player_map.get(&3).unwrap();
-        let bob = game.player_map.get(&6).unwrap();
-        let carol = game.player_map.get(&8).unwrap();
-        let dave = game.player_map.get(&9).unwrap();
+        let _alice = game.player_map.get(&3).unwrap();
+        let _bob = game.player_map.get(&6).unwrap();
+        let _carol = game.player_map.get(&8).unwrap();
+        let _dave = game.player_map.get(&9).unwrap();
         assert!(game.player_map.values().all(|p| matches!(p.status, PlayerStatus::Wait)));
         assert_eq!(game.btn, 6);
         // TODO: test who are sb and bb, respectively
@@ -470,10 +470,10 @@ fn test_multi_waitbbs_without_wait() -> HandleResult<()> {
         let mut effect = Effect::default();
         game.handle_event(&mut effect, event).unwrap();
 
-        let alice = game.player_map.get(&3).unwrap();
-        let bob = game.player_map.get(&6).unwrap();
-        let carol = game.player_map.get(&8).unwrap();
-        let dave = game.player_map.get(&9).unwrap();
+        let _alice = game.player_map.get(&3).unwrap();
+        let _bob = game.player_map.get(&6).unwrap();
+        let _carol = game.player_map.get(&8).unwrap();
+        let _dave = game.player_map.get(&9).unwrap();
         assert!(game.player_map.values().all(|p| matches!(p.status, PlayerStatus::Wait)));
         assert_eq!(game.btn, 4);
         // TODO: test who are sb and bb, respectively?

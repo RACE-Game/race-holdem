@@ -37,11 +37,10 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use errors::error_leave_not_allowed;
 use race_api::prelude::*;
 use race_holdem_mtt_base::{
-    ChipsChange, HoldemBridgeEvent, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
-    PlayerResultStatus, DEFAULT_TIME_CARDS,
+    get_relative_position, ChipsChange, HoldemBridgeEvent, MttTableInit, MttTablePlayer, MttTablePlayerInit, MttTableSitin, MttTableState, PlayerResult, PlayerResultStatus, DEFAULT_TIME_CARDS
 };
 use race_proc_macro::game_handler;
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::{collections::{btree_map::Entry, BTreeMap}, mem};
 
 const BONUS_DISTRIBUTION_DELAY: u64 = 120_000;
 
@@ -251,12 +250,13 @@ pub struct Mtt {
     subgame_bundle: String,
     winners: Vec<MttWinner>,
     launched_table_ids: Vec<GameId>,
-    // We use this to save the distributed prizes.
+    // TODO: We expect to use this to save the distributed prizes.
     // For example:
     // If the minimum prize for the top 10 is 100,
     // and 11 players are reduced to 10, each will be guaranteed a prize of 100.
     // The structure is a mapping from player_id to its guranteed prize.
     // The special player_id 0 stands for undistributed.
+    // Currently, all balances are stored in position 0.
     player_balances: BTreeMap<u64, u64>,
     // The minimal number of player to start this game.
     // When there are fewer players, we cancel the game.
@@ -357,9 +357,12 @@ impl GameHandler for Mtt {
                             let mut found: Option<usize> = None;
                             for (index, rank) in self.ranks.iter().enumerate() {
                                 if rank.id == sender {
-                                    let amount_to_rake = take_amount_by_portion(self.ticket, self.rake);
-                                    let amount_to_bounty = take_amount_by_portion(self.ticket, self.bounty);
-                                    let amount_to_prize = self.ticket - amount_to_rake - amount_to_bounty;
+                                    let amount_to_rake =
+                                        take_amount_by_portion(self.ticket, self.rake);
+                                    let amount_to_bounty =
+                                        take_amount_by_portion(self.ticket, self.bounty);
+                                    let amount_to_prize =
+                                        self.ticket - amount_to_rake - amount_to_bounty;
                                     self.total_prize -= amount_to_prize;
                                     self.total_bounty -= amount_to_bounty;
                                     self.total_rake -= amount_to_rake;
@@ -474,7 +477,7 @@ impl GameHandler for Mtt {
                             effect.reject_deposit(&d)?;
                         }
                     }
-                    self.sit_players(effect, pids_to_sit)?;
+                    self.sit_players(effect, pids_to_sit, true)?;
                     self.sort_ranks();
                     self.update_alives();
                 }
@@ -526,7 +529,7 @@ impl GameHandler for Mtt {
                         self.handle_bounty(&player_results, effect)?;
                         self.tables.insert(table_id, table);
                         self.apply_chips_change(&player_results)?;
-                        self.balance_tables(effect, table_id)?;
+                        self.balance_tables(effect, table_id, &player_results)?;
                         self.apply_prizes(effect)?;
                         self.maybe_set_entry_close(effect);
                         effect.checkpoint();
@@ -539,21 +542,22 @@ impl GameHandler for Mtt {
             Event::SubGameReady {
                 game_id, init_data, ..
             } => {
-                let table = MttTableState::try_from_slice(&init_data)?;
+                let table_init = MttTableInit::try_from_slice(&init_data)?;
                 effect.bridge_event(
-                    table.table_id,
+                    table_init.table_id,
                     HoldemBridgeEvent::StartGame {
-                        sb: table.sb,
-                        bb: table.bb,
-                        ante: table.ante,
+                        sb: table_init.sb,
+                        bb: table_init.bb,
+                        ante: table_init.ante,
                         sitout_players: vec![],
                     },
                 )?;
 
                 self.launched_table_ids.push(game_id);
-                for p in table.players.iter() {
-                    self.table_assigns.insert(p.id, table.table_id);
+                for p in table_init.players.iter() {
+                    self.table_assigns.insert(p.id, table_init.table_id);
                 }
+                let table: MttTableState = table_init.into();
                 self.tables.insert(table.table_id, table);
                 effect.checkpoint();
             }
@@ -613,7 +617,7 @@ impl Mtt {
     fn launch_table(
         &mut self,
         effect: &mut Effect,
-        table: MttTableState,
+        table: MttTableInit,
     ) -> Result<(), HandleError> {
         effect.launch_sub_game(self.subgame_bundle.clone(), self.table_size as _, &table)?;
         Ok(())
@@ -630,30 +634,25 @@ impl Mtt {
             (table_size_with_reserve as usize + num_of_players - 1) / table_size_with_reserve;
 
         for i in 0..num_of_tables {
-            let mut players = Vec::<MttTablePlayer>::new();
+            let mut players = Vec::<MttTablePlayerInit>::new();
             let mut j = i;
             let table_id = i + 1;
             while let Some(r) = self.ranks.get(j as usize) {
-                players.push(MttTablePlayer::new(
-                    r.id,
-                    r.chips,
-                    r.time_cards,
-                ));
+                players.push(MttTablePlayerInit::new(r.id, r.chips));
                 self.table_assigns.insert(r.id, table_id as _);
                 j += num_of_tables;
             }
             let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
             let table_id = effect.next_sub_game_id();
-            let table = MttTableState {
-                table_id: table_id.into(),
-                btn: 0,
+
+            let table = MttTableInit {
+                table_id,
                 sb,
                 bb,
                 ante,
                 players,
-                next_game_start: 0,
-                hand_id: 0,
             };
+
             self.launch_table(effect, table)?;
         }
 
@@ -683,6 +682,7 @@ impl Mtt {
             .filter(|r| matches!(r.chips_change, Some(ChipsChange::Add(_))))
             .map(|r| r.player_id)
             .collect();
+
         let winners_count: u64 = winner_pids.len() as u64;
         let mut total_bounty_reward = 0;
         let mut total_bounty_transfer = 0;
@@ -834,8 +834,24 @@ impl Mtt {
             "Move these player {:?} to other tables",
             player_ids
         ));
-        self.sit_players(effect, player_ids)?;
+        self.sit_players(effect, player_ids, false)?;
         Ok(())
+    }
+
+    /// List all available seats on a table
+    #[allow(unused)]
+    fn find_available_table_seats(&mut self, table_id: GameId) -> HandleResult<Vec<u8>> {
+        let mut available_seats = vec![];
+        let table = self
+            .tables
+            .get(&table_id)
+            .ok_or(errors::error_table_not_fonud())?;
+        for i in 0..(self.table_size) {
+            if table.players.iter().find(|p| p.position == i).is_none() {
+                available_seats.push(i);
+            }
+        }
+        Ok(available_seats)
     }
 
     fn balance_players_between_tables(
@@ -844,14 +860,26 @@ impl Mtt {
         from_table_id: GameId,
         to_table_id: GameId,
         num_to_move: usize,
+        player_results: &[PlayerResult],
     ) -> HandleResult<()> {
-        let players_to_move: Vec<MttTablePlayer> = self
-            .tables
-            .get_mut(&from_table_id)
-            .ok_or(errors::error_invalid_index_usage())?
-            .players
-            .drain(0..num_to_move)
-            .collect();
+        let mut players_to_move: Vec<MttTablePlayer> = vec![];
+        let table = self.tables.get_mut(&from_table_id).ok_or(errors::error_invalid_index_usage())?;
+        let mut table_players = vec![];
+        mem::swap(&mut table.players, &mut table_players);
+        for p in table_players {
+            let rel_pos = get_relative_position(p.id, table.btn, player_results);
+            // rel_pos 0 -> btn, 1 -> sb, 2 -> bb. since it is the
+            // postion for the last hand, for the next hand it will
+            // be: 1 -> btn, 2 -> sb, 3 -> bb.  In order to avoid a
+            // player becomes BB twice in a row, We prefer to move
+            // players who is neither sb nor bb.  That is we avoid to
+            // move a player who has rel_pos = 2 or 3.
+            if rel_pos != 2 && rel_pos != 3 && players_to_move.len() < num_to_move {
+                players_to_move.push(p);
+            } else {
+                table.players.push(p);
+            }
+        }
 
         let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
         let sitout_players: Vec<u64> = players_to_move.iter().map(|p| p.id).collect();
@@ -881,7 +909,7 @@ impl Mtt {
             HoldemBridgeEvent::SitinPlayers {
                 sitins: players_to_move
                     .iter()
-                    .map(|p| MttTableSitin::new(p.id, p.chips, p.time_cards))
+                    .map(|p| MttTableSitin::new(p.id, p.chips, p.time_cards, false))
                     .collect(),
             },
         )?;
@@ -906,7 +934,7 @@ impl Mtt {
     /// and a Relocate event will be emitted.
     ///
     /// Do nothing when there's only one table.
-    fn balance_tables(&mut self, effect: &mut Effect, table_id: GameId) -> Result<(), HandleError> {
+    fn balance_tables(&mut self, effect: &mut Effect, table_id: GameId, player_results: &[PlayerResult]) -> Result<(), HandleError> {
         let Some(current_table) = self.tables.get(&table_id) else {
             Err(errors::error_invalid_table_id())?
         };
@@ -970,6 +998,7 @@ impl Mtt {
                 largest_table_id,
                 smallest_table_id,
                 (largest_table_players_count - smallest_table_players_count) / 2,
+                player_results,
             )?;
         } else {
             let Some(table) = self.tables.get(&table_id) else {
@@ -1050,14 +1079,14 @@ impl Mtt {
     ///
     /// NB: The game will launch tables when receiving StartGame
     /// event, so this function is No-op in Init stage.
-    fn sit_players(&mut self, effect: &mut Effect, player_ids: Vec<u64>) -> HandleResult<()> {
+    fn sit_players(&mut self, effect: &mut Effect, player_ids: Vec<u64>, first_time_sit: bool) -> HandleResult<()> {
         if self.stage == MttStage::Init {
             effect.info("Skip sitting player, because the tourney is not started yet.");
             return Ok(());
         }
 
         let mut table_id_to_sitins = BTreeMap::<usize, Vec<MttTableSitin>>::new();
-        let mut tables_to_launch = Vec::<MttTableState>::new();
+        let mut tables_to_launch = Vec::<MttTableInit>::new();
 
         let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
 
@@ -1071,9 +1100,12 @@ impl Mtt {
             };
 
             if let Some(table_id) = table_to_sit {
-                // Find a table to sit
-                effect.info(format!("Sit player {} to {}", rank.id, table_id));
-                let sitin = MttTableSitin::new(rank.id, rank.chips, rank.time_cards);
+                // Find a table to sit, no preference on positions to
+                // sit.  Newly seated player should wait become the BB
+                // to start the first hand.
+                effect.info(format!("Sit player {} to table {}", rank.id, table_id));
+                let sitin =
+                    MttTableSitin::new(rank.id, rank.chips, rank.time_cards, first_time_sit);
                 match table_id_to_sitins.entry(table_id) {
                     Entry::Vacant(vacant_entry) => {
                         vacant_entry.insert(vec![sitin]);
@@ -1086,30 +1118,44 @@ impl Mtt {
                 let Some(table) = self.tables.get_mut(&table_id) else {
                     return Err(errors::error_table_not_fonud())?;
                 };
-
-                let player = MttTablePlayer::new(rank.id, rank.chips, rank.time_cards);
+                let Some(position) = table.find_position(self.table_size) else {
+                    return Err(errors::error_table_is_full())?;
+                };
+                // Set the player has forcasted position.  The
+                // position might not be the real one which is
+                // determined later in sub game.  This will be
+                // corrected by the next game result.
+                //
+                // TODO: does it matter?
+                let player =
+                    MttTablePlayer::new(rank.id, rank.chips, position, rank.time_cards);
                 table.players.push(player);
             } else if last_table_to_launch
                 .as_ref()
                 .is_some_and(|t| t.players.len() < self.table_size as _)
             {
+                // We already prepared a table to launch. Should sit
+                // the player to that table as well.  There's no
+                // preference on positions to sit.  Newly seated
+                // player should wait become the BB before the first
+                // hand.
                 let Some(table) = last_table_to_launch else {
                     return Err(errors::error_table_not_fonud())?;
                 };
 
                 effect.info(format!(
-                    "Sit player {} to the table just created {}",
+                    "Sit player {} to the table {} (just created)",
                     rank.id, table.table_id
                 ));
-                let player = MttTablePlayer::new(rank.id, rank.chips, rank.time_cards);
+                let player = MttTablePlayerInit::new(rank.id, rank.chips);
                 table.players.push(player);
             } else {
                 // Table is full, create a new table with this player.
                 let table_id = effect.next_sub_game_id();
                 effect.info(format!("Create {} table for player {}", table_id, rank.id));
-                let player = MttTablePlayer::new(rank.id, rank.chips, rank.time_cards);
+                let player = MttTablePlayerInit::new(rank.id, rank.chips);
                 let players = vec![player];
-                let table = MttTableState::new(table_id, sb, bb, ante, players);
+                let table = MttTableInit::new(table_id, sb, bb, ante, players);
                 tables_to_launch.push(table);
             }
         }
@@ -1143,10 +1189,18 @@ impl Mtt {
     }
 
     fn get_prizes(&self) -> &[u8] {
-        if let Some(prize_rule) = self.prize_rules.iter().rfind(|pr| pr.min_players <= self.ranks.len() as u16) {
+        if let Some(prize_rule) = self
+            .prize_rules
+            .iter()
+            .rfind(|pr| pr.min_players <= self.ranks.len() as u16)
+        {
             &prize_rule.prizes
         } else {
-            &self.prize_rules.first().expect("Prize rules can't be empty").prizes
+            &self
+                .prize_rules
+                .first()
+                .expect("Prize rules can't be empty")
+                .prizes
         }
     }
 

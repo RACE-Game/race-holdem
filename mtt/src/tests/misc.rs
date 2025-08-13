@@ -47,9 +47,9 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 1,
                     players: vec![
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(2, 10000),
-                        MttTablePlayer::new_with_defaults(3, 10000),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
+                        MttTablePlayer::new_with_defaults(3, 10000, 2),
                     ],
                     ..Default::default()
                 },
@@ -59,8 +59,8 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 2,
                     players: vec![
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(2, 10000),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
                     ],
                     ..Default::default()
                 },
@@ -70,11 +70,11 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 3,
                     players: vec![
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(2, 10000),
-                    ],
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(1, 10000, 1),
+                        MttTablePlayer::new_with_defaults(1, 10000, 2),
+                        MttTablePlayer::new_with_defaults(2, 10000, 3),
+                     ],
                     ..Default::default()
                 },
             ),
@@ -83,8 +83,8 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 4,
                     players: vec![
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(2, 10000),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(2, 10000, 1),
                     ],
                     ..Default::default()
                 },
@@ -94,10 +94,10 @@ fn test_get_table_ids_with_least_most_players() {
                 MttTableState {
                     table_id: 5,
                     players: vec![
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(1, 10000),
-                        MttTablePlayer::new_with_defaults(2, 10000),
+                        MttTablePlayer::new_with_defaults(1, 10000, 0),
+                        MttTablePlayer::new_with_defaults(1, 10000, 1),
+                        MttTablePlayer::new_with_defaults(1, 10000, 2),
+                        MttTablePlayer::new_with_defaults(2, 10000, 3),
                     ],
                     ..Default::default()
                 },
@@ -125,4 +125,20 @@ fn test_get_table_ids_with_least_most_players() {
     let (least, most) = mtt.get_table_ids_with_least_most_players(5).unwrap();
     assert_eq!(least.table_id, 2);
     assert_eq!(most.table_id, 5);
+}
+
+
+#[test]
+pub fn test_available_seats() -> anyhow::Result<()> {
+    let mut mtt = Mtt::default();
+    mtt.table_size = 6;
+    let players = vec![
+        MttTablePlayer::new(1, 1000, 1, 0),
+        MttTablePlayer::new(2, 1000, 2, 0),
+        MttTablePlayer::new(3, 1000, 4, 0),
+        MttTablePlayer::new(4, 1000, 5, 0),
+    ];
+    mtt.tables.insert(1, MttTableState::new(1, 10, 20, 0, players));
+    assert_eq!(mtt.find_available_table_seats(1)?, vec![0,3]);
+    return Ok(())
 }

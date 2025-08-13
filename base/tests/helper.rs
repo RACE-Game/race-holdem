@@ -24,19 +24,19 @@ const FRANK: u64 = 5;
 // ======================================================
 pub fn initial_two_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
-        (ALICE, Player::new_with_timeout(ALICE, 1000, 0u16, 0)),
-        (BOB, Player::new_with_timeout(BOB, 1000, 1u16, 0)),
+        (ALICE, Player::new_with_timeout(ALICE, 1000, 0, 0)),
+        (BOB, Player::new_with_timeout(BOB, 1000, 1, 0)),
     ])
 }
 
 pub fn initial_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
-        (ALICE, Player::new_with_timeout(ALICE, 1000, 0u16, 0)),
-        (BOB, Player::new_with_timeout(BOB, 1000, 1u16, 0)),
-        (CAROL, Player::new_with_timeout(CAROL, 1000, 2u16, 0)),
-        (DAVE, Player::new_with_timeout(DAVE, 1000, 3u16, 0)),
-        (EVA, Player::new_with_timeout(EVA, 1000, 4u16, 0)),
-        (FRANK, Player::new_with_timeout(FRANK, 1000, 5u16, 0)),
+        (ALICE, Player::new_with_timeout(ALICE, 1000, 0, 0)),
+        (BOB, Player::new_with_timeout(BOB, 1000, 1, 0)),
+        (CAROL, Player::new_with_timeout(CAROL, 1000, 2, 0)),
+        (DAVE, Player::new_with_timeout(DAVE, 1000, 3, 0)),
+        (EVA, Player::new_with_timeout(EVA, 1000, 4, 0)),
+        (FRANK, Player::new_with_timeout(FRANK, 1000, 5, 0)),
     ])
 }
 
@@ -44,27 +44,27 @@ pub fn gaming_players() -> BTreeMap<u64, Player> {
     BTreeMap::from([
         (
             ALICE,
-            Player::new_with_defaults(ALICE, 1000, 0usize, PlayerStatus::Acting),
+            Player::new_with_defaults(ALICE, 1000, 0, PlayerStatus::Acting),
         ),
         (
             BOB,
-            Player::new_with_defaults(BOB, 200, 1usize, PlayerStatus::Acted),
+            Player::new_with_defaults(BOB, 200, 1, PlayerStatus::Acted),
         ),
         (
             CAROL,
-            Player::new_with_defaults(CAROL, 0, 2usize, PlayerStatus::Allin),
+            Player::new_with_defaults(CAROL, 0, 2, PlayerStatus::Allin),
         ),
         (
             DAVE,
-            Player::new_with_defaults(DAVE, 780, 3usize, PlayerStatus::Acted),
+            Player::new_with_defaults(DAVE, 780, 3, PlayerStatus::Acted),
         ),
         (
             EVA,
-            Player::new_with_defaults(EVA, 650, 4usize, PlayerStatus::Acted),
+            Player::new_with_defaults(EVA, 650, 4, PlayerStatus::Acted),
         ),
         (
             FRANK,
-            Player::new_with_defaults(FRANK, 800, 5usize, PlayerStatus::Fold),
+            Player::new_with_defaults(FRANK, 800, 5, PlayerStatus::Fold),
         ),
     ])
 }
@@ -142,7 +142,7 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         next_game_start: 0,
         rake_collected: 6000,
     };
-    state.arrange_players(0usize)?;
+    state.arrange_players(0)?;
     Ok(state)
 }
 
@@ -166,7 +166,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
         max_deposit: 6000,
         ..Default::default()
     };
-    state.arrange_players(0usize)?;
+    state.arrange_players(0)?;
     Ok(state)
 }
 
@@ -191,7 +191,7 @@ pub fn setup_real_holdem() -> Holdem {
     holdem.pots = pots;
     holdem.acting_player = Some(ActingPlayer {
         id: BOB,
-        position: 1usize,
+        position: 1,
         clock: 30_000u64,
         action_start: 0,
         time_card_clock: None,

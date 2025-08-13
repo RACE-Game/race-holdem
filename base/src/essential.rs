@@ -56,7 +56,7 @@ pub struct InternalPlayerJoin {
 pub struct Player {
     pub id: u64,
     pub chips: u64,
-    pub position: usize,      // Zero indexed
+    pub position: u8,         // Zero indexed
     pub status: PlayerStatus,
     pub timeout: u8,          // Count the times of action timeout.
     pub deposit: u64,         // The deposited amount.
@@ -65,17 +65,17 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(id: u64, chips: u64, position: u16, status: PlayerStatus, timeout: u8, deposit: u64, time_cards: u8) -> Player {
+    pub fn new(id: u64, chips: u64, position: u8, status: PlayerStatus, timeout: u8, deposit: u64, time_cards: u8) -> Player {
         Self {
-            id, chips, position: position as usize, status, timeout, deposit, time_cards, is_afk: false,
+            id, chips, position: position, status, timeout, deposit, time_cards, is_afk: false,
         }
     }
 
-    pub fn new_with_timeout(id: u64, chips: u64, position: u16, timeout: u8) -> Player {
+    pub fn new_with_timeout(id: u64, chips: u64, position: u8, timeout: u8) -> Player {
         Self {
             id,
             chips,
-            position: position as usize,
+            position,
             status: PlayerStatus::default(),
             timeout,
             deposit: 0,
@@ -89,7 +89,7 @@ impl Player {
     pub fn new_with_defaults(
         id: u64,
         chips: u64,
-        position: usize,
+        position: u8,
         status: PlayerStatus,
     ) -> Player {
         Self {
@@ -105,11 +105,11 @@ impl Player {
     }
 
     // New players joined game all init to the status `Waitbb`
-    pub fn init(id: u64, chips: u64, position: u16, status: PlayerStatus) -> Player {
+    pub fn init(id: u64, chips: u64, position: u8, status: PlayerStatus) -> Player {
         Self {
             id,
             chips,
-            position: position as usize,
+            position,
             status,
             timeout: 0,
             deposit: 0,
@@ -152,18 +152,18 @@ impl Player {
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Clone)]
 pub struct ActingPlayer {
     pub id: u64,
-    pub position: usize,
+    pub position: u8,
     pub action_start: u64,
     pub clock: u64, // action clock
     pub time_card_clock: Option<u64>, // Some when a time card is in use
 }
 
 impl ActingPlayer {
-    pub fn new(id: u64, position: usize, action_start: u64, clock: u64) -> ActingPlayer {
+    pub fn new(id: u64, position: u8, action_start: u64, clock: u64) -> ActingPlayer {
         Self { id, position, action_start, clock, time_card_clock: None }
     }
 
-    pub fn new_with_time_card(id: u64, position: usize, action_start: u64, clock: u64) -> ActingPlayer {
+    pub fn new_with_time_card(id: u64, position: u8, action_start: u64, clock: u64) -> ActingPlayer {
         Self { id, position, action_start, clock, time_card_clock: Some(clock + TIME_CARD_EXTRA_SECS * 1000) }
     }
 }
@@ -244,7 +244,7 @@ pub struct PlayerResult {
     pub id: u64,
     pub chips: u64,
     pub status: PlayerStatus,
-    pub position: usize,
+    pub position: u8,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Clone)]

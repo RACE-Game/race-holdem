@@ -33,7 +33,7 @@ pub fn create_mtt_with_players(player_nums_per_table: &[usize], table_size: u8) 
         mtt.tables.insert(table_id, table_state);
         let table_state = mtt.tables.get_mut(&table_id).unwrap();
 
-        for _ in 0..*player_num {
+        for i in 0..*player_num {
             mtt.ranks.push(PlayerRank::new(
                 rank_id,
                 start_chips,
@@ -43,7 +43,7 @@ pub fn create_mtt_with_players(player_nums_per_table: &[usize], table_size: u8) 
                 DEFAULT_TIME_CARDS,
             ));
 
-            let player = MttTablePlayer::new(rank_id, start_chips, DEFAULT_TIME_CARDS);
+            let player = MttTablePlayer::new(rank_id, start_chips, i as u8 % table_size, DEFAULT_TIME_CARDS);
             table_state.players.push(player);
             mtt.table_assigns.insert(rank_id, table_id);
             rank_id += 1;

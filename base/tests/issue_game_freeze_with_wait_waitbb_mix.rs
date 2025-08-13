@@ -6,11 +6,9 @@
 
 mod helper;
 use helper::setup_holdem_game;
-use race_holdem_base::game::Holdem;
 use race_api::prelude::*;
 use race_holdem_base::essential::*;
 use race_test::prelude::*;
-use std::collections::BTreeMap;
 
 // In the previous buggy version, we shoud expect this to panic because
 // when there is only one player with `Wait` status (as sb), accessing bb

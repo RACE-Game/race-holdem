@@ -33,7 +33,7 @@ pub struct Holdem {
     pub bb: u64,
     pub ante: u64,
     pub min_raise: u64,
-    pub btn: usize,
+    pub btn: u8,
     pub rake: u16,
     pub rake_cap: u8,
     pub stage: HoldemStage,
@@ -214,7 +214,7 @@ impl Holdem {
                         )
                 })
                 .map(|p| (p.id, p.position))
-                .collect::<Vec<(u64, usize)>>();
+                .collect::<Vec<(u64, u8)>>();
             players.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
             players.into_iter().map(|(id, _)| id).collect::<Vec<u64>>()
         };
@@ -232,7 +232,7 @@ impl Holdem {
     }
 
     /// Return either acting player position or btn for reference
-    fn get_ref_position(&self) -> usize {
+    fn get_ref_position(&self) -> u8 {
         if let Some(ActingPlayer { position, .. }) = self.acting_player {
             position
         } else {
@@ -243,19 +243,19 @@ impl Holdem {
     // The next BTN is calculated based on the current one.
     // Players with status `Waitbb` will not be used to calculate next BTN.
     // BTN moves clockwise.
-    pub fn get_next_btn(&mut self) -> Result<usize, HandleError> {
-        let mut player_positions: Vec<usize> =
+    pub fn get_next_btn(&mut self) -> Result<u8, HandleError> {
+        let mut player_positions: Vec<u8> =
             self.player_map.values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
             .map(|p| p.position).collect();
         // There are only `Waitbb` players, default btn to 0 as it will be re-calced
         if player_positions.is_empty() {
-            return Ok(0usize);
+            return Ok(0);
         }
 
         player_positions.sort();
 
-        let next_btn_candidates: Vec<usize> = player_positions
+        let next_btn_candidates: Vec<u8> = player_positions
             .iter()
             .filter(|pos| **pos > self.btn)
             .map(|p| *p)
@@ -351,8 +351,8 @@ impl Holdem {
 
     /// According to players position, place them in the following order:
     /// SB, BB, UTG (1st-to-act), MID (2nd-to-act), ..., BTN (last-to-act).
-    pub fn arrange_players(&mut self, last_pos: usize) -> Result<(), HandleError> {
-        let mut player_pos: Vec<(u64, usize)> = self
+    pub fn arrange_players(&mut self, last_pos: u8) -> Result<(), HandleError> {
+        let mut player_pos: Vec<(u64, u8)> = self
             .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
@@ -376,9 +376,9 @@ impl Holdem {
     /// 1. SB < NP < BB, then NP should be the actual BB
     /// 2. NP > SB > BB, then NP should be the actual BB (a ring)
     /// 3. SB > BB > NP, then NP should be the actual BB (a ring)
-    fn arrange_waitbbs(&mut self, next_btn: usize) -> Result<(), HandleError> {
+    fn arrange_waitbbs(&mut self, next_btn: u8) -> Result<(), HandleError> {
         // tuple: (id, player_pos, modified_pos)
-        let mut waitbbs: Vec<(u64, usize, usize)> = self
+        let mut waitbbs: Vec<(u64, u8, u8)> = self
             .player_map.values()
             .filter(|p| matches!(p.status, PlayerStatus::Waitbb))
             .map(|p| id_pos!(p, next_btn))
@@ -388,7 +388,7 @@ impl Holdem {
         }
 
         // get current in-game players (with any status but Waitbb)
-        let mut player_pos: Vec<(u64, usize, usize)> = self
+        let mut player_pos: Vec<(u64, u8, u8)> = self
             .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
@@ -1544,12 +1544,13 @@ impl Holdem {
         Ok(())
     }
 
-    pub fn find_position(&self) -> Option<u8> {
+    /// Find an available position from this table.
+    pub fn find_position_simple(&self) -> Option<u8> {
         for i in 0..self.table_size {
             if self
                 .player_map
                 .iter()
-                .find(|p| p.1.position == i as usize)
+                .find(|p| p.1.position == i as u8)
                 .is_none()
             {
                 return Some(i);
@@ -1558,7 +1559,25 @@ impl Holdem {
         return None;
     }
 
-    pub fn position_occupied(&self, position: usize) -> bool {
+
+    /// Find a position from this table, but prefer to return a
+    /// position which is not between BTN and BB.
+    pub fn find_position(&self) -> Option<u8> {
+        // Use the simple way to find positon.
+        // TODO: In this case, we'd better just let that player wait BB.
+        if self.table_size < 4 || self.player_map.len() < 3 {
+            return self.find_position_simple();
+        }
+        for i in (self.btn..(self.btn + self.table_size)).rev() {
+            let pos = i % self.table_size;
+            if !self.position_occupied(pos) {
+                return Some(pos);
+            }
+        }
+        return None;
+    }
+
+    pub fn position_occupied(&self, position: u8) -> bool {
         self.player_map
             .iter()
             .find(|(_, ref p)| p.position == position)
@@ -1576,7 +1595,7 @@ impl Holdem {
                 .player_map
                 .values()
                 .map(|p| p.position)
-                .collect::<Vec<usize>>();
+                .collect::<Vec<u8>>();
             let Some(pos) = (0..11).find(|i| !occupied_pos.contains(i)) else {
                 return Err(errors::cannot_join_full_table());
             };
@@ -1750,12 +1769,12 @@ impl GameHandler for Holdem {
 
                 if self.player_map.len() <= 1 {
                     for p in players.into_iter() {
-                        let player = Player::init(p.id(), 0, p.position(), PlayerStatus::Init);
+                        let player = Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Init);
                         self.player_map.insert(player.id, player);
                     }
                 } else {
                     for p in players.into_iter() {
-                        let player = Player::init(p.id(), 0, p.position(), PlayerStatus::Waitbb);
+                        let player = Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Waitbb);
                         self.player_map.insert(player.id, player);
                     }
                 }

@@ -7,8 +7,8 @@ fn test_handle_bounty_single_winner_divisible() {
     let mut mtt = Mtt::default();
     let mut effect = Effect::default();
     let player_results = vec![
-        PlayerResult::new(1, 1000, Some(ChipsChange::Add(500)), PlayerResultStatus::Normal),
-        PlayerResult::new(2, 0, Some(ChipsChange::Sub(500)), PlayerResultStatus::Eliminated),
+        PlayerResult::new(1, 1000, Some(ChipsChange::Add(500)), 0, PlayerResultStatus::Normal),
+        PlayerResult::new(2, 0, Some(ChipsChange::Sub(500)), 1, PlayerResultStatus::Eliminated),
     ];
     mtt.ranks.push(PlayerRank::new(1, 1000, PlayerRankStatus::Play, 0, vec![1000], DEFAULT_TIME_CARDS));
     mtt.ranks.push(PlayerRank::new(2, 0, PlayerRankStatus::Out, 1, vec![1000], DEFAULT_TIME_CARDS));
@@ -27,8 +27,8 @@ fn test_handle_bounty_single_winner_non_divisible() {
     let mut mtt = Mtt::default();
     let mut effect = Effect::default();
     let player_results = vec![
-        PlayerResult::new(1, 1000, Some(ChipsChange::Add(500)), PlayerResultStatus::Normal),
-        PlayerResult::new(2, 0, Some(ChipsChange::Sub(500)), PlayerResultStatus::Eliminated),
+        PlayerResult::new(1, 1000, Some(ChipsChange::Add(500)), 0, PlayerResultStatus::Normal),
+        PlayerResult::new(2, 0, Some(ChipsChange::Sub(500)), 1, PlayerResultStatus::Eliminated),
     ];
     mtt.ranks.push(PlayerRank::new(1, 1000, PlayerRankStatus::Play, 0, vec![1000], DEFAULT_TIME_CARDS));
     mtt.ranks.push(PlayerRank::new(2, 0, PlayerRankStatus::Out, 1, vec![1000], DEFAULT_TIME_CARDS));
@@ -50,9 +50,9 @@ fn test_handle_bounty_multiple_winners_divisible() {
     let mut mtt = Mtt::default();
     let mut effect = Effect::default();
     let player_results = vec![
-        PlayerResult::new(1, 1000, Some(ChipsChange::Add(250)), PlayerResultStatus::Normal),
-        PlayerResult::new(2, 1000, Some(ChipsChange::Add(250)), PlayerResultStatus::Normal),
-        PlayerResult::new(3, 0, Some(ChipsChange::Sub(500)), PlayerResultStatus::Eliminated),
+        PlayerResult::new(1, 1000, Some(ChipsChange::Add(250)), 0, PlayerResultStatus::Normal),
+        PlayerResult::new(2, 1000, Some(ChipsChange::Add(250)), 1, PlayerResultStatus::Normal),
+        PlayerResult::new(3, 0, Some(ChipsChange::Sub(500)), 2, PlayerResultStatus::Eliminated),
     ];
     mtt.ranks.push(PlayerRank::new(1, 1000, PlayerRankStatus::Play, 0, vec![1000], DEFAULT_TIME_CARDS));
     mtt.ranks.push(PlayerRank::new(2, 1000, PlayerRankStatus::Play, 1, vec![1000], DEFAULT_TIME_CARDS));
@@ -77,9 +77,9 @@ fn test_handle_bounty_multiple_winners_non_divisible() {
     let mut mtt = Mtt::default();
     let mut effect = Effect::default();
     let player_results = vec![
-        PlayerResult::new(1, 1000, Some(ChipsChange::Add(250)), PlayerResultStatus::Normal),
-        PlayerResult::new(2, 1000, Some(ChipsChange::Add(250)), PlayerResultStatus::Normal),
-        PlayerResult::new(3, 0, Some(ChipsChange::Sub(500)), PlayerResultStatus::Eliminated),
+        PlayerResult::new(1, 1000, Some(ChipsChange::Add(250)), 0, PlayerResultStatus::Normal),
+        PlayerResult::new(2, 1000, Some(ChipsChange::Add(250)), 1, PlayerResultStatus::Normal),
+        PlayerResult::new(3, 0, Some(ChipsChange::Sub(500)), 2, PlayerResultStatus::Eliminated),
     ];
     mtt.ranks.push(PlayerRank::new(1, 1000, PlayerRankStatus::Play, 0, vec![1000], DEFAULT_TIME_CARDS));
     mtt.ranks.push(PlayerRank::new(2, 1000, PlayerRankStatus::Play, 1, vec![1000], DEFAULT_TIME_CARDS));
@@ -110,8 +110,8 @@ fn test_handle_bounty_no_eliminated() {
     let mut mtt = Mtt::default();
     let mut effect = Effect::default();
     let player_results = vec![
-        PlayerResult::new(1, 1000, Some(ChipsChange::Add(250)), PlayerResultStatus::Normal),
-        PlayerResult::new(2, 1000, Some(ChipsChange::Add(250)), PlayerResultStatus::Normal),
+        PlayerResult::new(1, 1000, Some(ChipsChange::Add(250)), 0, PlayerResultStatus::Normal),
+        PlayerResult::new(2, 1000, Some(ChipsChange::Add(250)), 1, PlayerResultStatus::Normal),
     ];
     mtt.ranks.push(PlayerRank::new(1, 1000, PlayerRankStatus::Play, 0, vec![1000], DEFAULT_TIME_CARDS));
     mtt.ranks.push(PlayerRank::new(2, 1000, PlayerRankStatus::Play, 1, vec![1000], DEFAULT_TIME_CARDS));

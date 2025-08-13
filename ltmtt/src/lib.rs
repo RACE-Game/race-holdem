@@ -316,7 +316,7 @@ impl GameHandler for LtMtt {
                         // send a bridge event to subgame, waiting `HoldemBridgeEvent::SitinResult` from subgame.
                         // when received the response, update self state.
                         let sitin =
-                            MttTableSitin::new(player.player_id, player.chips, player.time_cards);
+                            MttTableSitin::new(player.player_id, player.chips, player.time_cards, true);
                         effect.bridge_event(
                             table_id,
                             HoldemBridgeEvent::SitinPlayers {
@@ -514,6 +514,7 @@ impl LtMtt {
             table_id,
             player_results,
             table,
+            ..
         } = game_result
         {
             effect.info(format!("on_game_result: table_id: {}", table_id));
@@ -597,6 +598,7 @@ impl LtMtt {
                         player.id,
                         player.chips,
                         player.time_cards,
+                        true,
                     ));
                     self.table_assigns.insert(player.id, to_table_id);
                 }
@@ -640,9 +642,12 @@ impl LtMtt {
                 }
                 // add into current table
                 if let Some(table) = self.tables.get_mut(&table_id) {
-                    let mut table_player =
-                        MttTablePlayer::new(player_id, player.chips, player.time_cards);
-                    table.add_player(&mut table_player);
+                    let Some(position) = table.find_position(self.table_size) else {
+                        return Err(errors::error_table_is_full());
+                    };
+                    let table_player =
+                        MttTablePlayer::new(player_id, player.chips, position, player.time_cards);
+                    table.players.push(table_player);
                     self.table_assigns.insert(player_id, table_id);
                     self.create_table_if_target_table_not_enough(effect, table_id)?;
                 } else {
@@ -815,9 +820,8 @@ impl LtMtt {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use borsh::BorshDeserialize;
-    use race_api::{effect::Effect, event::Event};
+    // use borsh::BorshDeserialize;
+    // use race_api::{effect::Effect, event::Event};
 
     // use std::time::SystemTime;
     // use super::*;
