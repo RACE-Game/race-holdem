@@ -867,7 +867,7 @@ impl Mtt {
         let mut table_players = vec![];
         mem::swap(&mut table.players, &mut table_players);
         for p in table_players {
-            let rel_pos = get_relative_position(p.id, table.btn, player_results);
+            let rel_pos = get_relative_position(p.id, table.btn, player_results).unwrap_or_default();
             // rel_pos 0 -> btn, 1 -> sb, 2 -> bb. since it is the
             // postion for the last hand, for the next hand it will
             // be: 1 -> btn, 2 -> sb, 3 -> bb.  In order to avoid a

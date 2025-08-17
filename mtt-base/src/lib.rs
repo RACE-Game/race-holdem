@@ -246,12 +246,12 @@ impl BridgeEvent for HoldemBridgeEvent {}
 
 /// Get a relative position(to BTN) for given player id.
 /// BTN is 0, SB is 1, BB is 2, and so on.
-pub fn get_relative_position(player_id: u64, btn: u8, player_results: &[PlayerResult]) -> u8 {
-    let player_position = player_results.iter().find(|p| p.player_id == player_id).unwrap().position;
+pub fn get_relative_position(player_id: u64, btn: u8, player_results: &[PlayerResult]) -> Option<u8> {
+    let player_position = player_results.iter().find(|p| p.player_id == player_id)?.position;
     let mut positions: Vec<u8> = player_results.iter().map(|p| p.position).collect();
-    let mid = positions.iter().position(|p| *p == btn).unwrap();
+    let mid = positions.iter().position(|p| *p == btn)?;
     positions.rotate_left(mid);
-    return positions.iter().position(|p| *p == player_position).unwrap() as u8;
+    positions.iter().position(|p| *p == player_position).map(|i| i as u8)
 }
 
 #[cfg(test)]
