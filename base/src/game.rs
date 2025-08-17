@@ -1706,32 +1706,24 @@ impl GameHandler for Holdem {
                 let Some(player) = self.player_map.get_mut(&player_id) else {
                     return Err(errors::internal_player_not_found());
                 };
-                player.timeout += 1;
 
                 let street = self.street;
-                // In Cash game, mark those who've reached T/O for
-                // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
+
                 if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
+                    // In Cash game, mark those who've reached T/O for
+                    // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
                     if self.mode == GameMode::Cash {
                         self.set_player_status(player_id, PlayerStatus::Leave)?;
                         self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
-                        self.next_state(effect)?;
-                        return Ok(());
+                        return self.next_state(effect);
                     } else {
                         player.is_afk = true;
                     }
+                } else {
+                    player.timeout += 1;
                 }
 
-                if self.mode == GameMode::Cash {
-                    if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
-                        self.set_player_status(player_id, PlayerStatus::Leave)?;
-                        self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
-                        self.next_state(effect)?;
-                        return Ok(());
-                    } else if street != Street::Preflop {
-                        player.timeout += 1;
-                    }
-                }
+                // Make this player check or fold.
 
                 let street_bet = self.street_bet;
                 let bet = if let Some(player_bet) = self.bet_map.get(&player_id) {
