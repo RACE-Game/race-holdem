@@ -389,13 +389,13 @@ impl Holdem {
 
         // get current in-game players (with any status but Waitbb)
         let mut player_pos: Vec<(u64, u8, u8)> = self
-            .player_map
+           .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
             .map(|p| id_pos!(p, next_btn))
             .collect();
         player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
-        println!("Sorted playters without Waitbbs {player_pos:?}");
+        println!("Sorted players without Waitbbs {player_pos:?}");
 
         if player_pos.is_empty() {
             let mut new_btn = 0;

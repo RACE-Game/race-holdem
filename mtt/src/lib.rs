@@ -4,32 +4,34 @@
 //!
 //! ## Stages
 //!
-//! There are three stages in the whole game progress:
-//! - Init, the initial state, players can buy-in.
+//! There are five stages in the whole game progress:
+//! - Init, the initial state; players can buy-in.
 //! - Playing, the game is in progress.
+//! - DistributingPrize, prizes are being sent to winners
 //! - Completed, the game is finished.
+//! - Cancelled, not enough players registered for a tournament
 //!
 //! ## Table Launchment
 //!
-//! The game starts at timestamp `start-time`, which is saved in the
-//! account data.  Depends on the number of registered players and the
-//! `table_size`, a list of tables will be created when the game
-//! starts.  The same data structure as in cash table is used for each
-//! table in the tournament.
+//! The game starts at the timestamp `start-time`, which is saved in the
+//! account data.  Depends on the total number of registered players
+//! and the `table_size`, a list of tables will be created when the game
+//! starts.  Each table in the tournament shares the same data structures
+//! as those used in a cash table.
 //!
 //! ## Entry
 //!
-//! The supported entry type is `Ticket` which supports only one
-//! deposit amount.  After a player is eliminated, he can join again
-//! by rebuy a ticket with a same amount of deposit.  This must be
-//! done before `entry_close_time` or Final Table stage.  An invalid
-//! deposit will be rejected immediately.
+//! The supported entry type is `Ticket`, which allows only one deposit
+//! amount at a time.  After a player is eliminated, he can join again by
+//! rebuying a ticket worth the same amount of his initial deposit.
+//! The rebuy must be done before `entry_close_time` or Final Table stage.
+//! An invalid deposit will be rejected immediately.
 //!
 //! ## Settlement
 //!
-//! The game ends when only one player remains.  The prizes are
-//! distributed based on the proportion define in `prize_rules`(value
-//! by per thousand).
+//! The game ends when only one player remains in the game.  The prizes
+//! will be distributed based on the proportion defined in `prize_rules`
+//! (value by per thousand).
 
 mod errors;
 
@@ -57,9 +59,9 @@ pub enum MttStage {
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq, Default)]
 pub enum PlayerRankStatus {
     #[default]
-    Pending, // The player has been resitting from one table to another
-    Play, // The player is sitting on a table and playing
-    Out,  // The player has no chips
+    Pending, // The player getting resit from one table to another
+    Play,    // The player is sitting on a table and playing
+    Out,     // The player has no chips
 }
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
@@ -252,14 +254,14 @@ pub struct Mtt {
     launched_table_ids: Vec<GameId>,
     // TODO: We expect to use this to save the distributed prizes.
     // For example:
-    // If the minimum prize for the top 10 is 100,
+    // If the minimum prize for the top 10 is 100 for each,
     // and 11 players are reduced to 10, each will be guaranteed a prize of 100.
     // The structure is a mapping from player_id to its guranteed prize.
     // The special player_id 0 stands for undistributed.
     // Currently, all balances are stored in position 0.
     player_balances: BTreeMap<u64, u64>,
-    // The minimal number of player to start this game.
-    // When there are fewer players, we cancel the game.
+    // The minimal number of players to start this game.
+    // When there are not enough players, the game gets canceled.
     min_players: u16,
     rake: u16,
     bounty: u16,
@@ -416,7 +418,7 @@ impl GameHandler for Mtt {
             },
 
             Event::Deposit { deposits } => {
-                // For any case that the player is not in the game,
+                // If the player has never joined or registered for the game,
                 // the deposit should be rejected.
 
                 if self.in_the_money {
@@ -494,8 +496,8 @@ impl GameHandler for Mtt {
                     // No player joined, mark game as completed
                     self.stage = MttStage::Cancelled;
                 } else if self.ranks.len() < self.min_players as _ {
-                    // No enough players, cancel the game
-                    // Return the ticket for each player
+                    // Not enough players, cancel the game
+                    // Refund players' tickets
                     effect.info("Game has no enough players, cancel game");
                     self.refund_tickets(effect)?;
                 } else {
@@ -917,21 +919,22 @@ impl Mtt {
         Ok(())
     }
 
-    /// Update tables by balancing the players at each table.
-    /// `table_id` is the id of current table, where the bridge event
-    /// came from.
+    /// Update tables by balancing the number of players at each table.
+    /// `table_id` is the id of the current table, where the bridge
+    /// event came from.
     ///
-    /// The rules for table balancing:
+    /// The rules for balancing players at different tables:
     ///
-    /// When there are enough empty seats to accept all the players
-    /// from current table, close current table and move players to
-    /// empty seats. In this scenario, a CloseTable event and a few
-    /// Relocate events will be emitted.
+    /// When there is a table with enough empty seats to hold all the
+    /// players from the current table, close the current table and
+    /// move all the players to that table.  In this scenario, a
+    /// CloseTable event and a few Relocate events will be emitted.
     ///
-    /// When current table is the one with most players and have at
-    /// least two more players than the table with least payers, move
-    /// one player to that table. In this scenario, a StartGame event
-    /// and a Relocate event will be emitted.
+    /// When the current table has the most players and has at least
+    /// two more players than the table that has the fewest payers,
+    /// move one player from the current table to that smallest table.
+    /// In this scenario, a StartGame event and a Relocate event will
+    /// be emitted.
     ///
     /// Do nothing when there's only one table.
     fn balance_tables(&mut self, effect: &mut Effect, table_id: GameId, player_results: &[PlayerResult]) -> Result<(), HandleError> {
@@ -1065,7 +1068,7 @@ impl Mtt {
         let mut least_player_num: usize = self.table_size as _;
 
         for table_id in self.tables.keys() {
-            // The table with least player but not empty
+            // The table with least players but not empty
             let count = self.count_table_players(*table_id);
             if count < least_player_num && count > 0 {
                 table_id_with_least_players = Some(*table_id);
@@ -1077,8 +1080,8 @@ impl Mtt {
 
     /// Add a list of players to the game.
     ///
-    /// NB: The game will launch tables when receiving StartGame
-    /// event, so this function is No-op in Init stage.
+    /// NB: The game will launch tables when receiving a StartGame
+    /// event and this function is No-op in Init stage.
     fn sit_players(&mut self, effect: &mut Effect, player_ids: Vec<u64>, first_time_sit: bool) -> HandleResult<()> {
         if self.stage == MttStage::Init {
             effect.info("Skip sitting player, because the tourney is not started yet.");
@@ -1171,7 +1174,7 @@ impl Mtt {
         Ok(())
     }
 
-    /// Refund ticket to registered players
+    /// Refund registered players their tickets
     fn refund_tickets(&mut self, effect: &mut Effect) -> HandleResult<()> {
         self.stage = MttStage::Cancelled;
 
@@ -1207,7 +1210,7 @@ impl Mtt {
     /// Apply the prizes and mark the game as completed.
     fn apply_prizes(&mut self, effect: &mut Effect) -> HandleResult<()> {
         if !self.has_winner() {
-            // Do nothing is the game is ongoing
+            // Do nothing if the game is ongoing
             return Ok(());
         }
 
