@@ -1225,9 +1225,9 @@ impl Mtt {
                     player_id: id,
                     prize,
                 });
+                effect.withdraw(id, prize + rank.bounty_reward + rank.bounty_transfer);
                 rank.bounty_reward = 0;
                 rank.bounty_transfer = 0;
-                effect.withdraw(id, prize + rank.bounty_reward + rank.bounty_transfer);
             }
         }
 
