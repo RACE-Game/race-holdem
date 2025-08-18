@@ -1822,12 +1822,9 @@ impl GameHandler for Holdem {
             }
 
             Event::RandomnessReady { .. } => {
-                // Cards are dealt to players but remain invisible to them
-                for (idx, (id, player)) in self.player_map.iter().enumerate() {
-                    if matches!(player.status, PlayerStatus::Wait) {
-                        effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
-                        self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
-                    }
+                for (idx, id) in self.player_order.iter().enumerate() {
+                    effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
+                    self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
                 }
 
                 Ok(())
