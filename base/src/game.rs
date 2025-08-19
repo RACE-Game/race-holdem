@@ -1822,6 +1822,7 @@ impl GameHandler for Holdem {
             }
 
             Event::RandomnessReady { .. } => {
+                self.arrange_players(self.btn)?;
                 for (idx, id) in self.player_order.iter().enumerate() {
                     effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
                     self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
