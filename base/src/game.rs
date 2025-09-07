@@ -1,7 +1,4 @@
 //! Game state machine (or handler) of Holdem: the core of this lib.
-use race_api::prelude::*;
-use std::collections::BTreeMap;
-use std::mem::take;
 use crate::account::HoldemAccount;
 use crate::errors;
 use crate::essential::{
@@ -12,16 +9,9 @@ use crate::essential::{
 };
 use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
 use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
-
-macro_rules! id_pos {
-    ($p:ident, $last_pos:ident) => {
-        if $p.position > $last_pos {
-            ($p.id, $p.position, $p.position - $last_pos)
-        } else {
-            ($p.id, $p.position, $p.position + 100)
-        }
-    }
-}
+use race_api::prelude::*;
+use std::collections::BTreeMap;
+use std::mem::take;
 
 // Holdem: the game state
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
@@ -163,9 +153,9 @@ impl Holdem {
     pub fn reset_player_map_status(&mut self) -> Result<(), HandleError> {
         for player in self.player_map.values_mut() {
             match player.status {
-                PlayerStatus::Out =>  player.timeout += 1,
-                PlayerStatus::Waitbb => {},
-                _ => player.status = PlayerStatus::Wait
+                PlayerStatus::Out => player.timeout += 1,
+                PlayerStatus::Waitbb => {}
+                _ => player.status = PlayerStatus::Wait,
             }
         }
         Ok(())
@@ -240,17 +230,25 @@ impl Holdem {
         }
     }
 
-    // The next BTN is calculated based on the current one.
-    // Players with status `Waitbb` will not be used to calculate next BTN.
+    // Move BTN by calculating the next btn based on the previous one and
     // BTN moves clockwise.
-    pub fn get_next_btn(&mut self) -> Result<u8, HandleError> {
-        let mut player_positions: Vec<u8> =
-            self.player_map.values()
+    // If there are only `Waitbb` players, make the first of them the btn.
+    pub fn move_btn(&mut self) -> Result<(), HandleError> {
+        let mut player_positions: Vec<u8> = self
+            .player_map
+            .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
-            .map(|p| p.position).collect();
-        // There are only `Waitbb` players, default btn to 0 as it will be re-calced
+            .map(|p| p.position)
+            .collect();
+
         if player_positions.is_empty() {
-            return Ok(0);
+            let next_btn = self
+                .player_map
+                .first_key_value()
+                .map(|(_, p)| p.position)
+                .ok_or_else(|| errors::btn_not_found_in_player_order())?;
+            self.btn = next_btn;
+            return Ok(());
         }
 
         player_positions.sort();
@@ -265,12 +263,14 @@ impl Holdem {
             let Some(next_btn) = player_positions.first() else {
                 return Err(errors::next_button_player_not_found());
             };
-            Ok(*next_btn)
+            self.btn = *next_btn;
+            Ok(())
         } else {
             if let Some(next_btn) = next_btn_candidates.first() {
-                Ok(*next_btn)
+                self.btn = *next_btn;
+                Ok(())
             } else {
-                return Err(errors::next_button_position_not_found());
+                Err(errors::next_button_position_not_found())
             }
         }
     }
@@ -349,10 +349,23 @@ impl Holdem {
         }
     }
 
-    /// According to players position, place them in the following order:
+    // Sort the given players by their relative positions to the btn
+    fn sort_by_relative_position(&self, players: &mut Vec<(u64, u8)>) {
+        players.sort_by_key(|&(_, pos)| {
+            if pos > self.btn {
+                pos - self.btn
+            } else {
+                pos + 100
+            }
+        });
+    }
+
+    /// According to players position, place them in the below order at the start
     /// SB, BB, UTG (1st-to-act), MID (2nd-to-act), ..., BTN (last-to-act).
+    /// During the game, player acts in turn clockwise, thus the order looks like
+    /// [acting, ..., most-recently-acted]
     pub fn arrange_players(&mut self, last_pos: u8) -> Result<(), HandleError> {
-        let mut player_pos: Vec<(u64, u8)> = self
+        let mut player_relative_pos: Vec<(u64, u8)> = self
             .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
@@ -364,109 +377,75 @@ impl Holdem {
                 }
             })
             .collect();
-        player_pos.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
-        let player_order: Vec<u64> = player_pos.into_iter().map(|(id, _)| id ).collect();
-        println!("Sorted players: {player_order:?}");
-        self.player_order = player_order;
+        player_relative_pos.sort_by(|(_, pos1), (_, pos2)| pos1.cmp(pos2));
+        println!("Sorted player relative positions: {:?}", player_relative_pos);
+        self.player_order = player_relative_pos.into_iter().map(|(id, _)| id).collect();
         Ok(())
     }
 
     /// Similar to arrange_player, but runs only once after next btn is known.
-    /// It checks if the next player can be the actual BB based on positions:
-    /// 1. SB < NP < BB, then NP should be the actual BB
-    /// 2. NP > SB > BB, then NP should be the actual BB (a ring)
-    /// 3. SB > BB > NP, then NP should be the actual BB (a ring)
-    fn arrange_waitbbs(&mut self, next_btn: u8) -> Result<(), HandleError> {
-        // tuple: (id, player_pos, modified_pos)
-        let mut waitbbs: Vec<(u64, u8, u8)> = self
-            .player_map.values()
+    /// It checks if the new player can be the actual BB based on positions:
+    fn arrange_waitbbs(&mut self) -> Result<(), HandleError> {
+        // Get waitbb players and sort by their relative pos to btn
+        let mut waitbbs: Vec<(u64, u8)> = self
+            .player_map
+            .values()
             .filter(|p| matches!(p.status, PlayerStatus::Waitbb))
-            .map(|p| id_pos!(p, next_btn))
+            .map(|p| (p.id, p.position))
             .collect();
+        self.sort_by_relative_position(&mut waitbbs);
+
+        // When no waitbb players, do nothing
         if waitbbs.is_empty() {
             return Ok(());
         }
 
-        // get current in-game players (with any status but Waitbb)
-        let mut player_pos: Vec<(u64, u8, u8)> = self
-           .player_map
+        // Otherwise, get non-waitbb players and sort by their relative pos to btn
+        let mut non_waitbbs: Vec<(u64, u8)> = self
+            .player_map
             .values()
             .filter(|p| p.status != PlayerStatus::Waitbb)
-            .map(|p| id_pos!(p, next_btn))
+            .map(|p| (p.id, p.position))
             .collect();
-        player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
-        println!("Sorted players without Waitbbs {player_pos:?}");
+        self.sort_by_relative_position(&mut non_waitbbs);
 
-        if player_pos.is_empty() {
-            let mut new_btn = 0;
-            for p @ (id, wpos, _) in waitbbs {
-                let wp = self.player_map.get_mut(&id)
-                    .ok_or(errors::internal_player_not_found())?;
-                wp.status = PlayerStatus::Wait;
-                player_pos.push(p);
-                new_btn = wpos;
-            }
-            self.btn = new_btn;
-        } else if player_pos.len() == 1 && waitbbs.len() == 1 {
-            // heads-up, wait player becomes sb and btn
-            let (_, new_btn, _) = player_pos.first().cloned()
-                .ok_or_else(|| errors::btn_not_found_in_player_order())?;
-            self.btn = new_btn;
-            // waitbb player becomes bb
-            let (id, _, _) = waitbbs.first().cloned()
-                .ok_or_else(|| errors::bb_not_found_in_waitbbs())?;
-            let wp = self.player_map.get_mut(&id)
-                .ok_or(errors::internal_player_not_found())?;
-            wp.status = PlayerStatus::Wait;
-            player_pos.append(&mut waitbbs);
-        } else if player_pos.len() == 1 && waitbbs.len() > 1 {
-            // make the single player with `Wait` status the next btn
-            let btn_player @ (_, new_btn, _) = player_pos.first().cloned()
-                .ok_or_else(|| errors::btn_not_found_in_player_order())?;
-            self.btn = new_btn;
-            // re-order waitbbs according to the next btn
-            player_pos = waitbbs.iter().map(|&(id, pos, _)| {
-                if pos > new_btn {
-                    (id, pos, pos - new_btn)
-                } else {
-                    (id, pos, pos + 100)
-                }
-            }).collect();
-            // add all waitbb players to game
-            for (id, _, _) in waitbbs {
-                let wp = self.player_map.get_mut(&id)
-                    .ok_or(errors::internal_player_not_found())?;
+        // Process waitbb players
+        if non_waitbbs.len() <= 1 {
+            for (id, _) in waitbbs {
+                let wp = self
+                    .player_map
+                    .get_mut(&id)
+                    .ok_or_else(|| errors::internal_player_not_found())?;
                 wp.status = PlayerStatus::Wait;
             }
-            player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
-            player_pos.push(btn_player);
         } else {
-            let (_, sb_pos, _) = player_pos.first().cloned()
-                .ok_or_else(|| errors::sb_not_found_in_player_order())?;
-            let (_, bb_pos, _) = player_pos.get(1).cloned()
-                .ok_or_else(|| errors::bb_not_found_in_player_order())?;
-            for p @ (id, wpos, _) in waitbbs {
-                if sb_pos < wpos && wpos < bb_pos  {
-                    player_pos.push(p);
-                    let wp = self.player_map.get_mut(&id)
-                        .ok_or(errors::internal_player_not_found())?;
-                    wp.status = PlayerStatus::Wait;
+            let (_, sb_pos) = non_waitbbs
+                .get(0)
+                .cloned()
+                .ok_or_else(|| errors::sb_not_found_in_non_waitbbs())?;
+            let (_, bb_pos) = non_waitbbs
+                .get(1)
+                .cloned()
+                .ok_or_else(|| errors::bb_not_found_in_non_waitbbs())?;
+            // Try to find an eligible waitbb to become the actual bb
+            // 1. SB < NP < BB, then NP should be the actual BB
+            // 2. NP > SB > BB, then NP should be the actual BB (a ring)
+            // 3. SB > BB > NP, then NP should be the actual BB (a ring)
+            for (new_bb_id, new_bb_pos) in waitbbs {
+                let new_bb = self
+                    .player_map
+                    .get_mut(&new_bb_id)
+                    .ok_or_else(|| errors::internal_player_not_found())?;
+                if sb_pos < new_bb_pos && new_bb_pos < bb_pos {
+                    new_bb.status = PlayerStatus::Wait;
                     break;
-                }
-                if sb_pos > bb_pos && (wpos > sb_pos || wpos < bb_pos) {
-                    player_pos.push(p);
-                    let wp = self.player_map.get_mut(&id)
-                        .ok_or(errors::internal_player_not_found())?;
-                    wp.status = PlayerStatus::Wait;
+                } else if sb_pos > bb_pos && (new_bb_pos > sb_pos || bb_pos > new_bb_pos) {
+                    new_bb.status = PlayerStatus::Wait;
                     break;
                 }
             }
-            player_pos.sort_by(|(.., pos1), (.., pos2)| pos1.cmp(pos2));
         }
 
-        println!("Sorted players with one potential new bb {player_pos:?}");
-        let player_order: Vec<u64> = player_pos.into_iter().map(|(id, ..)| id).collect();
-        self.player_order = player_order;
         Ok(())
     }
 
@@ -482,8 +461,12 @@ impl Holdem {
             if allin {
                 self.set_player_status(player_id, PlayerStatus::Allin)?;
             }
-            self.hand_history
-                .add_blinds_info(BlindBet::new(player_id, BlindType::Ante, real_ante, allin));
+            self.hand_history.add_blinds_info(BlindBet::new(
+                player_id,
+                BlindType::Ante,
+                real_ante,
+                allin,
+            ));
         }
 
         Ok(total_ante)
@@ -710,9 +693,7 @@ impl Holdem {
     pub fn count_ingame_players(&self) -> usize {
         self.player_map
             .values()
-            .filter(|p| !matches!(p.status,
-                                  PlayerStatus::Init | PlayerStatus::Waitbb)
-            )
+            .filter(|p| !matches!(p.status, PlayerStatus::Init | PlayerStatus::Waitbb))
             .count()
     }
 
@@ -1031,7 +1012,6 @@ impl Holdem {
 
         player_hands.sort_by(|(_, h1), (_, h2)| compare_hands(&h2.value, &h1.value));
 
-
         println!("Player Hands from strong to weak {:?}", player_hands);
 
         // Winners example: [[w1], [w2, w3], ... ] where w2 == w3, i.e. a draw/tie
@@ -1043,7 +1023,10 @@ impl Holdem {
                 current_value = Some(hand.value.clone());
                 winners.push(vec![]);
             }
-            winners.last_mut().ok_or(errors::strongest_hand_not_found())?.push(id);
+            winners
+                .last_mut()
+                .ok_or(errors::strongest_hand_not_found())?
+                .push(id);
         }
 
         println!("Player rankings in order: {:?}", winners);
@@ -1301,7 +1284,10 @@ impl Holdem {
                 self.set_player_acted(sender, allin)?;
                 self.min_raise = amount;
                 self.street_bet = amount;
-                self.hand_history.add_action(self.street, PlayerAction::new_bet(player_id, real_bet_amount, allin))?;
+                self.hand_history.add_action(
+                    self.street,
+                    PlayerAction::new_bet(player_id, real_bet_amount, allin),
+                )?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1317,7 +1303,10 @@ impl Holdem {
                 let call_amount = self.street_bet - betted;
                 let (allin, real_call_amount) = self.take_bet(sender.clone(), call_amount)?;
                 self.set_player_acted(sender, allin)?;
-                self.hand_history.add_action(self.street, PlayerAction::new_call(player_id, real_call_amount, allin))?;
+                self.hand_history.add_action(
+                    self.street,
+                    PlayerAction::new_call(player_id, real_call_amount, allin),
+                )?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1332,7 +1321,8 @@ impl Holdem {
                     return Err(errors::player_cant_check());
                 }
                 self.set_player_status(sender, PlayerStatus::Acted)?;
-                self.hand_history.add_action(self.street, PlayerAction::new_check(player_id))?;
+                self.hand_history
+                    .add_action(self.street, PlayerAction::new_check(player_id))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1341,7 +1331,8 @@ impl Holdem {
                     return Err(errors::not_the_acting_player_to_fold());
                 }
                 self.set_player_status(sender, PlayerStatus::Fold)?;
-                self.hand_history.add_action(self.street, PlayerAction::new_fold(player_id))?;
+                self.hand_history
+                    .add_action(self.street, PlayerAction::new_fold(player_id))?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1366,7 +1357,10 @@ impl Holdem {
                     self.street_bet = new_street_bet;
                 }
                 self.min_raise = new_min_raise;
-                self.hand_history.add_action(self.street, PlayerAction::new_raise(player_id, betted + real_raise_amount, allin))?;
+                self.hand_history.add_action(
+                    self.street,
+                    PlayerAction::new_raise(player_id, betted + real_raise_amount, allin),
+                )?;
                 self.reduce_time_cards(effect)?;
             }
 
@@ -1559,7 +1553,6 @@ impl Holdem {
         return None;
     }
 
-
     /// Find a position from this table, but prefer to return a
     /// position which is not between BTN and BB.
     pub fn find_position(&self) -> Option<u8> {
@@ -1612,10 +1605,6 @@ impl Holdem {
         self.reset_state()?;
         self.fill_player_chips_with_deposits();
 
-        let next_btn = self.get_next_btn()?;
-        effect.info(format!("Game starts and next BTN: {}", next_btn));
-        self.btn = next_btn;
-
         // Only start game when there are at least two available players
         if self
             .player_map
@@ -1624,8 +1613,15 @@ impl Holdem {
             .count()
             >= 2
         {
+            // Move btn
+            self.move_btn()?;
+            effect.info(format!("Next BTN = {}", self.btn));
+
             // Process Waitbb players
-            self.arrange_waitbbs(next_btn)?;
+            self.arrange_waitbbs()?;
+
+            // Arrange players to set the player order
+            self.arrange_players(self.btn)?;
 
             // Prepare randomness (shuffling cards)
             let rnd_spec = RandomSpec::deck_of_cards();
@@ -1714,7 +1710,8 @@ impl GameHandler for Holdem {
                     // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
                     if self.mode == GameMode::Cash {
                         self.set_player_status(player_id, PlayerStatus::Leave)?;
-                        self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
+                        self.hand_history
+                            .add_action(street, PlayerAction::new_fold(player_id))?;
                         return self.next_state(effect);
                     } else {
                         player.is_afk = true;
@@ -1734,12 +1731,14 @@ impl GameHandler for Holdem {
 
                 if bet == street_bet {
                     self.set_player_status(player_id, PlayerStatus::Acted)?;
-                    self.hand_history.add_action(street, PlayerAction::new_check(player_id))?;
+                    self.hand_history
+                        .add_action(street, PlayerAction::new_check(player_id))?;
                     self.next_state(effect)?;
                     Ok(())
                 } else {
                     self.set_player_status(player_id, PlayerStatus::Fold)?;
-                    self.hand_history.add_action(street, PlayerAction::new_fold(player_id))?;
+                    self.hand_history
+                        .add_action(street, PlayerAction::new_fold(player_id))?;
                     self.next_state(effect)?;
                     Ok(())
                 }
@@ -1761,12 +1760,14 @@ impl GameHandler for Holdem {
 
                 if self.player_map.len() <= 1 {
                     for p in players.into_iter() {
-                        let player = Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Init);
+                        let player =
+                            Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Init);
                         self.player_map.insert(player.id, player);
                     }
                 } else {
                     for p in players.into_iter() {
-                        let player = Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Waitbb);
+                        let player =
+                            Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Waitbb);
                         self.player_map.insert(player.id, player);
                     }
                 }
@@ -1822,7 +1823,6 @@ impl GameHandler for Holdem {
             }
 
             Event::RandomnessReady { .. } => {
-                self.arrange_players(self.btn)?;
                 for (idx, id) in self.player_order.iter().enumerate() {
                     effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
                     self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);

@@ -337,7 +337,7 @@ fn test_wait_waitbb_headsup() -> HandleResult<()> {
         assert_eq!(alice.status, PlayerStatus::Wait);
         assert_eq!(bob.status, PlayerStatus::Wait);
         assert_eq!(game.btn, 6);
-        assert_eq!(game.player_order, vec![3, 6]);
+        assert_eq!(game.player_order, vec![6, 3]);
     }
 
     Ok(())
@@ -418,7 +418,7 @@ fn test_one_wait_multi_waitbbs() -> HandleResult<()> {
 // Test the game scenario where all eligbile players are with `Waitbb` status
 // They should all be added to the game with `Wait` status
 #[test]
-fn test_multi_waitbbs_without_wait() -> HandleResult<()> {
+fn test_no_waits_multi_waitbbs() -> HandleResult<()> {
     // players
     let alice = Player { id: 3, position: 6, status: PlayerStatus::Waitbb, ..Player::default() };
     let bob = Player { id: 6, position: 3, status: PlayerStatus::Waitbb, ..Player::default() };
@@ -475,8 +475,7 @@ fn test_multi_waitbbs_without_wait() -> HandleResult<()> {
         let _carol = game.player_map.get(&8).unwrap();
         let _dave = game.player_map.get(&9).unwrap();
         assert!(game.player_map.values().all(|p| matches!(p.status, PlayerStatus::Wait)));
-        assert_eq!(game.btn, 4);
-        // TODO: test who are sb and bb, respectively?
+        assert_eq!(game.btn, 6);
     }
 
     Ok(())
@@ -484,7 +483,7 @@ fn test_multi_waitbbs_without_wait() -> HandleResult<()> {
 
 // No `Waitbb` players so `Wait` players move on as usual
 #[test]
-fn test_multi_wait_without_waitbb() -> HandleResult<()> {
+fn test_multi_waits_no_waitbbs() -> HandleResult<()> {
     // players
     let alice = Player { id: 3, position: 6, status: PlayerStatus::Wait, ..Player::default() };
     let bob = Player { id: 6, position: 3, status: PlayerStatus::Wait, ..Player::default() };
@@ -538,6 +537,290 @@ fn test_multi_wait_without_waitbb() -> HandleResult<()> {
 
         assert!(game.player_map.values().all(|p| matches!(p.status, PlayerStatus::Wait)));
         assert_eq!(game.btn, 6);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_first_waitbb_between_btn_and_sb() -> HandleResult<()> {
+    // players
+    let a1 = Player { id: 1, position: 1, status: PlayerStatus::Waitbb, ..Player::default() };
+    let b2 = Player { id: 2, position: 2, status: PlayerStatus::Wait, ..Player::default() };
+    let c3 = Player { id: 3, position: 3, status: PlayerStatus::Waitbb, ..Player::default() };
+    let d4 = Player { id: 4, position: 4, status: PlayerStatus::Waitbb, .. Player::default() };
+    let e5 = Player { id: 5, position: 5, status: PlayerStatus::Wait, .. Player::default() };
+    let f6 = Player { id: 6, position: 6, status: PlayerStatus::Wait, .. Player::default() };
+
+    let player_map = BTreeMap::from([
+        (1, a1),
+        (2, b2),
+        (3, c3),
+        (4, d4),
+        (5, e5),
+        (6, f6)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 5,                 // current btn; next btn will be 6
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 6,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        assert_eq!(game.btn, 6);
+        // Without waitbbs, players are supposed to act in the below order
+        // [b2, e5, f6] or [2, 5, 6] or [sb, bb, btn]
+        // a1 should be skipped and c3 should be the new bb:
+        // [b2, c3, e5, f6] or [2, 3, 5, 6]
+        assert_eq!(game.player_map.get(&1).unwrap().status, PlayerStatus::Waitbb);
+        assert_eq!(game.player_map.get(&4).unwrap().status, PlayerStatus::Waitbb);
+        assert_eq!(game.player_order, [2, 3, 5, 6]);
+    }
+
+    Ok(())
+}
+
+// When there are multiple waitbbs, the one near (right to) the btn/sb plays first.
+// This test covers the case where NP > SB > BB
+#[test]
+fn test_multi_waitbbs_play_order1() -> HandleResult<()> {
+    // players
+    let a1 = Player { id: 1, position: 1, status: PlayerStatus::Wait, ..Player::default() };
+    let b2 = Player { id: 2, position: 2, status: PlayerStatus::Wait, ..Player::default() };
+    let c3 = Player { id: 3, position: 3, status: PlayerStatus::Wait, ..Player::default() };
+    let d4 = Player { id: 4, position: 4, status: PlayerStatus::Wait, .. Player::default() };
+    let e5 = Player { id: 5, position: 5, status: PlayerStatus::Waitbb, .. Player::default() };
+    let f6 = Player { id: 6, position: 6, status: PlayerStatus::Waitbb, .. Player::default() };
+
+    let player_map = BTreeMap::from([
+        (1, a1),
+        (2, b2),
+        (3, c3),
+        (4, d4),
+        (5, e5),
+        (6, f6)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 2,                 // current btn; next btn will be 3
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 6,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        assert_eq!(game.btn, 3);
+        // Without waitbbs, players are supposed to act in the below order
+        // [d4, a1, b2, c3] or [4, 1, 2, 3] or [sb, bb, utg, btn]
+        // Since e4 and f5 are all eligible for the actual bb, the actual order is
+        // [d4, e5, a1, b2, c3] or [4, 5, 1, 2, 3]
+        assert_eq!(game.player_order, [4, 5, 1, 2, 3]);
+    }
+
+    Ok(())
+}
+
+// When there are multiple waitbbs, the one near (right to) the btn/sb plays first.
+// This test covers the case where SB > BB > NP
+#[test]
+fn test_multi_waitbbs_play_order2() -> HandleResult<()> {
+    // players
+    let a1 = Player { id: 1, position: 1, status: PlayerStatus::Waitbb, ..Player::default() };
+    let b2 = Player { id: 2, position: 2, status: PlayerStatus::Waitbb, ..Player::default() };
+    let c3 = Player { id: 3, position: 3, status: PlayerStatus::Wait, ..Player::default() };
+    let d4 = Player { id: 4, position: 4, status: PlayerStatus::Wait, .. Player::default() };
+    let e5 = Player { id: 5, position: 5, status: PlayerStatus::Wait, .. Player::default() };
+    let f6 = Player { id: 6, position: 6, status: PlayerStatus::Wait, .. Player::default() };
+
+    let player_map = BTreeMap::from([
+        (1, a1),
+        (2, b2),
+        (3, c3),
+        (4, d4),
+        (5, e5),
+        (6, f6)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 4,                 // current btn; next btn will be 5
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 6,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        assert_eq!(game.btn, 5);
+        // Without waitbbs, players are supposed to act in the below order
+        // [f6, c3, d4, e5] or [6, 3, 4, 5] or [sb, bb, utg, btn]
+        // a1 and b2 are all eligible for the actual bb, but a1 is the near (to btn)
+        // [f6, a1, c3, d4, e5] or [6, 1, 3, 4, 5]
+        assert_eq!(game.player_order, [6, 1, 3, 4, 5]);
+    }
+
+    Ok(())
+}
+
+// This test targets a bug where the would-be-bb was skipped
+// Suppose next btn is 6 and thus a1 will be sb
+// b2 (Suts) buys in early but joins the table late (thus further from btn)
+// c3 (Loso) buys in late but joins the table early (thus near btn)
+// In such case, c3 (near sb/btn) should become the actual big blind
+#[test]
+fn test_multi_waitbbs_play_order3() -> HandleResult<()> {
+    // players
+    let a1 = Player { id: 1, position: 1, status: PlayerStatus::Wait, ..Player::default() };
+    let b2 = Player { id: 2, position: 3, status: PlayerStatus::Waitbb, ..Player::default() };
+    let c3 = Player { id: 3, position: 2, status: PlayerStatus::Waitbb, ..Player::default() };
+    let d4 = Player { id: 4, position: 4, status: PlayerStatus::Wait, .. Player::default() };
+    let e5 = Player { id: 5, position: 5, status: PlayerStatus::Wait, .. Player::default() };
+    let f6 = Player { id: 6, position: 6, status: PlayerStatus::Wait, .. Player::default() };
+
+    let player_map = BTreeMap::from([
+        (1, a1),
+        (2, b2),
+        (3, c3),
+        (4, d4),
+        (5, e5),
+        (6, f6)
+    ]);
+
+    // snapshot of game state
+    let mut game =  Holdem {
+        hand_id: 1,
+        deck_random_id: 1,
+        max_deposit: 2000,
+        sb: 100,
+        bb: 200,
+        ante: 20,
+        min_raise: 1000,
+        btn: 5,                 // current btn; next btn will be 6
+        rake: 10,
+        rake_cap: 25,
+        stage: HoldemStage::Play,
+        street: Street::Preflop,
+        street_bet: 200,
+        board: Vec::<String>::with_capacity(5),
+        hand_index_map: BTreeMap::<u64, Vec<usize>>::new(),
+        bet_map: BTreeMap::<u64, u64>::new(),
+        total_bet_map: BTreeMap::<u64, u64>::new(),
+        prize_map: BTreeMap::<u64, u64>::new(),
+        player_map,
+        player_order: vec![],
+        pots: Vec::<Pot>::new(),
+        acting_player: None,
+        winners: Vec::<u64>::new(),
+        display: Vec::<Display>::new(),
+        mode: GameMode::Cash,
+        table_size: 6,
+        hand_history: HandHistory::default(),
+        next_game_start: 0,
+        rake_collected: 0,
+    };
+
+    {
+        let event = Event::GameStart;
+        let mut effect = Effect::default();
+        game.handle_event(&mut effect, event).unwrap();
+
+        assert_eq!(game.btn, 6);
+        assert_eq!(game.player_map.get(&2).unwrap().status, PlayerStatus::Waitbb);
+        // Without waitbbs, players are supposed to act in the below order
+        // [a1, d4, e5, f6] or [1, 4, 5, 6] or [sb, bb, utg, btn]
+        // c3 should become the actual bb so the actual order is
+        // [a1, c3, d4, e5, f6] or [1, 3, 4, 5, 6]
+        assert_eq!(game.player_order, [1, 3, 4, 5, 6]);
     }
 
     Ok(())
