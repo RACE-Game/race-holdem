@@ -233,10 +233,10 @@ pub struct Mtt {
     in_the_money: bool,
     alives: usize, // The number of alive players
     stage: MttStage,
-    table_assigns: BTreeMap<u64, GameId>,
-    // table_assigns_pending: BTreeMap<u64, GameId>,
+    table_assigns: BTreeMap<u64, usize>,
+    // table_assigns_pending: BTreeMap<u64, usize>,
     ranks: Vec<PlayerRank>,
-    tables: BTreeMap<GameId, MttTableState>,
+    tables: BTreeMap<usize, MttTableState>,
     table_size: u8,
     time_elapsed: u64,
     timestamp: u64,
@@ -251,7 +251,7 @@ pub struct Mtt {
     theme: Option<String>,
     subgame_bundle: String,
     winners: Vec<MttWinner>,
-    launched_table_ids: Vec<GameId>,
+    launched_table_ids: Vec<usize>,
     // TODO: We expect to use this to save the distributed prizes.
     // For example:
     // If the minimum prize for the top 10 is 100 for each,
@@ -793,7 +793,7 @@ impl Mtt {
     /// higher priority when candidates have the same number of players.
     fn get_table_ids_with_least_most_players(
         &self,
-        prefer_table_id: GameId,
+        prefer_table_id: usize,
     ) -> HandleResult<(&MttTableState, &MttTableState)> {
         let Some(curr_table) = self.tables.get_key_value(&prefer_table_id) else {
             return Err(errors::error_invalid_table_id());
@@ -819,7 +819,7 @@ impl Mtt {
     fn close_table_and_move_players_to_other_tables(
         &mut self,
         effect: &mut Effect,
-        close_table_id: GameId,
+        close_table_id: usize,
     ) -> HandleResult<()> {
         let Some(table) = self.tables.get(&close_table_id) else {
             return Err(errors::error_table_not_fonud());
@@ -842,7 +842,7 @@ impl Mtt {
 
     /// List all available seats on a table
     #[allow(unused)]
-    fn find_available_table_seats(&mut self, table_id: GameId) -> HandleResult<Vec<u8>> {
+    fn find_available_table_seats(&mut self, table_id: usize) -> HandleResult<Vec<u8>> {
         let mut available_seats = vec![];
         let table = self
             .tables
@@ -859,8 +859,8 @@ impl Mtt {
     fn balance_players_between_tables(
         &mut self,
         effect: &mut Effect,
-        from_table_id: GameId,
-        to_table_id: GameId,
+        from_table_id: usize,
+        to_table_id: usize,
         num_to_move: usize,
         player_results: &[PlayerResult],
     ) -> HandleResult<()> {
@@ -937,7 +937,7 @@ impl Mtt {
     /// be emitted.
     ///
     /// Do nothing when there's only one table.
-    fn balance_tables(&mut self, effect: &mut Effect, table_id: GameId, player_results: &[PlayerResult]) -> Result<(), HandleError> {
+    fn balance_tables(&mut self, effect: &mut Effect, table_id: usize, player_results: &[PlayerResult]) -> Result<(), HandleError> {
         let Some(current_table) = self.tables.get(&table_id) else {
             Err(errors::error_invalid_table_id())?
         };
@@ -1056,14 +1056,14 @@ impl Mtt {
         self.stage = MttStage::Completed;
     }
 
-    fn count_table_players(&self, table_id: GameId) -> usize {
+    fn count_table_players(&self, table_id: usize) -> usize {
         self.tables
             .get(&table_id)
             .map(|t| t.players.len())
             .unwrap_or(0)
     }
 
-    fn find_sparse_non_empty_table(&self) -> Option<GameId> {
+    fn find_sparse_non_empty_table(&self) -> Option<usize> {
         let mut table_id_with_least_players = None;
         let mut least_player_num: usize = self.table_size as _;
 

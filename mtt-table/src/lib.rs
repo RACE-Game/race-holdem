@@ -18,7 +18,7 @@ pub type PlayerId = u64;
 #[game_handler]
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default, Clone)]
 pub struct MttTable {
-    pub table_id: GameId,
+    pub table_id: usize,
     pub holdem: Holdem,
 }
 

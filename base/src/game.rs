@@ -17,7 +17,7 @@ use std::mem::take;
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
 pub struct Holdem {
     pub hand_id: usize,
-    pub deck_random_id: RandomId,
+    pub deck_random_id: usize,
     pub max_deposit: u64,
     pub sb: u64,
     pub bb: u64,

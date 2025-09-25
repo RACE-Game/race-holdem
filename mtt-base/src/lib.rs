@@ -72,7 +72,7 @@ impl MttTablePlayerInit {
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableInit {
-    pub table_id: GameId,
+    pub table_id: usize,
     pub sb: u64,
     pub bb: u64,
     pub ante: u64,
@@ -81,7 +81,7 @@ pub struct MttTableInit {
 
 impl MttTableInit {
     pub fn new(
-        table_id: GameId,
+        table_id: usize,
         sb: u64,
         bb: u64,
         ante: u64,
@@ -119,7 +119,7 @@ impl From<MttTableInit> for MttTableState {
 
 #[derive(Default, Debug, Clone, BorshSerialize, BorshDeserialize, PartialEq, Eq)]
 pub struct MttTableState {
-    pub table_id: GameId,
+    pub table_id: usize,
     pub hand_id: usize,
     pub btn: u8,
     pub sb: u64,
@@ -131,7 +131,7 @@ pub struct MttTableState {
 
 impl MttTableState {
     pub fn new(
-        table_id: GameId,
+        table_id: usize,
         sb: u64,
         bb: u64,
         ante: u64,
@@ -228,7 +228,7 @@ pub enum HoldemBridgeEvent {
     /// A game result report from table.
     GameResult {
         hand_id: usize,
-        table_id: GameId,
+        table_id: usize,
         btn: u8,
         player_results: Vec<PlayerResult>,
         table: MttTableState,
