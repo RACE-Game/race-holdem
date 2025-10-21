@@ -4,7 +4,7 @@ use race_api::prelude::HandleError;
 use crate::{
     errors,
     essential::Street,
-    evaluator::Category,
+    holdem_evaluator::Category,
 };
 use std::collections::BTreeMap;
 

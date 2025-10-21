@@ -4,9 +4,10 @@
 //! - Game: the core logic of handling various events in the game
 //!
 
-pub mod evaluator;
+pub mod holdem_evaluator;
 pub mod account;
 pub mod essential;
+pub mod variant;
 pub mod game;
 pub mod hand_history;
 pub mod errors;

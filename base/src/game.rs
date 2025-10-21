@@ -1,5 +1,7 @@
-//! Game state machine (or handler) of Holdem: the core of this lib.
+//! Game state machine of poker game (Hold'em or Omaha).
+
 use crate::account::HoldemAccount;
+use crate::variant::{ EvaluateHandsOutput, GameVariant };
 use crate::errors;
 use crate::essential::{
     ActingPlayer, AwardPot, Display, GameEvent, GameMode, HoldemStage, InternalPlayerJoin, Player,
@@ -7,15 +9,14 @@ use crate::essential::{
     ACTION_TIMEOUT_PREFLOP, ACTION_TIMEOUT_RIVER, ACTION_TIMEOUT_TURN, MAX_ACTION_TIMEOUT_COUNT,
     TIME_CARD_EXTRA_SECS, WAIT_TIMEOUT_DEFAULT,
 };
-use crate::evaluator::{compare_hands, create_cards, evaluate_cards, PlayerHand};
-use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction, Showdown};
+use crate::hand_history::{BlindBet, BlindType, HandHistory, PlayerAction};
 use race_api::prelude::*;
 use std::collections::BTreeMap;
 use std::mem::take;
 
 // Holdem: the game state
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
-pub struct Holdem {
+pub struct PokerGame<V: GameVariant> {
     pub hand_id: usize,
     pub deck_random_id: usize,
     pub max_deposit: u64,
@@ -45,10 +46,11 @@ pub struct Holdem {
     pub hand_history: HandHistory,
     pub next_game_start: u64,
     pub rake_collected: u64,
+    pub variant: V,
 }
 
 // Methods that mutate or query the game state
-impl Holdem {
+impl<V: GameVariant> PokerGame<V> {
     // calc timeout that should be wait after settle by state
     fn calc_pre_settle_timeout(&self) -> Result<u64, HandleError> {
         // 0.5s for collect chips, 5s for players observer game result
@@ -958,80 +960,15 @@ impl Holdem {
     }
 
     pub fn update_game_result(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        let decryption = effect.get_revealed(self.deck_random_id)?;
-        // Board
-        let board: Vec<&str> = self.board.iter().map(|c| c.as_str()).collect();
-        // Player hands
-        let mut player_hands: Vec<(u64, PlayerHand)> = Vec::with_capacity(self.player_order.len());
+        let revealed = effect.get_revealed(self.deck_random_id)?;
 
-        let mut showdowns = Vec::<(u64, Showdown)>::new();
+        let EvaluateHandsOutput { winner_sets, showdown_map } = self.variant.evaluate_hands(
+            &self.board,
+            &self.hand_index_map,
+            revealed
+        )?;
 
-        for (id, idxs) in self.hand_index_map.iter() {
-            if idxs.len() != 2 {
-                return Err(errors::invalid_hole_cards_number());
-            }
-
-            let Some(player) = self.player_map.get(id) else {
-                return Err(errors::internal_player_not_found());
-            };
-
-            if player.status != PlayerStatus::Fold
-                && player.status != PlayerStatus::Init
-                && player.status != PlayerStatus::Waitbb
-                && player.status != PlayerStatus::Leave
-            {
-                let Some(first_card_idx) = idxs.first() else {
-                    return Err(errors::first_hole_card_index_missing());
-                };
-                let Some(first_card) = decryption.get(first_card_idx) else {
-                    return Err(errors::first_hole_card_error());
-                };
-                let Some(second_card_idx) = idxs.last() else {
-                    return Err(errors::second_hole_card_index_missing());
-                };
-                let Some(second_card) = decryption.get(second_card_idx) else {
-                    return Err(errors::second_hole_card_error());
-                };
-                let hole_cards = [first_card.as_str(), second_card.as_str()];
-                let cards = create_cards(board.as_slice(), &hole_cards);
-                let hand = evaluate_cards(cards);
-                let hole_cards = hole_cards.iter().map(|c| c.to_string()).collect();
-                let category = hand.category.clone();
-                let picks = hand.picks.iter().map(|c| c.to_string()).collect();
-                player_hands.push((*id, hand));
-                showdowns.push((
-                    *id,
-                    Showdown {
-                        hole_cards,
-                        category,
-                        picks,
-                    },
-                ));
-            }
-        }
-
-        player_hands.sort_by(|(_, h1), (_, h2)| compare_hands(&h2.value, &h1.value));
-
-        println!("Player Hands from strong to weak {:?}", player_hands);
-
-        // Winners example: [[w1], [w2, w3], ... ] where w2 == w3, i.e. a draw/tie
-        let mut winners: Vec<Vec<u64>> = Vec::new();
-        let mut current_value = None;
-
-        for (id, hand) in player_hands.into_iter() {
-            if Some(&hand.value) != current_value.as_ref() {
-                current_value = Some(hand.value.clone());
-                winners.push(vec![]);
-            }
-            winners
-                .last_mut()
-                .ok_or(errors::strongest_hand_not_found())?
-                .push(id);
-        }
-
-        println!("Player rankings in order: {:?}", winners);
-
-        let award_pots = self.assign_winners(winners)?;
+        let award_pots = self.assign_winners(winner_sets)?;
         self.calc_prize()?;
 
         let player_result_map = self.update_player_chips()?;
@@ -1041,7 +978,7 @@ impl Holdem {
         self.mark_eliminated_players();
 
         // Save to hand history
-        for (id, showdown) in showdowns.into_iter() {
+        for (id, showdown) in showdown_map.into_iter() {
             self.hand_history.add_showdown(id, showdown);
         }
 
@@ -1346,9 +1283,16 @@ impl Holdem {
                 }
 
                 let betted = self.get_player_bet(sender);
-                if amount + betted < self.street_bet + self.min_raise && amount != player.chips {
-                    return Err(errors::raise_amount_is_too_small());
-                }
+
+                self.variant.validate_raise_amount(
+                    player.chips,
+                    betted,
+                    amount,
+                    self.street_bet,
+                    self.min_raise,
+                    &self.pots,
+                )?;
+
                 let (allin, real_raise_amount) = self.take_bet(sender.clone(), amount)?;
                 self.set_player_acted(sender, allin)?;
                 let new_street_bet = betted + real_raise_amount;
@@ -1632,7 +1576,7 @@ impl Holdem {
     }
 }
 
-impl GameHandler for Holdem {
+impl<V: GameVariant> GameHandler for PokerGame<V> {
     fn balances(&self) -> Vec<PlayerBalance> {
         self.player_map
             .values()
