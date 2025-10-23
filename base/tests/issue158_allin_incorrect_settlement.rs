@@ -2,8 +2,9 @@
 //! For more, see: https://github.com/RACE-Game/racepoker/issues/158
 
 use race_api::prelude::*;
-use race_holdem_base::essential::*;
-use race_holdem_base::game::Holdem;
+use race_poker_base::essential::*;
+use race_poker_base::game::PokerGame;
+use race_poker_base::holdem::HoldemVariant;
 use race_test::prelude::*;
 use std::collections::{HashMap, BTreeMap};
 
@@ -70,7 +71,7 @@ fn three_way_allin_incorrect_settle() -> Result<()> {
         (4, vec![6, 7]),
     ]);
 
-    let mut holdem = Holdem {
+    let mut holdem = PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,

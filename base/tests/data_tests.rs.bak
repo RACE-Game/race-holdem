@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use borsh::BorshDeserialize;
 use helper::make_uneven_betmap;
 
-use race_holdem_base::account::HoldemAccount;
-use race_holdem_base::essential::{
+use race_poker_base::account::HoldemAccount;
+use race_poker_base::essential::{
     Display, GameEvent, Player, PlayerResult, PlayerStatus, Pot,
 };
 

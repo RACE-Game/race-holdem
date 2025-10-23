@@ -1,5 +1,5 @@
 [package]
-name = "race-holdem-base"
+name = "race-poker-base"
 version = "0.1.0"
 edition = "2021"
 

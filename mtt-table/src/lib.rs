@@ -5,8 +5,9 @@ use std::collections::btree_map::Entry;
 use borsh::{BorshDeserialize, BorshSerialize};
 use race_api::event::BridgeEvent;
 use race_api::prelude::*;
-use race_holdem_base::essential::{GameMode, Player, PlayerStatus};
-use race_holdem_base::game::Holdem;
+use race_poker_base::essential::{GameMode, Player, PlayerStatus};
+use race_poker_base::game::PokerGame;
+use race_poker_base::holdem::HoldemVariant;
 use race_holdem_mtt_base::{
     ChipsChange, HoldemBridgeEvent, MttTableInit, MttTablePlayer, MttTableSitin, MttTableState, PlayerResult,
     PlayerResultStatus,
@@ -19,7 +20,7 @@ pub type PlayerId = u64;
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default, Clone)]
 pub struct MttTable {
     pub table_id: usize,
-    pub holdem: Holdem,
+    pub holdem: PokerGame<HoldemVariant>,
 }
 
 impl GameHandler for MttTable {
@@ -43,7 +44,7 @@ impl GameHandler for MttTable {
             })
             .collect();
 
-        let holdem = Holdem {
+        let holdem = PokerGame::<HoldemVariant> {
             btn: 0,
             sb,
             bb,
@@ -83,11 +84,11 @@ impl GameHandler for MttTable {
                             _ => PlayerResultStatus::Normal,
                         };
                         let chips_change = match self.holdem.hand_history.chips_change.get(&p.id) {
-                            Some(race_holdem_base::hand_history::ChipsChange::NoUpdate) => None,
-                            Some(race_holdem_base::hand_history::ChipsChange::Add(amt)) => {
+                            Some(race_poker_base::hand_history::ChipsChange::NoUpdate) => None,
+                            Some(race_poker_base::hand_history::ChipsChange::Add(amt)) => {
                                 Some(ChipsChange::Add(*amt))
                             }
-                            Some(race_holdem_base::hand_history::ChipsChange::Sub(amt)) => {
+                            Some(race_poker_base::hand_history::ChipsChange::Sub(amt)) => {
                                 Some(ChipsChange::Sub(*amt))
                             }
                             None => None,

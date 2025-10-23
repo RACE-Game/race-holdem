@@ -7,7 +7,7 @@
 mod helper;
 use helper::setup_holdem_game;
 use race_api::prelude::*;
-use race_holdem_base::essential::*;
+use race_poker_base::essential::*;
 use race_test::prelude::*;
 
 // In the previous buggy version, we shoud expect this to panic because

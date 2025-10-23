@@ -5,7 +5,7 @@ mod helper;
 
 use std::collections::HashMap;
 
-use race_holdem_base::essential::*;
+use race_poker_base::essential::*;
 use helper::{create_sync_event, setup_holdem_game};
 use race_api::{error::HandleResult, event::Event};
 use race_test::prelude::*;

@@ -5,12 +5,13 @@
 use std::collections::BTreeMap;
 
 use race_api::prelude::*;
-use race_holdem_base::hand_history::HandHistory;
+use race_poker_base::hand_history::HandHistory;
 use race_test::prelude::*;
-use race_holdem_base::account::HoldemAccount;
+use race_poker_base::account::HoldemAccount;
 
-use race_holdem_base::essential::*;
-use race_holdem_base::game::*;
+use race_poker_base::essential::*;
+use race_poker_base::game::*;
+use race_poker_base::holdem::HoldemVariant;
 
 const ALICE: u64 = 0;
 const BOB: u64 = 1;
@@ -109,9 +110,9 @@ pub fn make_pots() -> Vec<Pot> {
 }
 
 // Set up a initial holdem state with multi players joined
-pub fn setup_holdem_state() -> Result<Holdem> {
+pub fn setup_holdem_state() -> Result<PokerGame<HoldemVariant>> {
     let players_map = initial_players();
-    let mut state = Holdem {
+    let mut state = PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 600,
@@ -141,15 +142,16 @@ pub fn setup_holdem_state() -> Result<Holdem> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 6000,
+        variant: HoldemVariant {},
     };
     state.arrange_players(0)?;
     Ok(state)
 }
 
 // Set up a holdem state for headsup
-pub fn setup_two_player_holdem() -> Result<Holdem> {
+pub fn setup_two_player_holdem() -> Result<PokerGame<HoldemVariant>> {
     let players_map = initial_two_players();
-    let mut state = Holdem {
+    let mut state = PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         sb: 10,
@@ -171,7 +173,7 @@ pub fn setup_two_player_holdem() -> Result<Holdem> {
 }
 
 // Set up a holdem scene similar to those in real world
-pub fn setup_real_holdem() -> Holdem {
+pub fn setup_real_holdem() -> PokerGame::<HoldemVariant> {
     let mut holdem = setup_holdem_state().unwrap();
     let player_map = gaming_players();
     let bet_map = make_even_betmap();
@@ -207,11 +209,11 @@ type Game = (
     InitAccount,
     GameAccount,
     GameContext,
-    TestHandler<Holdem>,
+    TestHandler<PokerGame::<HoldemVariant>>,
     TestClient,
 );
 
-pub fn setup_holdem_game(transactor: &mut TestClient) -> TestContext<Holdem> {
+pub fn setup_holdem_game(transactor: &mut TestClient) -> TestContext<PokerGame::<HoldemVariant>> {
     let holdem_account = HoldemAccount::default();
     let (test_context, _) = TestContextBuilder::default()
         .with_max_players(9)

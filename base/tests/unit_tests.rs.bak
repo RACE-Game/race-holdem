@@ -9,7 +9,7 @@ use helper::{
     initial_players, make_even_betmap, make_uneven_betmap, setup_context, setup_holdem_state,
 };
 use race_api::prelude::HandleError;
-use race_holdem_base::essential::{ActingPlayer, Display};
+use race_poker_base::essential::{ActingPlayer, Display};
 use std::collections::BTreeMap;
 
 const ALICE: u64 = 0;

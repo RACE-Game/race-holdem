@@ -11,7 +11,7 @@ use race_test::prelude::*;
 use std::collections::HashMap;
 
 use helper::{create_sync_event, setup_holdem_game};
-use race_holdem_base::essential::*;
+use race_poker_base::essential::*;
 
 #[test]
 fn test_players_order() -> Result<()> {

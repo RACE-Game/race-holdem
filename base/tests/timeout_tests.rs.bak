@@ -2,7 +2,7 @@ mod helper;
 
 use helper::{create_sync_event, setup_holdem_game};
 use race_api::{error::HandleResult, event::Event};
-use race_holdem_base::essential::*;
+use race_poker_base::essential::*;
 use race_test::prelude::*;
 
 // Test one player reaches the maximum number of timeouts in heads up

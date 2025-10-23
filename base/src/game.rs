@@ -701,7 +701,7 @@ impl<V: GameVariant> PokerGame<V> {
 
     /// Reveal community cards according to current street
     pub fn update_board(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        let players_cnt = self.count_ingame_players() * 2;
+        let players_cnt = self.count_ingame_players() * self.variant.hole_card_count();
         match self.street {
             Street::Flop => {
                 effect.reveal(
@@ -1081,7 +1081,7 @@ impl<V: GameVariant> PokerGame<V> {
                 }
             }
 
-            let board_start = self.hand_index_map.len() * 2;
+            let board_start = self.count_ingame_players() * self.variant.hole_card_count();
             effect.reveal(
                 self.deck_random_id,
                 (board_start..(board_start + 5)).collect(),
@@ -1212,10 +1212,12 @@ impl<V: GameVariant> PokerGame<V> {
                     return Err(errors::player_cant_bet());
                 }
 
-                // When bet amount is less than 1BB, only allin is allowed.
-                if self.bb > amount && player.chips != amount {
-                    return Err(errors::bet_amonut_is_too_small());
-                }
+                self.variant.validate_bet_amount(
+                    amount,
+                    self.bb,
+                    player.chips,
+                    &self.pots,
+                )?;
 
                 let (allin, real_bet_amount) = self.take_bet(sender.clone(), amount)?;
                 self.set_player_acted(sender, allin)?;
@@ -1284,12 +1286,18 @@ impl<V: GameVariant> PokerGame<V> {
 
                 let betted = self.get_player_bet(sender);
 
+                let bet_sum_of_all_players = self.bet_map.values().sum::<u64>();
+
+                effect.info(format!("player.chips = {}, betted = {}, amount = {}, self.street_bet = {}, self.min_raise = {}, bet_sum_of_all_players = {}, pots = {}",
+                    player.chips, betted, amount, self.street_bet, self.min_raise, bet_sum_of_all_players, self.pots.iter().map(|p| p.amount).sum::<u64>()));
+
                 self.variant.validate_raise_amount(
+                    amount,
                     player.chips,
                     betted,
-                    amount,
                     self.street_bet,
                     self.min_raise,
+                    bet_sum_of_all_players,
                     &self.pots,
                 )?;
 
@@ -1767,9 +1775,16 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
             }
 
             Event::RandomnessReady { .. } => {
+                let hole_card_count = self.variant.hole_card_count();
+
                 for (idx, id) in self.player_order.iter().enumerate() {
-                    effect.assign(self.deck_random_id, *id, vec![idx * 2, idx * 2 + 1])?;
-                    self.hand_index_map.insert(*id, vec![idx * 2, idx * 2 + 1]);
+                    let mut indices: Vec<usize> = Vec::with_capacity(hole_card_count);
+                    for i in 0..hole_card_count {
+                        indices.push(idx * hole_card_count + i);
+                    }
+
+                    effect.assign(self.deck_random_id, *id, indices.clone())?;
+                    self.hand_index_map.insert(*id, indices);
                 }
 
                 Ok(())
@@ -1777,7 +1792,7 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
 
             Event::SecretsReady { .. } => match self.stage {
                 HoldemStage::ShareKey => {
-                    let players_cnt = self.count_ingame_players() * 2;
+                    let players_cnt = self.count_ingame_players() * self.variant.hole_card_count();
                     let board_prev_cnt = self.board.len();
                     self.stage = HoldemStage::Play;
 

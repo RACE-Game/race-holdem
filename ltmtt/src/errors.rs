@@ -1,4 +1,4 @@
-use race_holdem_base::custom_err;
+use race_poker_base::custom_err;
 
 custom_err!(error_player_not_found);
 custom_err!(error_table_not_found);

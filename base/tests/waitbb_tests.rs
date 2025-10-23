@@ -3,11 +3,12 @@
 
 mod helper;
 use helper::setup_holdem_game;
-use race_holdem_base::game::Holdem;
+use race_poker_base::holdem::HoldemVariant;
+use race_poker_base::game::PokerGame;
 use race_api::prelude::*;
-use race_holdem_base::essential::*;
+use race_poker_base::essential::*;
 use race_test::prelude::*;
-use race_holdem_base::hand_history::HandHistory;
+use race_poker_base::hand_history::HandHistory;
 use std::collections::BTreeMap;
 
 // All players join the game sequentially and no one leaves or gets kicked out.
@@ -108,7 +109,7 @@ fn test_waitbb_inbetween() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game = PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -138,6 +139,7 @@ fn test_waitbb_inbetween() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -171,7 +173,7 @@ fn test_waitbb_after_sb() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -201,6 +203,7 @@ fn test_waitbb_after_sb() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -234,7 +237,7 @@ fn test_waitbb_before_bb() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -264,6 +267,7 @@ fn test_waitbb_before_bb() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -295,7 +299,7 @@ fn test_wait_waitbb_headsup() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -325,6 +329,7 @@ fn test_wait_waitbb_headsup() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -366,7 +371,7 @@ fn test_one_wait_multi_waitbbs() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -396,6 +401,7 @@ fn test_one_wait_multi_waitbbs() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -433,7 +439,7 @@ fn test_no_waits_multi_waitbbs() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -463,6 +469,7 @@ fn test_no_waits_multi_waitbbs() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -498,7 +505,7 @@ fn test_multi_waits_no_waitbbs() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -528,6 +535,7 @@ fn test_multi_waits_no_waitbbs() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -562,7 +570,7 @@ fn test_first_waitbb_between_btn_and_sb() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -592,6 +600,7 @@ fn test_first_waitbb_between_btn_and_sb() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -634,7 +643,7 @@ fn test_multi_waitbbs_play_order1() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -664,6 +673,7 @@ fn test_multi_waitbbs_play_order1() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -704,7 +714,7 @@ fn test_multi_waitbbs_play_order2() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -734,6 +744,7 @@ fn test_multi_waitbbs_play_order2() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {
@@ -777,7 +788,7 @@ fn test_multi_waitbbs_play_order3() -> HandleResult<()> {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game =  PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -807,6 +818,7 @@ fn test_multi_waitbbs_play_order3() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
     {

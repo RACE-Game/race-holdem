@@ -21,14 +21,24 @@ pub trait GameVariant: Default + BorshDeserialize + BorshSerialize {
         revealed_cards: &HashMap<usize, String>,
     ) -> HandleResult<EvaluateHandsOutput>;
 
+    /// Validates a bet amount
+    fn validate_bet_amount(
+        &self,
+        bet_amount: u64,
+        bb: u64,
+        player_chips: u64,
+        pots: &[Pot],
+    ) -> HandleResult<()>;
+
     /// Validates a raise amount (to handle No-Limit vs. Pot-Limit)
     fn validate_raise_amount(
         &self,
+        raise_amount: u64,
         player_chips: u64,
         betted: u64,
-        raise_amount: u64,
         street_bet: u64,
         min_raise: u64,
+        bet_sum_of_all_players: u64,
         pots: &[Pot],
     ) -> HandleResult<()>;
 }

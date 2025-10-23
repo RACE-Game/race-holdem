@@ -6,6 +6,7 @@ members = [
   "mtt-table",
   "mtt-base",
   "cash",
+  "omaha-cash",
   "ltmtt",
 ]
 

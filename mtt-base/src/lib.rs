@@ -270,8 +270,8 @@ mod tests {
         ];
 
         let btn = 4;
-        assert_eq!(0, get_relative_position(4, btn, &player_results));
-        assert_eq!(3, get_relative_position(1, btn, &player_results));
-        assert_eq!(1, get_relative_position(5, btn, &player_results));
+        assert_eq!(Some(0), get_relative_position(4, btn, &player_results));
+        assert_eq!(Some(3), get_relative_position(1, btn, &player_results));
+        assert_eq!(Some(1), get_relative_position(5, btn, &player_results));
     }
 }

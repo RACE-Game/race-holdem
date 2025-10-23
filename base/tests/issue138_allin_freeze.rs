@@ -3,9 +3,10 @@
 
 use race_api::prelude::*;
 use std::collections::BTreeMap;
-use race_holdem_base::essential::*;
-use race_holdem_base::game::Holdem;
-use race_holdem_base::hand_history::HandHistory;
+use race_poker_base::essential::*;
+use race_poker_base::game::PokerGame;
+use race_poker_base::holdem::HoldemVariant;
+use race_poker_base::hand_history::HandHistory;
 
 #[test]
 fn allin_smaller_than_blinds() {
@@ -47,7 +48,7 @@ fn allin_smaller_than_blinds() {
     ]);
 
     // snapshot of game state
-    let mut game =  Holdem {
+    let mut game = PokerGame::<HoldemVariant> {
         hand_id: 1,
         deck_random_id: 1,
         max_deposit: 2000,
@@ -77,6 +78,7 @@ fn allin_smaller_than_blinds() {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        variant: HoldemVariant {},
     };
 
 

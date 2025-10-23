@@ -5,9 +5,12 @@
 //!
 
 pub mod holdem_evaluator;
+pub mod omaha_evaluator;
 pub mod account;
 pub mod essential;
 pub mod variant;
 pub mod game;
 pub mod hand_history;
 pub mod errors;
+pub mod holdem;
+pub mod omaha;

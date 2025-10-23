@@ -712,23 +712,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "race-holdem-base"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "borsh",
- "race-api",
- "race-proc-macro",
- "race-test",
-]
-
-[[package]]
 name = "race-holdem-cash"
 version = "0.1.0"
 dependencies = [
  "borsh",
  "race-api",
- "race-holdem-base",
+ "race-poker-base",
  "race-proc-macro",
  "race-test",
 ]
@@ -740,8 +729,8 @@ dependencies = [
  "anyhow",
  "borsh",
  "race-api",
- "race-holdem-base",
  "race-holdem-mtt-base",
+ "race-poker-base",
  "race-proc-macro",
  "race-test",
 ]
@@ -776,8 +765,30 @@ dependencies = [
  "anyhow",
  "borsh",
  "race-api",
- "race-holdem-base",
  "race-holdem-mtt-base",
+ "race-poker-base",
+ "race-proc-macro",
+ "race-test",
+]
+
+[[package]]
+name = "race-omaha-cash"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "race-api",
+ "race-poker-base",
+ "race-proc-macro",
+ "race-test",
+]
+
+[[package]]
+name = "race-poker-base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "race-api",
  "race-proc-macro",
  "race-test",
 ]

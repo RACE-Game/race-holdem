@@ -135,9 +135,9 @@ pub enum Category {
 }
 
 #[derive(Debug)]
-pub struct PlayerHand<'a> {
+pub struct PlayerHand {
     pub category: Category,  // rankings
-    pub picks: Vec<&'a str>, // Best 5 out of 7
+    pub picks: Vec<String>,  // Best 5 out of 7
     pub value: Vec<u8>,      // [value, category_order ...]
 }
 
@@ -343,7 +343,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&rflush, 9);
         PlayerHand {
             category: Category::RoyalFlush,
-            picks: rflush,
+            picks: rflush.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -353,7 +353,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 8);
         PlayerHand {
             category: Category::StraightFlush,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -363,7 +363,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 7);
         PlayerHand {
             category: Category::FourOfAKind,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -373,7 +373,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 6);
         PlayerHand {
             category: Category::FullHouse,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -383,7 +383,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 5);
         PlayerHand {
             category: Category::Flush,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -393,7 +393,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 4);
         PlayerHand {
             category: Category::Straight,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -403,7 +403,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 3);
         PlayerHand {
             category: Category::ThreeOfAKind,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -416,7 +416,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 2);
         PlayerHand {
             category: Category::TwoPairs,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -426,7 +426,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 1);
         PlayerHand {
             category: Category::Pair,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
@@ -436,7 +436,7 @@ pub fn evaluate_cards(cards: Vec<&str>) -> PlayerHand {
         let value = tag_value(&picks, 0);
         PlayerHand {
             category: Category::HighCard,
-            picks,
+            picks: picks.iter().map(|s| s.to_string()).collect(),
             value,
         }
     }
