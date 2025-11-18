@@ -46,6 +46,7 @@ pub struct PokerGame<V: GameVariant> {
     pub hand_history: HandHistory,
     pub next_game_start: u64,
     pub rake_collected: u64,
+    pub max_afk_hands: u8,
     pub variant: V,
 }
 
@@ -1522,6 +1523,34 @@ impl<V: GameVariant> PokerGame<V> {
         return None;
     }
 
+    /// Return if this position is between current BTN and BB.
+    pub fn is_position_between_btn_and_bb(&self, position: u8) -> bool {
+        let mut p = self.btn;
+        let mut count_non_waitbb = 0;
+        loop {
+            if let Some(player) = self.player_map.values().find(|player| player.position == p) {
+                if player.status != PlayerStatus::Waitbb {
+                    count_non_waitbb += 1;
+                }
+            }
+            if p == position {
+                return true;
+            }
+            if p == self.table_size - 1 {
+                p = 0;
+            } else {
+                p += 1;
+            }
+            if p == self.btn {
+                break;
+            }
+            if count_non_waitbb == 2 {
+                break;
+            }
+        }
+        return false;
+    }
+
     pub fn position_occupied(&self, position: u8) -> bool {
         self.player_map
             .iter()
@@ -1605,6 +1634,7 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
 
         let btn = 0;
         let next_game_start = 0;
+        let max_afk_hands = 0;
 
         Ok(Self {
             deck_random_id: 0,
@@ -1622,6 +1652,7 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
             next_game_start,
             mode: GameMode::Cash,
             table_size: init_account.max_players as _,
+            max_afk_hands,
             ..Default::default()
         })
     }
@@ -1657,7 +1688,13 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
 
                 let street = self.street;
 
-                if player.timeout >= MAX_ACTION_TIMEOUT_COUNT {
+                // Increase the timeout counter.
+                // The maximum value is 100.
+                if player.timeout < 100 {
+                    player.timeout += 1;
+                }
+
+                if player.timeout > MAX_ACTION_TIMEOUT_COUNT {
                     // In Cash game, mark those who've reached T/O for
                     // MAX_ACTION_TIMEOUT_COUNT times with `Leave` status
                     if self.mode == GameMode::Cash {
@@ -1666,14 +1703,18 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
                             .add_action(street, PlayerAction::new_fold(player_id))?;
                         return self.next_state(effect);
                     } else {
-                        player.is_afk = true;
+                        if self.max_afk_hands > 0 && player.timeout > self.max_afk_hands {
+                            self.set_player_status(player_id, PlayerStatus::Leave)?;
+                            self.hand_history
+                                .add_action(street, PlayerAction::new_fold(player_id))?;
+                            return self.next_state(effect);
+                        } else {
+                            player.is_afk = true;
+                        }
                     }
-                } else {
-                    player.timeout += 1;
                 }
 
                 // Make this player check or fold.
-
                 let street_bet = self.street_bet;
                 let bet = if let Some(player_bet) = self.bet_map.get(&player_id) {
                     *player_bet
@@ -1697,12 +1738,18 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
             }
 
             Event::WaitingTimeout => {
-                self.settle(effect)?;
-                if self.player_map.len() >= 2
-                    && effect.count_nodes() >= 1
-                    && self.mode != GameMode::Mtt
-                {
-                    effect.start_game();
+                if self.stage == HoldemStage::Init {
+                    if self.player_map.len() >= 2 {
+                        effect.start_game();
+                    }
+                } else {
+                    self.settle(effect)?;
+                    if self.player_map.len() >= 2
+                        && effect.count_nodes() >= 1
+                        && self.mode != GameMode::Mtt
+                    {
+                        effect.start_game();
+                    }
                 }
                 Ok(())
             }

@@ -30,16 +30,18 @@ impl GameHandler for MttTable {
 
     fn init_state(_effect: &mut Effect, init_account: InitAccount) -> HandleResult<Self> {
         let MttTableInit {
-            table_id, sb, bb, ante, players,
+            table_id, sb, bb, ante, players, max_afk_hands,
         } = init_account.data()?;
 
         let player_map = players
             .into_iter()
             .enumerate()
             .map(|(idx, p)| {
+                let mut player = Player::new_with_timeout(p.id, p.chips, idx as u8, 0);
+                player.is_afk = true;
                 (
                     p.id,
-                    Player::new_with_timeout(p.id, p.chips, idx as u8, 0),
+                    player,
                 )
             })
             .collect();
@@ -52,6 +54,7 @@ impl GameHandler for MttTable {
             table_size: init_account.max_players as _,
             mode: GameMode::Mtt,
             player_map,
+            max_afk_hands,
             ..Default::default()
         };
 
@@ -93,7 +96,7 @@ impl GameHandler for MttTable {
                             }
                             None => None,
                         };
-                        player_results.push(PlayerResult::new(p.id, p.chips, chips_change, p.position, status));
+                        player_results.push(PlayerResult::new(p.id, p.chips, chips_change, p.position, status, p.timeout));
                     }
 
                     self.holdem.kick_players(effect);
@@ -148,6 +151,7 @@ impl MttTable {
                 bb,
                 ante,
                 sitout_players,
+                start_time,
             } => {
                 self.holdem.sb = sb;
                 self.holdem.bb = bb;
@@ -161,7 +165,11 @@ impl MttTable {
                     }
                 }
                 if self.holdem.player_map.len() > 1 {
-                    effect.start_game();
+                    if let Some(start_time) = start_time {
+                        effect.wait_timeout(start_time - effect.timestamp());
+                    } else {
+                        effect.start_game();
+                    }
                 }
             }
             // Add players from other tables
@@ -178,6 +186,10 @@ impl MttTable {
                     } = sitin;
 
                     if let Some(position) = self.holdem.find_position() {
+
+                        // The player's init status depends on where the player is seated
+                        // If the player sits between BTN/SB and SB/BB, the status is default to WAITBB
+                        // Otherwise, it is INIT.
                         let status;
                         if first_time_sit {
                             status = PlayerStatus::Waitbb;
@@ -222,15 +234,6 @@ impl MttTable {
             HoldemBridgeEvent::CloseTable => {
                 self.holdem.player_map.clear();
                 effect.checkpoint();
-                // effect.bridge_event(
-                //     0,
-                //     HoldemBridgeEvent::GameResult {
-                //         hand_id: self.holdem.hand_id,
-                //         table_id: self.table_id,
-                //         player_results: vec![],
-                //         table: self.make_mtt_table_state(),
-                //     },
-                // )?;
                 effect.stop_game();
             }
             _ => return Err(errors::internal_invalid_bridge_event()),

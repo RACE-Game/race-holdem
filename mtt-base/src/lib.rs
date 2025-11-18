@@ -77,6 +77,7 @@ pub struct MttTableInit {
     pub bb: u64,
     pub ante: u64,
     pub players: Vec<MttTablePlayerInit>,
+    pub max_afk_hands: u8,
 }
 
 impl MttTableInit {
@@ -86,6 +87,7 @@ impl MttTableInit {
         bb: u64,
         ante: u64,
         players: Vec<MttTablePlayerInit>,
+        max_afk_hands: u8,
     ) -> Self {
         Self {
             table_id,
@@ -93,6 +95,7 @@ impl MttTableInit {
             bb,
             ante,
             players,
+            max_afk_hands,
         }
     }
 }
@@ -184,6 +187,7 @@ pub struct PlayerResult {
     pub chips_change: Option<ChipsChange>,
     pub position: u8, // The player's position in this hand
     pub status: PlayerResultStatus,
+    pub timeout: u8,  // How many consecutive hands has this player missed
 }
 
 impl PlayerResult {
@@ -193,6 +197,7 @@ impl PlayerResult {
         chips_change: Option<ChipsChange>,
         position: u8,
         status: PlayerResultStatus,
+        timeout: u8,
     ) -> Self {
         Self {
             player_id,
@@ -200,6 +205,7 @@ impl PlayerResult {
             chips_change,
             position,
             status,
+            timeout,
         }
     }
 }
@@ -216,6 +222,7 @@ pub enum HoldemBridgeEvent {
         bb: u64,
         ante: u64,
         sitout_players: Vec<u64>,
+        start_time: Option<u64>,
     },
     /// This event is sent by master game.
     /// Add players to current game.

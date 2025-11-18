@@ -208,6 +208,8 @@ pub struct MttAccountData {
     bounty: u16,           // an integer representing the bounty (per thousand)
     theme: Option<String>, // optional NFT theme
     subgame_bundle: String,
+    check_in_duration: u64,   // A pre-match pause time in millisecond
+    max_afk_hands: u8,        // How many consecutive hands a player can miss before getting kicked
 }
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, Default)]
@@ -265,6 +267,8 @@ pub struct Mtt {
     min_players: u16,
     rake: u16,
     bounty: u16,
+    check_in_duration: u64,   // A pre-match pause time in millisecond
+    max_afk_hands: u8,        // How many consecutive hands a player can miss before getting kicked
 }
 
 impl GameHandler for Mtt {
@@ -290,6 +294,8 @@ impl GameHandler for Mtt {
             bounty,
             theme,
             subgame_bundle,
+            check_in_duration,
+            max_afk_hands,
         } = init_account.data()?;
 
         if start_time > effect.timestamp() {
@@ -335,6 +341,8 @@ impl GameHandler for Mtt {
             bounty,
             theme,
             subgame_bundle,
+            check_in_duration,
+            max_afk_hands,
             ..Default::default()
         };
 
@@ -344,9 +352,14 @@ impl GameHandler for Mtt {
     fn handle_event(&mut self, effect: &mut Effect, event: Event) -> Result<(), HandleError> {
         // Update time elapsed for blinds calculation.
         if self.stage == MttStage::Playing {
-            self.time_elapsed =
+            if effect.timestamp() < self.start_time + self.check_in_duration {
+                self.time_elapsed = 0;
+                self.timestamp = effect.timestamp();
+            } else {
+                self.time_elapsed =
                 (self.time_elapsed + effect.timestamp()).saturating_sub(self.timestamp);
-            self.timestamp = effect.timestamp();
+                self.timestamp = effect.timestamp();
+            }
         }
 
         match event {
@@ -502,11 +515,11 @@ impl GameHandler for Mtt {
                     self.refund_tickets(effect)?;
                 } else {
                     // Start game normally
+                    // Set current stage to check-in.
                     effect.info(format!("Start game with {} players", self.ranks.len()));
                     self.stage = MttStage::Playing;
                     self.create_tables(effect)?;
                     self.update_alives();
-                    self.maybe_set_in_the_money();
                 }
                 effect.checkpoint();
             }
@@ -545,6 +558,7 @@ impl GameHandler for Mtt {
                 game_id, init_data, ..
             } => {
                 let table_init = MttTableInit::try_from_slice(&init_data)?;
+
                 effect.bridge_event(
                     table_init.table_id,
                     HoldemBridgeEvent::StartGame {
@@ -552,6 +566,7 @@ impl GameHandler for Mtt {
                         bb: table_init.bb,
                         ante: table_init.ante,
                         sitout_players: vec![],
+                        start_time: self.start_time_for_start_game(effect),
                     },
                 )?;
 
@@ -647,13 +662,7 @@ impl Mtt {
             let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
             let table_id = effect.next_sub_game_id();
 
-            let table = MttTableInit {
-                table_id,
-                sb,
-                bb,
-                ante,
-                players,
-            };
+            let table = MttTableInit::new(table_id, sb, bb, ante, players, self.max_afk_hands);
 
             self.launch_table(effect, table)?;
         }
@@ -744,19 +753,28 @@ impl Mtt {
                 .iter_mut()
                 .find(|r| r.id.eq(&rst.player_id))
                 .ok_or(errors::error_player_not_found())?;
-            match rst.chips_change {
-                Some(ChipsChange::Add(amount)) => {
-                    rank.chips += amount;
-                }
-                Some(ChipsChange::Sub(amount)) => {
-                    rank.chips -= amount;
-                    if rank.chips == 0 {
-                        rank.status = PlayerRankStatus::Out;
-                        // In such case, we want to unset player's assignment to table
-                        self.table_assigns.remove(&rank.id);
+
+            // If this player is considered as kicked
+            // Its chips should be zeroized.
+            if self.max_afk_hands > 0 && rst.timeout > self.max_afk_hands {
+                rank.chips = 0;
+                rank.status = PlayerRankStatus::Out;
+                self.table_assigns.remove(&rank.id);
+            } else {
+                match rst.chips_change {
+                    Some(ChipsChange::Add(amount)) => {
+                        rank.chips += amount;
                     }
+                    Some(ChipsChange::Sub(amount)) => {
+                        rank.chips -= amount;
+                        if rank.chips == 0 {
+                            rank.status = PlayerRankStatus::Out;
+                            // In such case, we want to unset player's assignment to table
+                            self.table_assigns.remove(&rank.id);
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
         self.sort_ranks();
@@ -856,6 +874,14 @@ impl Mtt {
         Ok(available_seats)
     }
 
+    fn start_time_for_start_game(&self, effect: &Effect) -> Option<u64> {
+        if self.start_time + self.check_in_duration > effect.timestamp() {
+            Some(self.start_time + self.check_in_duration)
+        } else {
+            None
+        }
+    }
+
     fn balance_players_between_tables(
         &mut self,
         effect: &mut Effect,
@@ -903,6 +929,7 @@ impl Mtt {
                 bb,
                 ante,
                 sitout_players,
+                start_time: self.start_time_for_start_game(effect),
             },
         )?;
 
@@ -948,6 +975,7 @@ impl Mtt {
         if self.tables.len() == 1 {
             if current_table.players.len() > 1 {
                 effect.info(format!("Send start game to table {}", table_id));
+
                 effect.bridge_event(
                     table_id as _,
                     HoldemBridgeEvent::StartGame {
@@ -955,6 +983,7 @@ impl Mtt {
                         bb,
                         ante,
                         sitout_players: vec![],
+                        start_time: self.start_time_for_start_game(effect),
                     },
                 )?;
             }
@@ -1020,6 +1049,7 @@ impl Mtt {
                         bb,
                         ante,
                         sitout_players: Vec::with_capacity(0),
+                        start_time: self.start_time_for_start_game(effect),
                     },
                 )?;
             }
@@ -1158,7 +1188,7 @@ impl Mtt {
                 effect.info(format!("Create {} table for player {}", table_id, rank.id));
                 let player = MttTablePlayerInit::new(rank.id, rank.chips);
                 let players = vec![player];
-                let table = MttTableInit::new(table_id, sb, bb, ante, players);
+                let table = MttTableInit::new(table_id, sb, bb, ante, players, self.max_afk_hands);
                 tables_to_launch.push(table);
             }
         }
@@ -1257,6 +1287,18 @@ impl Mtt {
     pub fn update_player_balances(&mut self) {
         let amount = self.total_prize + self.total_rake + self.total_bounty;
         self.player_balances.insert(0, amount);
+    }
+
+    /// Eliminate an AFK player.
+    /// Set its status to Out, and chips to zero.
+    pub fn eliminate_afk(&mut self, player_id: u64) -> HandleResult<()> {
+        if let Some(rank) = self.get_rank_mut(player_id) {
+            rank.chips = 0;
+            rank.status = PlayerRankStatus::Out;
+            Ok(())
+        } else {
+            Err(errors::error_player_id_not_found())
+        }
     }
 }
 
