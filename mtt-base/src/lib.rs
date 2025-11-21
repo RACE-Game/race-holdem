@@ -268,17 +268,30 @@ mod tests {
     #[test]
     fn test_get_relative_position() {
         let player_results = vec![
-            PlayerResult::new(1, 1000, None, 1, PlayerResultStatus::Normal),
-            PlayerResult::new(2, 1000, None, 2, PlayerResultStatus::Normal),
-            PlayerResult::new(3, 1000, None, 3, PlayerResultStatus::Normal),
-            PlayerResult::new(4, 1000, None, 4, PlayerResultStatus::Normal),
-            PlayerResult::new(5, 1000, None, 5, PlayerResultStatus::Normal),
-            PlayerResult::new(6, 1000, None, 6, PlayerResultStatus::Normal),
+            PlayerResult::new(1, 1000, None, 1, PlayerResultStatus::Normal, 0),
+            PlayerResult::new(2, 1000, None, 2, PlayerResultStatus::Normal, 0),
+            PlayerResult::new(3, 1000, None, 3, PlayerResultStatus::Normal, 0),
+            PlayerResult::new(4, 1000, None, 4, PlayerResultStatus::Normal, 0),
+            PlayerResult::new(5, 1000, None, 5, PlayerResultStatus::Normal, 0),
+            PlayerResult::new(6, 1000, None, 6, PlayerResultStatus::Normal, 0),
         ];
 
         let btn = 4;
         assert_eq!(Some(0), get_relative_position(4, btn, &player_results));
         assert_eq!(Some(3), get_relative_position(1, btn, &player_results));
         assert_eq!(Some(1), get_relative_position(5, btn, &player_results));
+
+        let player_results = vec![
+            PlayerResult::new(1, 1000, None, 0, PlayerResultStatus::Normal, 0),
+            PlayerResult::new(2, 1000, None, 1, PlayerResultStatus::Normal, 0),
+        ];
+
+        let btn = 0;
+        assert_eq!(Some(0), get_relative_position(1, btn, &player_results));
+        assert_eq!(Some(1), get_relative_position(2, btn, &player_results));
+
+        let btn = 1;
+        assert_eq!(Some(1), get_relative_position(1, btn, &player_results));
+        assert_eq!(Some(0), get_relative_position(2, btn, &player_results));
     }
 }

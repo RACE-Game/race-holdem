@@ -36,22 +36,25 @@ impl GameVariant for HoldemVariant {
 
         // Step 1: Evaluate each player's hand and build the Showdown struct.
         for (&player_id, indices) in hand_index_map.iter() {
-            let card1 = revealed_cards.get(&indices[0]).ok_or_else(errors::first_hole_card_error)?;
-            let card2 = revealed_cards.get(&indices[1]).ok_or_else(errors::second_hole_card_error)?;
-            let hole_cards = vec![card1.clone(), card2.clone()];
+            let c1 = revealed_cards.get(&indices[0]);
+            let c2 = revealed_cards.get(&indices[1]);
 
-            let board_cards: Vec<&str> = board.into_iter().map(|x| x.as_ref()).collect();
-            let all_cards = create_cards(&board_cards, &[card1.as_str(), card2.as_str()]);
+            if let (Some(card1), Some(card2)) = (c1, c2) {
+                let hole_cards = vec![card1.clone(), card2.clone()];
 
-            // The evaluator now returns a richer PlayerHand struct
-            let hand = evaluate_cards(all_cards);
+                let board_cards: Vec<&str> = board.into_iter().map(|x| x.as_ref()).collect();
+                let all_cards = create_cards(&board_cards, &[card1.as_str(), card2.as_str()]);
 
-            let showdown = Showdown {
-                hole_cards,
-                category: hand.category.clone(),
-                picks: hand.picks.iter().map(|x| x.to_string()).collect(),
-            };
-            results.push(EvalResult { player_id, hand, showdown });
+                // The evaluator now returns a richer PlayerHand struct
+                let hand = evaluate_cards(all_cards);
+
+                let showdown = Showdown {
+                    hole_cards,
+                    category: hand.category.clone(),
+                    picks: hand.picks.iter().map(|x| x.to_string()).collect(),
+                };
+                results.push(EvalResult { player_id, hand, showdown });
+            }
         }
 
         // Step 2: Sort players from best hand to worst.

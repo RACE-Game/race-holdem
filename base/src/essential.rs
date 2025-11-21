@@ -42,7 +42,6 @@ pub enum PlayerStatus {
     Leave,      // the player just sent the Leave event
     Out,        // the player is sitted out
     Eliminated, // the player has zero chips
-    Afk,        // the player is away from keyboard
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq)]

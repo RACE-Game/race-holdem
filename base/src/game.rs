@@ -1427,11 +1427,14 @@ impl<V: GameVariant> PokerGame<V> {
         )
     }
 
-    pub fn reset_player_timeout(&mut self, player_id: u64) -> Result<(), HandleError> {
+    pub fn maybe_reset_player_timeout(&mut self, player_id: u64) -> Result<(), HandleError> {
         let Some(player) = self.player_map.get_mut(&player_id) else {
             return Err(HandleError::InvalidPlayer);
         };
-        player.timeout = 0;
+        // Don't reset the player's timeout if the player is already marked to be kicked
+        if !matches!(player.status, PlayerStatus::Out | PlayerStatus::Leave | PlayerStatus::Eliminated) {
+            player.timeout = 0;
+        }
         Ok(())
     }
 
@@ -1662,7 +1665,7 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
         match event {
             // Handle holdem specific (custom) events
             Event::Custom { sender, raw } => {
-                self.reset_player_timeout(sender)?;
+                self.maybe_reset_player_timeout(sender)?;
                 let event: GameEvent = GameEvent::try_parse(&raw)?;
 
                 effect.info(format!(

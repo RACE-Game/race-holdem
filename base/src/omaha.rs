@@ -33,26 +33,35 @@ impl GameVariant for OmahaVariant {
         let board_cards: Vec<&str> = board.iter().map(String::as_str).collect();
 
         for (&player_id, indices) in hand_index_map.iter() {
-            // Get the player's 4 hole cards.
-            let hole_cards_str: Vec<String> = indices
-                .iter()
-                .map(|i| revealed_cards.get(i).cloned().unwrap_or_default())
-                .collect();
-            let hole_cards: Vec<&str> = hole_cards_str.iter().map(String::as_str).collect();
 
-            if hole_cards.len() != 4 {
-                return Err(errors::invalid_hole_cards_number());
+            // Collect hole cards only if they exist in revealed_cards
+            let mut hole_cards_str = Vec::new();
+            let mut has_all_cards = true;
+
+            for i in indices {
+                if let Some(card) = revealed_cards.get(i) {
+                    hole_cards_str.push(card.clone());
+                } else {
+                    // If any card is missing (player folded/left), mark as invalid
+                    has_all_cards = false;
+                    break;
+                }
             }
 
-            // Use the new Omaha evaluator
-            let hand = omaha_evaluator::evaluate_omaha_hand(&hole_cards, &board_cards);
+            // Only proceed if we successfully retrieved exactly 4 cards
+            if has_all_cards && hole_cards_str.len() == 4 {
+                let hole_cards: Vec<&str> = hole_cards_str.iter().map(String::as_str).collect();
 
-            let showdown = Showdown {
-                 hole_cards: hole_cards_str.clone(),
-                 category: hand.category.clone(),
-                 picks: hand.picks.iter().map(|x| x.to_string()).collect(),
-            };
-            results.push(EvalResult { player_id, hand, showdown });
+                // Use the new Omaha evaluator
+                let hand = omaha_evaluator::evaluate_omaha_hand(&hole_cards, &board_cards);
+
+                let showdown = Showdown {
+                    hole_cards: hole_cards_str,
+                    category: hand.category.clone(),
+                    picks: hand.picks.iter().map(|x| x.to_string()).collect(),
+                };
+                results.push(EvalResult { player_id, hand, showdown });
+            }
         }
 
         // Sort players from best hand to worst.
@@ -80,7 +89,6 @@ impl GameVariant for OmahaVariant {
             winner_sets: ranked_winners,
             showdown_map,
         })
-
     }
 
     fn validate_bet_amount(

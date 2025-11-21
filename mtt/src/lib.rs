@@ -922,6 +922,9 @@ impl Mtt {
             });
         }
 
+        effect.info(format!("Move these players away from table {}: {}",
+            sitout_players.iter().map(|id| id.to_string()).collect::<Vec<String>>().join(","), from_table_id));
+
         effect.bridge_event(
             from_table_id as _,
             HoldemBridgeEvent::StartGame {
@@ -1244,6 +1247,7 @@ impl Mtt {
             return Ok(());
         }
 
+        let mut total_balance = self.player_balances.get(&0).cloned().unwrap_or(0);
         let prizes: Vec<u8> = self.get_prizes().into();
 
         let total_shares: u8 = prizes.iter().take(self.ranks.len()).sum();
@@ -1258,14 +1262,16 @@ impl Mtt {
                     player_id: id,
                     prize,
                 });
-                effect.withdraw(id, prize + rank.bounty_reward + rank.bounty_transfer);
+                let withdraw = prize + rank.bounty_reward + rank.bounty_transfer;
+                effect.withdraw(id, withdraw);
+                total_balance -= withdraw;
                 rank.bounty_reward = 0;
                 rank.bounty_transfer = 0;
             }
         }
 
         self.stage = MttStage::DistributingPrize;
-        self.player_balances.insert(0, 0);
+        self.player_balances.insert(0, total_balance);
 
         effect.info("Schedule bonus distribution");
         effect.wait_timeout(BONUS_DISTRIBUTION_DELAY);
