@@ -1271,13 +1271,15 @@ impl Mtt {
         }
 
         self.stage = MttStage::DistributingPrize;
-        self.player_balances.insert(0, total_balance);
 
         effect.info("Schedule bonus distribution");
         effect.wait_timeout(BONUS_DISTRIBUTION_DELAY);
 
         // We also collect the rake when distributing prizes
         effect.transfer(self.total_rake);
+
+        total_balance -= self.total_rake;
+        self.player_balances.insert(0, total_balance);
 
         Ok(())
     }
