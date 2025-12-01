@@ -581,6 +581,7 @@ impl LtMtt {
                         bb: origin_table.bb,
                         ante: origin_table.ante,
                         sitout_players: up_ids,
+                        start_time: None,
                     },
                 )?;
 
@@ -615,6 +616,7 @@ impl LtMtt {
                 bb: origin_table.bb,
                 ante: origin_table.ante,
                 sitout_players: vec![],
+                start_time: None,
             },
         )?;
 

@@ -79,6 +79,7 @@ fn allin_smaller_than_blinds() {
         next_game_start: 0,
         rake_collected: 0,
         variant: HoldemVariant {},
+        max_afk_hands: 100,
     };
 
 

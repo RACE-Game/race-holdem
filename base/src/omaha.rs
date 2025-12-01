@@ -124,6 +124,11 @@ impl GameVariant for OmahaVariant {
     ) -> HandleResult<()> {
         // Check 1: The raise must not exceed the pot limit. This is the primary rule.
         let pot_before_action: u64 = pots.iter().map(|p| p.amount).sum::<u64>() + bet_sum_of_all_players;
+
+        if betted > street_bet {
+            return Err(errors::player_cant_call());
+        }
+
         let call_amount = street_bet - betted;
         let max_raise = pot_before_action + call_amount;
 
@@ -151,9 +156,9 @@ mod tests {
 
         // bet 2, call 2 - bet 4, raise 10, raise ?
         let r = v.validate_raise_amount(
+            12,                 // raise_amount
             1000,               // player_chips
             4,                  // betted
-            12,                 // raise_amount
             10,                 // street_bet
             6,                  // min_raise
             14,                 // bet_sum_of_all_players
@@ -164,9 +169,9 @@ mod tests {
         // Pot limit-> 6(for call) + 18 (previous pot)
         // bet 2, call 2 - bet 4, raise 10, raise ?
         let r = v.validate_raise_amount(
+            24,                 // raise_amount
             1000,               // player_chips
             4,                  // betted
-            24,                 // raise_amount
             10,                 // street_bet
             6,                  // min_raise
             14,                 // bet_sum_of_all_players
@@ -178,9 +183,9 @@ mod tests {
         // Over pot limit
         // bet 2, call 2 - bet 4, raise 10, raise ?
         let r = v.validate_raise_amount(
+            25,                 // raise_amount
             1000,               // player_chips
             4,                  // betted
-            25,                 // raise_amount
             10,                 // street_bet
             6,                  // min_raise
             14,                 // bet_sum_of_all_players

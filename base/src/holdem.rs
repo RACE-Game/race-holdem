@@ -83,7 +83,6 @@ impl GameVariant for HoldemVariant {
         })
     }
 
-    /// Validates a bet amount
     fn validate_bet_amount(
         &self,
         bet_amount: u64,
@@ -101,9 +100,9 @@ impl GameVariant for HoldemVariant {
 
     fn validate_raise_amount(
         &self,
+        raise_amount: u64,
         player_chips: u64,
         betted: u64,
-        raise_amount: u64,
         street_bet: u64,
         min_raise: u64,
         _bet_sum_of_all_players: u64,

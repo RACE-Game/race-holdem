@@ -143,6 +143,7 @@ pub fn setup_holdem_state() -> Result<PokerGame<HoldemVariant>> {
         next_game_start: 0,
         rake_collected: 6000,
         variant: HoldemVariant {},
+        max_afk_hands: 100,
     };
     state.arrange_players(0)?;
     Ok(state)

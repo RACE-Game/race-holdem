@@ -140,6 +140,7 @@ fn test_waitbb_inbetween() -> HandleResult<()> {
         next_game_start: 0,
         rake_collected: 0,
         variant: HoldemVariant {},
+        max_afk_hands: 100,
     };
 
     {
@@ -204,6 +205,7 @@ fn test_waitbb_after_sb() -> HandleResult<()> {
         next_game_start: 0,
         rake_collected: 0,
         variant: HoldemVariant {},
+        max_afk_hands: 100,
     };
 
     {
@@ -267,6 +269,7 @@ fn test_waitbb_before_bb() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -329,6 +332,7 @@ fn test_wait_waitbb_headsup() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -401,6 +405,7 @@ fn test_one_wait_multi_waitbbs() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -469,6 +474,7 @@ fn test_no_waits_multi_waitbbs() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -535,6 +541,7 @@ fn test_multi_waits_no_waitbbs() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -600,6 +607,7 @@ fn test_first_waitbb_between_btn_and_sb() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -673,6 +681,7 @@ fn test_multi_waitbbs_play_order1() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -744,6 +753,7 @@ fn test_multi_waitbbs_play_order2() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 
@@ -818,6 +828,7 @@ fn test_multi_waitbbs_play_order3() -> HandleResult<()> {
         hand_history: HandHistory::default(),
         next_game_start: 0,
         rake_collected: 0,
+        max_afk_hands: 100,
         variant: HoldemVariant {},
     };
 

@@ -261,6 +261,7 @@ mod tests {
             ante: 0,
             players: default_players(num_of_players),
             table_id: 1,
+            max_afk_hands: 100,
         }
     }
 
@@ -314,6 +315,7 @@ mod tests {
             bb: 200,
             ante: 0,
             sitout_players: vec![999], // Invalid player ID
+            start_time: None,
         };
         let result = mtt_table.handle_bridge_event(&mut effect, invalid_player_id_event);
         assert!(result.is_err());
@@ -330,6 +332,7 @@ mod tests {
             bb: 200,
             ante: 0,
             sitout_players: vec![1, 2],
+            start_time: None,
         };
 
         mtt_table
