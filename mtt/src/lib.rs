@@ -495,6 +495,7 @@ impl GameHandler for Mtt {
                     self.sit_players(effect, pids_to_sit, true)?;
                     self.sort_ranks();
                     self.update_alives();
+                    effect.checkpoint();
                 }
             }
 
