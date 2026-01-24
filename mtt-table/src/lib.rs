@@ -166,7 +166,7 @@ impl MttTable {
                 }
                 if self.holdem.player_map.len() > 1 {
                     if let Some(start_time) = start_time {
-                        effect.wait_timeout(start_time - effect.timestamp());
+                        effect.wait_timeout(start_time.saturating_sub(effect.timestamp()));
                     } else {
                         effect.start_game();
                     }

@@ -560,6 +560,8 @@ impl GameHandler for Mtt {
             } => {
                 let table_init = MttTableInit::try_from_slice(&init_data)?;
 
+                effect.info(format!("Start table: {}", game_id));
+
                 effect.bridge_event(
                     table_init.table_id,
                     HoldemBridgeEvent::StartGame {
