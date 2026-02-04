@@ -220,7 +220,7 @@ pub fn setup_holdem_game(transactor: &mut TestClient) -> TestContext<PokerGame::
         .with_max_players(9)
         .set_transactor(transactor)
         .with_deposit_range(1, 1000000000)
-        .with_data(&holdem_account)
+        .with_init_data(holdem_account)
         .build_with_init_state().unwrap();
 
     test_context
