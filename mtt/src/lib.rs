@@ -401,14 +401,7 @@ impl GameHandler for Mtt {
             Event::Join { players } => match self.stage {
                 MttStage::Init => {
                     for p in players {
-                        self.ranks.push(PlayerRank::new(
-                            p.id(),
-                            0,
-                            PlayerRankStatus::Pending,
-                            p.position(),
-                            vec![],
-                            DEFAULT_TIME_CARDS,
-                        ));
+                        self.add_player_rank(p);
                     }
                 }
                 MttStage::Playing => {
@@ -624,11 +617,12 @@ impl Mtt {
     }
 
     fn add_player_rank(&mut self, p: GamePlayer) {
+        let pos = self.ranks.len() as u16;
         self.ranks.push(PlayerRank::new(
             p.id(),
             0,
             PlayerRankStatus::Pending,
-            p.position(),
+            pos,
             vec![],
             DEFAULT_TIME_CARDS,
         ));

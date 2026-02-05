@@ -427,9 +427,10 @@ impl LtMtt {
                     continue;
                 }
 
+                let position = self.rankings.len() as u16;
                 let ltmtt_player = LtMttPlayer {
                     player_id: player.id(),
-                    position: player.position(),
+                    position,
                     status: LtMttPlayerStatus::Out,
                     chips: 0,
                     deposit_history: vec![],

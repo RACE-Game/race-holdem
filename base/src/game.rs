@@ -1760,18 +1760,18 @@ impl<V: GameVariant> GameHandler for PokerGame<V> {
             Event::Join { players } => {
                 effect.info("A player joined!");
 
-                if self.player_map.len() <= 1 {
-                    for p in players.into_iter() {
-                        let player =
-                            Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Init);
-                        self.player_map.insert(player.id, player);
-                    }
+                let status = if self.player_map.len() <= 1 {
+                    PlayerStatus::Init
                 } else {
-                    for p in players.into_iter() {
-                        let player =
-                            Player::init(p.id(), 0, p.position() as u8, PlayerStatus::Waitbb);
-                        self.player_map.insert(player.id, player);
-                    }
+                    PlayerStatus::Waitbb
+                };
+
+                for p in players.into_iter() {
+                    let Some(pos) = self.find_position() else {
+                        return Err(errors::game_is_full());
+                    };
+                    let player = Player::init(p.id(), 0, pos, status);
+                    self.player_map.insert(player.id, player);
                 }
 
                 match self.stage {
