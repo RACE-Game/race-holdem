@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, HashMap};
 use crate::hand_history::Showdown;
 use crate::variant::{EvaluateHandsOutput, GameVariant};
 use crate::holdem_evaluator::{PlayerHand, evaluate_cards, create_cards, compare_hands};
-use crate::essential::Pot;
 use crate::errors;
 use race_api::prelude::*;
 
@@ -88,7 +87,7 @@ impl GameVariant for HoldemVariant {
         bet_amount: u64,
         bb: u64,
         player_chips: u64,
-        _pots: &[Pot],
+        _pot_sum: u64,
     ) -> HandleResult<()> {
         // The bet must meet the minimum bet requirement(1BB), unless it's an all-in.
         if bet_amount < bb && bet_amount != player_chips {
@@ -106,7 +105,7 @@ impl GameVariant for HoldemVariant {
         street_bet: u64,
         min_raise: u64,
         _bet_sum_of_all_players: u64,
-        _pots: &[Pot],
+        _pot_sum: u64,
     ) -> HandleResult<()> {
         let total_new_bet = betted + raise_amount;
 

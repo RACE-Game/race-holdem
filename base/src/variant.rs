@@ -1,6 +1,5 @@
 use race_api::prelude::*;
 use std::collections::{HashMap, BTreeMap};
-use crate::essential::Pot;
 use crate::hand_history::Showdown;
 
 pub struct EvaluateHandsOutput {
@@ -27,7 +26,7 @@ pub trait GameVariant: Default + BorshDeserialize + BorshSerialize {
         bet_amount: u64,
         bb: u64,
         player_chips: u64,
-        pots: &[Pot],
+        pot_sum: u64,
     ) -> HandleResult<()>;
 
     /// Validates a raise amount (to handle No-Limit vs. Pot-Limit)
@@ -39,6 +38,6 @@ pub trait GameVariant: Default + BorshDeserialize + BorshSerialize {
         street_bet: u64,
         min_raise: u64,
         bet_sum_of_all_players: u64,
-        pots: &[Pot],
+        pot_sum: u64,
     ) -> HandleResult<()>;
 }

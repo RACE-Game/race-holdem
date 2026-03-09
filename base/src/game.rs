@@ -1213,11 +1213,12 @@ impl<V: GameVariant> PokerGame<V> {
                     return Err(errors::player_cant_bet());
                 }
 
+                let pot_sum = self.pots.iter().map(|p| p.amount).sum();
                 self.variant.validate_bet_amount(
                     amount,
                     self.bb,
                     player.chips,
-                    &self.pots,
+                    pot_sum,
                 )?;
 
                 let (allin, real_bet_amount) = self.take_bet(sender.clone(), amount)?;
@@ -1288,9 +1289,7 @@ impl<V: GameVariant> PokerGame<V> {
                 let betted = self.get_player_bet(sender);
 
                 let bet_sum_of_all_players = self.bet_map.values().sum::<u64>();
-
-                effect.info(format!("player.chips = {}, betted = {}, amount = {}, self.street_bet = {}, self.min_raise = {}, bet_sum_of_all_players = {}, pots = {}",
-                    player.chips, betted, amount, self.street_bet, self.min_raise, bet_sum_of_all_players, self.pots.iter().map(|p| p.amount).sum::<u64>()));
+                let pot_sum = self.pots.iter().map(|p| p.amount).sum();
 
                 self.variant.validate_raise_amount(
                     amount,
@@ -1299,7 +1298,7 @@ impl<V: GameVariant> PokerGame<V> {
                     self.street_bet,
                     self.min_raise,
                     bet_sum_of_all_players,
-                    &self.pots,
+                    pot_sum,
                 )?;
 
                 let (allin, real_raise_amount) = self.take_bet(sender.clone(), amount)?;

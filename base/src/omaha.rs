@@ -7,7 +7,6 @@ use crate::variant::{EvaluateHandsOutput, GameVariant};
 use crate::holdem_evaluator::{PlayerHand, compare_hands};
 use crate::omaha_evaluator;
 use crate::errors;
-use crate::essential::Pot;
 
 #[derive(BorshSerialize, BorshDeserialize, Default, Debug, PartialEq, Clone)]
 pub struct OmahaVariant;
@@ -96,11 +95,10 @@ impl GameVariant for OmahaVariant {
         bet_amount: u64,
         bb: u64,
         player_chips: u64,
-        pots: &[Pot],
+        pot_sum: u64,
     ) -> HandleResult<()> {
         // Check 1: The bet must not exceed the pot limit.
-        let pot_before_action: u64 = pots.iter().map(|p| p.amount).sum::<u64>();
-        if bet_amount > pot_before_action {
+        if bet_amount > pot_sum {
             return Err(errors::bet_exceeds_pot_limit());
         }
 
@@ -120,17 +118,17 @@ impl GameVariant for OmahaVariant {
         street_bet: u64,
         min_raise: u64,
         bet_sum_of_all_players: u64,
-        pots: &[Pot],
+        pot_sum: u64,
     ) -> HandleResult<()> {
         // Check 1: The raise must not exceed the pot limit. This is the primary rule.
-        let pot_before_action: u64 = pots.iter().map(|p| p.amount).sum::<u64>() + bet_sum_of_all_players;
+        let pot_before_action: u64 = pot_sum + bet_sum_of_all_players;
 
         if betted > street_bet {
-            return Err(errors::player_cant_call());
+            return Err(errors::player_cant_raise());
         }
 
         let call_amount = street_bet - betted;
-        let max_raise = pot_before_action + call_amount;
+        let max_raise = pot_before_action + call_amount + call_amount;
 
         if raise_amount > max_raise {
             return Err(errors::raise_exceeds_pot_limit());
