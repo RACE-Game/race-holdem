@@ -1,8 +1,13 @@
-.PHONY: release-all build-race-omaha-cash
+.PHONY: release-all build-race-omaha-cash dist
 
 CRATES = race-omaha-cash race-holdem-cash race-holdem-mtt-table race-holdem-mtt
 
-all: $(CRATES)
+all: $(CRATES) dist
+
+dist:
+	mkdir -p dist
+	cp target/*.wasm dist/
+	cp cf_headers dist/_headers
 
 define BUILD_template
 .PHONY: $(1)
