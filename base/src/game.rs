@@ -988,6 +988,8 @@ impl<V: GameVariant> PokerGame<V> {
 
     // De facto entry point of Holdem
     pub fn next_state(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
+        effect.cancel_dispatch();
+
         let last_pos = self.get_ref_position();
         self.arrange_players(last_pos)?;
         // ingame_players exclude anyone with `Init` or `Waitbb` status
