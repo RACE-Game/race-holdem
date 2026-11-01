@@ -832,6 +832,19 @@ impl<V: GameVariant> PokerGame<V> {
         winner_sets: Vec<Vec<u64>>,
     ) -> Result<Vec<AwardPot>, HandleError> {
         for pot in self.pots.iter_mut() {
+            if pot.owners.is_empty() {
+                let Some(winners) = winner_sets.first() else {
+                    return Err(errors::pot_winner_missing());
+                };
+                if winners.is_empty() {
+                    return Err(errors::pot_winner_missing());
+                }
+
+                pot.owners = winners.clone();
+                pot.winners = winners.clone();
+                continue;
+            }
+
             for winner_set in winner_sets.iter() {
                 let real_winners: Vec<u64> = winner_set
                     .iter()
