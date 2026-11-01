@@ -45,6 +45,7 @@ use race_proc_macro::game_handler;
 use std::{collections::{btree_map::Entry, BTreeMap}, mem};
 
 const BONUS_DISTRIBUTION_DELAY: u64 = 120_000;
+const TABLE_READY_POLL_INTERVAL: u64 = 1_000;
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Eq, Default, Debug, Clone, Copy)]
 pub enum MttStage {
@@ -398,30 +399,43 @@ impl GameHandler for Mtt {
                 }
             }
 
-            Event::Join { players } => match self.stage {
-                MttStage::Init => {
-                    for p in players {
-                        self.add_player_rank(p);
-                    }
-                }
-                MttStage::Playing => {
-                    if !self.in_the_money && effect.timestamp() <= self.entry_close_time {
+            Event::Join { players } => {
+                let mut should_reconcile = false;
+
+                match self.stage {
+                    MttStage::Init => {
                         for p in players {
-                            self.add_player_rank(p);
+                            if self.add_player_rank_if_missing(p) {
+                                should_reconcile = false;
+                            }
                         }
-                    } else {
+                    }
+                    MttStage::Playing => {
+                        if !self.in_the_money && effect.timestamp() <= self.entry_close_time {
+                            for p in players {
+                                if self.add_player_rank_if_missing(p) {
+                                    should_reconcile = true;
+                                }
+                            }
+                        } else {
+                            for p in players {
+                                effect.warn(format!("Reject player join: {}", p.id()));
+                            }
+                        }
+                    }
+                    _ => {
+                        effect.warn("Join event at completed stage.");
                         for p in players {
                             effect.warn(format!("Reject player join: {}", p.id()));
                         }
                     }
                 }
-                _ => {
-                    effect.warn("Join event at completed stage.");
-                    for p in players {
-                        effect.warn(format!("Reject player join: {}", p.id()));
-                    }
+
+                if should_reconcile {
+                    effect.wait_timeout(TABLE_READY_POLL_INTERVAL);
+                    effect.checkpoint();
                 }
-            },
+            }
 
             Event::Deposit { deposits } => {
                 // If the player has never joined or registered for the game,
@@ -441,7 +455,7 @@ impl GameHandler for Mtt {
                         effect.reject_deposit(&d)?;
                     }
                 } else {
-                    let mut pids_to_sit = Vec::new();
+                    let mut should_reconcile = false;
                     for d in deposits {
                         let player_id = d.id();
                         if let Some(rank) = self.ranks.iter_mut().find(|r| r.id == player_id) {
@@ -467,7 +481,7 @@ impl GameHandler for Mtt {
                                 self.total_prize += amount_to_prize;
                                 self.total_rake += amount_to_rake;
                                 self.total_bounty += amount_to_bounty;
-                                pids_to_sit.push(player_id);
+                                should_reconcile = true;
 
                                 self.update_player_balances();
                             } else {
@@ -485,9 +499,11 @@ impl GameHandler for Mtt {
                             effect.reject_deposit(&d)?;
                         }
                     }
-                    self.sit_players(effect, pids_to_sit, true)?;
                     self.sort_ranks();
                     self.update_alives();
+                    if should_reconcile && self.stage == MttStage::Playing {
+                        effect.wait_timeout(TABLE_READY_POLL_INTERVAL);
+                    }
                     effect.checkpoint();
                 }
             }
@@ -512,8 +528,8 @@ impl GameHandler for Mtt {
                     // Set current stage to check-in.
                     effect.info(format!("Start game with {} players", self.ranks.len()));
                     self.stage = MttStage::Playing;
-                    self.create_tables(effect)?;
                     self.update_alives();
+                    effect.wait_timeout(0);
                 }
                 effect.checkpoint();
             }
@@ -552,26 +568,31 @@ impl GameHandler for Mtt {
                 game_id, init_data, ..
             } => {
                 let table_init = MttTableInit::try_from_slice(&init_data)?;
+                let table_id = table_init.table_id;
+                let sb = table_init.sb;
+                let bb = table_init.bb;
+                let ante = table_init.ante;
 
                 effect.info(format!("Start table: {}", game_id));
 
+                self.mark_table_ready(game_id, table_id);
+                for p in table_init.players.iter() {
+                    self.table_assigns.insert(p.id, table_id);
+                }
+                let table: MttTableState = table_init.into();
+                self.tables.insert(table.table_id, table);
+
                 effect.bridge_event(
-                    table_init.table_id,
+                    table_id,
                     HoldemBridgeEvent::StartGame {
-                        sb: table_init.sb,
-                        bb: table_init.bb,
-                        ante: table_init.ante,
+                        sb,
+                        bb,
+                        ante,
                         sitout_players: vec![],
                         start_time: self.start_time_for_start_game(effect),
                     },
                 )?;
 
-                self.launched_table_ids.push(game_id);
-                for p in table_init.players.iter() {
-                    self.table_assigns.insert(p.id, table_init.table_id);
-                }
-                let table: MttTableState = table_init.into();
-                self.tables.insert(table.table_id, table);
                 effect.checkpoint();
             }
 
@@ -581,7 +602,12 @@ impl GameHandler for Mtt {
                     effect.start_game();
                 }
 
-                MttStage::Playing => {}
+                MttStage::Playing => {
+                    if self.reconcile_tables(effect)? {
+                        effect.wait_timeout(TABLE_READY_POLL_INTERVAL);
+                    }
+                    effect.checkpoint();
+                }
 
                 MttStage::DistributingPrize => {
                     self.distribute_awards(effect);
@@ -616,7 +642,11 @@ impl Mtt {
             == 1
     }
 
-    fn add_player_rank(&mut self, p: GamePlayer) {
+    fn add_player_rank_if_missing(&mut self, p: GamePlayer) -> bool {
+        if self.ranks.iter().any(|rank| rank.id == p.id()) {
+            return false;
+        }
+
         let pos = self.ranks.len() as u16;
         self.ranks.push(PlayerRank::new(
             p.id(),
@@ -626,6 +656,7 @@ impl Mtt {
             vec![],
             DEFAULT_TIME_CARDS,
         ));
+        true
     }
 
     fn launch_table(
@@ -633,39 +664,142 @@ impl Mtt {
         effect: &mut Effect,
         table: MttTableInit,
     ) -> Result<(), HandleError> {
-        effect.launch_sub_game(self.subgame_bundle.clone(), self.table_size as _, &table)?;
+        let game_id = effect.launch_sub_game(
+            self.subgame_bundle.clone(),
+            self.table_size as _,
+            &table,
+        )?;
+        self.launched_table_ids.push(game_id);
         Ok(())
     }
 
-    fn create_tables(&mut self, effect: &mut Effect) -> Result<(), HandleError> {
-        let num_of_players = self.ranks.len();
-        let table_size_with_reserve = if self.table_size > 2 {
+    fn table_size_with_reserve(&self) -> usize {
+        if self.table_size > 2 {
             self.table_size as usize - 1
         } else {
             self.table_size as usize
-        };
-        let num_of_tables =
-            (table_size_with_reserve as usize + num_of_players - 1) / table_size_with_reserve;
+        }
+    }
 
-        for i in 0..num_of_tables {
-            let mut players = Vec::<MttTablePlayerInit>::new();
-            let mut j = i;
-            let table_id = i + 1;
-            while let Some(r) = self.ranks.get(j as usize) {
-                players.push(MttTablePlayerInit::new(r.id, r.chips));
-                self.table_assigns.insert(r.id, table_id as _);
-                j += num_of_tables;
-            }
-            let BlindRuleItem { sb, bb, ante } = self.calc_blinds()?;
+    fn initial_table_count(&self, eligible_players: usize) -> usize {
+        let reserve = self.table_size_with_reserve();
+        if reserve == 0 {
+            0
+        } else {
+            (eligible_players + reserve - 1) / reserve
+        }
+    }
+
+    fn rank_chips(&self, player_id: u64) -> Option<u64> {
+        self.ranks
+            .iter()
+            .find(|rank| rank.id == player_id)
+            .map(|rank| rank.chips)
+    }
+
+    fn eligible_player_ids(&self) -> Vec<u64> {
+        self.ranks
+            .iter()
+            .filter(|rank| {
+                rank.chips > 0
+                    && matches!(
+                        rank.status,
+                        PlayerRankStatus::Play | PlayerRankStatus::Pending
+                    )
+            })
+            .map(|rank| rank.id)
+            .collect()
+    }
+
+    fn is_table_known(&self, table_id: usize) -> bool {
+        self.tables.contains_key(&table_id) || self.launched_table_ids.contains(&table_id)
+    }
+
+    fn has_launched_table_not_ready(&self) -> bool {
+        self.launched_table_ids
+            .iter()
+            .any(|table_id| !self.tables.contains_key(table_id))
+    }
+
+    fn pending_player_ids(&self) -> Vec<u64> {
+        self.eligible_player_ids()
+            .into_iter()
+            .filter(|player_id| match self.table_assigns.get(&player_id) {
+                None => true,
+                Some(table_id) => !self.is_table_known(*table_id),
+            })
+            .collect()
+    }
+
+    fn mark_table_ready(&mut self, game_id: usize, table_id: usize) {
+        self.launched_table_ids
+            .retain(|id| *id != game_id && *id != table_id);
+    }
+
+    fn reconcile_tables(&mut self, effect: &mut Effect) -> Result<bool, HandleError> {
+        if self.stage != MttStage::Playing {
+            return Ok(false);
+        }
+
+        let eligible = self.eligible_player_ids();
+        if eligible.is_empty() {
+            return Ok(false);
+        }
+
+        if self.tables.is_empty() && self.launched_table_ids.is_empty() {
+            self.plan_initial_tables(effect, &eligible)?;
+            return Ok(self.has_launched_table_not_ready());
+        }
+
+        if self.has_launched_table_not_ready() {
+            return Ok(true);
+        }
+
+        let pending = self.pending_player_ids();
+        if pending.is_empty() {
+            return Ok(false);
+        }
+
+        self.sit_players(effect, pending, true)?;
+        Ok(self.has_launched_table_not_ready() || !self.pending_player_ids().is_empty())
+    }
+
+    fn plan_initial_tables(
+        &mut self,
+        effect: &mut Effect,
+        eligible: &[u64],
+    ) -> Result<(), HandleError> {
+        let table_count = self.initial_table_count(eligible.len());
+        if table_count == 0 {
+            return Ok(());
+        }
+
+        let blinds = self.calc_blinds()?;
+        let mut players_by_table: Vec<Vec<MttTablePlayerInit>> = vec![Vec::new(); table_count];
+
+        for (idx, player_id) in eligible.iter().enumerate() {
+            let chips = self.rank_chips(*player_id).unwrap_or(0);
+            players_by_table[idx % table_count].push(MttTablePlayerInit::new(*player_id, chips));
+        }
+
+        for table_idx in 0..table_count {
             let table_id = effect.next_sub_game_id();
+            for player in players_by_table[table_idx].iter() {
+                self.table_assigns.insert(player.id, table_id);
+            }
 
-            let table = MttTableInit::new(table_id, sb, bb, ante, players, self.max_afk_hands);
-
+            let table = MttTableInit::new(
+                table_id,
+                blinds.sb,
+                blinds.bb,
+                blinds.ante,
+                players_by_table[table_idx].clone(),
+                self.max_afk_hands,
+            );
             self.launch_table(effect, table)?;
         }
 
         self.maybe_set_in_the_money();
-
         Ok(())
     }
 
@@ -793,8 +927,7 @@ impl Mtt {
     }
 
     fn calc_blinds(&self) -> Result<BlindRuleItem, HandleError> {
-        let time_elapsed = self.time_elapsed;
-        let level = time_elapsed / self.blind_info.blind_interval;
+        let level = self.time_elapsed / self.blind_info.blind_interval;
         let mut blind_rule = self.blind_info.blind_rules.get(level as usize);
         if blind_rule.is_none() {
             blind_rule = self.blind_info.blind_rules.last();
@@ -1319,6 +1452,8 @@ mod tests {
     mod test_handle_bounty;
     mod test_handle_game_result;
     mod test_init_state;
+    mod test_reconcile_tables;
     mod test_sit_players;
     mod test_unregister;
+    mod test_waiting_timeout;
 }

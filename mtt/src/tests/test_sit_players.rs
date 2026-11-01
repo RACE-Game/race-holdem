@@ -86,7 +86,7 @@ fn sit_multiple_players_when_all_tables_are_full_creates_new_tables() {
 
     let BlindRuleItem { sb, bb, ante } = mtt.calc_blinds().unwrap();
     let players =  vec![MttTablePlayerInit::new(10, 1000), MttTablePlayerInit::new(11, 1000)];
-    let table_created = MttTableInit::new(0, sb, bb, ante, players);
+    let table_created = MttTableInit::new(0, sb, bb, ante, players, 0);
 
     assert_eq!(
         effect.list_sub_game_data::<MttTableInit>().unwrap(),
@@ -179,7 +179,7 @@ fn sit_players_in_existing_and_new_tables() {
         MttTablePlayerInit::new(14, 1000),
         MttTablePlayerInit::new(15, 1000),
         MttTablePlayerInit::new(16, 1000),
-    ]);
+    ], 0);
 
     assert_eq!(effect.list_sub_game_data::<MttTableInit>().unwrap(), vec![
         table_created

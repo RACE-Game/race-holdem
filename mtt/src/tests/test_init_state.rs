@@ -20,6 +20,8 @@ fn test_init_state_valid() {
         bounty: 20,
         theme: None,
         subgame_bundle: "holdem".to_string(),
+        check_in_duration: 0,
+        max_afk_hands: 0,
     };
 
     let init_account = InitAccount {

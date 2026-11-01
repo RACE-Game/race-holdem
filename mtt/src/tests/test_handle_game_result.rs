@@ -20,14 +20,14 @@ fn test_game_result_given_3_tables_and_current_table_has_1_player_do_dispatch_no
                 0,
                 Some(ChipsChange::Sub(10000)),
                 0,
-                PlayerResultStatus::Eliminated,
+                PlayerResultStatus::Eliminated, 0,
             ),
             PlayerResult::new(
                 8,
                 20000,
                 Some(ChipsChange::Add(10000)),
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
@@ -67,14 +67,14 @@ fn test_game_result_given_2_tables_and_current_table_has_1_player_do_dispatch_no
                 0,
                 Some(ChipsChange::Sub(10000)),
                 0,
-                PlayerResultStatus::Eliminated,
+                PlayerResultStatus::Eliminated, 0,
             ),
             PlayerResult::new(
                 5,
                 20000,
                 Some(ChipsChange::Add(10000)),
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
@@ -116,21 +116,21 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
                 10000,
                 None,
                 0,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
             PlayerResult::new(
                 5,
                 10000,
                 None,
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
             PlayerResult::new(
                 6,
                 10000,
                 None,
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             )
         ],
         table: MttTableState {
@@ -166,6 +166,7 @@ fn test_game_result_given_3_tables_and_single_player_in_different_table_do_dispa
                     bb: DEFAULT_BB,
                     ante: DEFAULT_ANTE,
                     sitout_players: vec![4],
+                    start_time: None,
                 },
             ),
             (
@@ -198,14 +199,14 @@ fn test_game_result_given_3_tables_do_close_table() {
                 0,
                 Some(ChipsChange::Sub(10000)),
                 0,
-                PlayerResultStatus::Eliminated,
+                PlayerResultStatus::Eliminated, 0,
             ),
             PlayerResult::new(
                 1,
                 20000,
                 Some(ChipsChange::Add(10000)),
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
@@ -272,14 +273,14 @@ fn test_game_result_given_2_tables_do_close_table() {
                 0,
                 Some(ChipsChange::Sub(10000)),
                 0,
-                PlayerResultStatus::Eliminated,
+                PlayerResultStatus::Eliminated, 0,
             ),
             PlayerResult::new(
                 1,
                 20000,
                 Some(ChipsChange::Add(10000)),
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
@@ -332,21 +333,21 @@ fn test_game_result_given_2_tables_move_one_player() {
                 10000,
                 None,
                 0,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
             PlayerResult::new(
                 2,
                 10000,
                 None,
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
             PlayerResult::new(
                 3,
                 10000,
                 None,
                 2,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
@@ -380,6 +381,7 @@ fn test_game_result_given_2_tables_move_one_player() {
                     sb: DEFAULT_SB,
                     bb: DEFAULT_BB,
                     ante: DEFAULT_ANTE,
+                    start_time: None,
                 }
             ),
             (
@@ -419,14 +421,14 @@ fn test_game_result_with_table_reservation_pre_entry_close() {
                 0,
                 Some(ChipsChange::Sub(10000)),
                 0,
-                PlayerResultStatus::Eliminated,
+                PlayerResultStatus::Eliminated, 0,
             ),
             PlayerResult::new(
                 2,
                 20000,
                 Some(ChipsChange::Add(10000)),
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
@@ -468,7 +470,8 @@ fn test_game_result_with_table_reservation_pre_entry_close() {
                 sb: DEFAULT_SB,
                 bb: DEFAULT_BB,
                 ante: DEFAULT_ANTE,
-                sitout_players: vec![]
+                sitout_players: vec![],
+                start_time: None,
             }
         )]
     );
@@ -495,14 +498,14 @@ fn test_game_result_given_enough_reservation_do_close_table() {
                 0,
                 Some(ChipsChange::Sub(10000)),
                 0,
-                PlayerResultStatus::Eliminated,
+                PlayerResultStatus::Eliminated, 0,
             ),
             PlayerResult::new(
                 10,
                 20000,
                 Some(ChipsChange::Add(10000)),
                 1,
-                PlayerResultStatus::Normal,
+                PlayerResultStatus::Normal, 0,
             ),
         ],
         table: MttTableState {
